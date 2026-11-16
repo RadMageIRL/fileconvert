@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { addFiles, convert, cspViolations, unexpectedViolations, download, expectDone, fx, openApp, pdftotext, row } from './helpers';
+import { MD_SAMPLE, addFiles, convert, cspViolations, unexpectedViolations, download, expectDone, fx, openApp, pdftotext, row } from './helpers';
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -64,7 +64,7 @@ test('PDF to TXT, including a page with no text layer', async ({ page }, info) =
 
 test('Markdown to HTML: a standalone page with the content, and scripts and handlers removed', async ({ page }, info) => {
   const w = await openApp(page);
-  await addFiles(page, [fx('document/sample.md')]);
+  await addFiles(page, [MD_SAMPLE]);
   await convert(page, 'sample.md', 'HTML');
   await expectDone(page, 'sample.md');
   const html = readFileSync((await download(page, 'sample.md', info)).path, 'utf8');
@@ -90,7 +90,7 @@ test('Markdown to HTML: a standalone page with the content, and scripts and hand
 
 test('Markdown and HTML to PDF: structure, text and links, with nothing fetched or run', async ({ page }, info) => {
   const w = await openApp(page);
-  await addFiles(page, [fx('document/sample.md'), fx('document/sample.html')]);
+  await addFiles(page, [MD_SAMPLE, fx('document/sample.html')]);
   await convert(page, 'sample.md', 'PDF');
   await expectDone(page, 'sample.md');
   const md = pdftotext((await download(page, 'sample.md', info)).path);

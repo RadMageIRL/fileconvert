@@ -22,13 +22,17 @@ describe('format detection reads the bytes, not the name', () => {
     ['audio/tone.mp3', 'mp3'], ['audio/tagged.mp3', 'mp3'], ['audio/tone.wav', 'wav'], ['audio/tone.flac', 'flac'], ['audio/tone.aac', 'aac'],
     ['audio/tone.m4a', 'm4a'], ['audio/tone-vorbis.ogg', 'ogg'], ['audio/tone-opus.ogg', 'ogg'],
     ['video/clip.mp4', 'mp4'], ['video/clip.webm', 'webm'], ['video/clip.mov', 'mov'], ['video/clip.mkv', 'mkv'], ['video/clip.avi', null],
-    ['document/sample.txt', 'txt'], ['document/sample.md', 'md'], ['document/sample.html', 'html'], ['document/sample.docx', 'docx'],
+    ['document/sample.txt', 'txt'], ['document/sample.html', 'html'], ['document/sample.docx', 'docx'],
     ['document/scanned.pdf', 'pdf'], ['document/utf16.txt', 'txt'],
     ['data/records.json', 'json'], ['data/people.csv', 'csv'], ['data/config.yaml', 'yaml'], ['data/catalog.xml', 'xml'], ['data/workbook.xlsx', 'xlsx'],
     ['hostile/random.jpg', null],
   ];
   test.each(cases)('%s is %s', (p, want) => {
     expect(sniffFile(p).format).toBe(want);
+  });
+
+  test('Markdown is recognized by its name (the sample is stored as .txt)', () => {
+    expect(sniffFile('document/markdown-sample.txt', 'sample.md').format).toBe('md');
   });
 
   test('a PNG named .jpg is converted as PNG, with a note', () => {

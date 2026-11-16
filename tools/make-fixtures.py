@@ -206,7 +206,9 @@ function hello(name) {{
 
 Final paragraph: caf\u00e9 and \u03ba\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1.
 """
-write(os.path.join(DOC, 'sample.md'), md, 'w')
+# Stored as .txt: the repository keeps no Markdown files besides README and CHANGELOG. The tests hand it
+# to the app under the name sample.md.
+write(os.path.join(DOC, 'markdown-sample.txt'), md, 'w')
 
 html = f"""<!doctype html>
 <html lang="en">

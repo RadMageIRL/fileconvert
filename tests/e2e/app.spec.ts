@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { PYTHON, addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, fx, openApp, row } from './helpers';
+import { MD_SAMPLE, PYTHON, addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, fx, openApp, row } from './helpers';
 
 const png = () => readFileSync(fx('image/alpha.png'));
 
@@ -93,7 +93,7 @@ test('keyboard only: add, choose an output, convert and download', async ({ page
 
 test('every control has an accessible name and the page has one main landmark and a skip link', async ({ page }) => {
   await openApp(page);
-  await addFiles(page, [fx('image/photo.jpg'), fx('audio/tone.mp3'), fx('video/clip.mp4'), fx('document/sample.md'), fx('data/workbook.xlsx')]);
+  await addFiles(page, [fx('image/photo.jpg'), fx('audio/tone.mp3'), fx('video/clip.mp4'), MD_SAMPLE, fx('data/workbook.xlsx')]);
   await expect(page.locator('li.job.checking')).toHaveCount(0);
   for (const d of await page.locator('details.panel').all()) await d.locator('summary').click();
   const unnamed = await page.evaluate(() => {

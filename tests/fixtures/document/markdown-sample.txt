@@ -1,0 +1,41 @@
+# FileConvert Markdown sample
+
+A paragraph with **bold**, *italic*, `inline code` and a [link](https://radmagelabs.com/).
+
+## Lists
+
+- First item
+- Second item with **emphasis**
+  - A nested item
+1. Numbered one
+2. Numbered two
+
+## Code
+
+```js
+function hello(name) {
+  return `Hello, ${name}`;
+}
+```
+
+## Table
+
+| Format | Kind | Lossy |
+|--------|------|-------|
+| PNG | Image | No |
+| MP3 | Audio | Yes |
+
+> A block quote that spans
+> two source lines.
+
+![A tiny embedded image](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC)
+
+![A remote image that must not be fetched](https://example.com/remote.png)
+
+<p onclick="alert(1)">Inline HTML paragraph.</p>
+<script>window.__fileconvertPwned = true</script>
+<a href="javascript:alert(1)">A javascript: link</a>
+
+---
+
+Final paragraph: café and καλημέρα.

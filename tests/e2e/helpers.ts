@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { expect, type Download, type Page, type TestInfo } from '@playwright/test';
 
 export const FIX = resolve('tests', 'fixtures');
@@ -52,8 +52,16 @@ export async function unexpectedViolations(page: Page): Promise<string[]> {
   return (await cspViolations(page)).filter(v => !/^(script-src-attr|style-src-attr|style-src-elem) inline$/.test(v));
 }
 
-export async function addFiles(page: Page, paths: string[]): Promise<void> {
-  await page.locator('#picker').setInputFiles(paths);
+export interface FilePayload { name: string; mimeType: string; buffer: Buffer }
+
+/** The Markdown sample. The repository keeps no .md files besides README and CHANGELOG, so it is stored as .txt. */
+export const MD_SAMPLE: FilePayload = { name: 'sample.md', mimeType: 'text/markdown', buffer: readFileSync(fx('document/markdown-sample.txt')) };
+
+export async function addFiles(page: Page, files: Array<string | FilePayload>): Promise<void> {
+  if (files.every(f => typeof f === 'string')) return page.locator('#picker').setInputFiles(files as string[]);
+  await page.locator('#picker').setInputFiles(files.map(f => typeof f === 'string'
+    ? { name: basename(f), mimeType: 'application/octet-stream', buffer: readFileSync(f) }
+    : f));
 }
 
 export const row = (page: Page, name: string) => page.locator('li.job', { has: page.locator('.job-name', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) });

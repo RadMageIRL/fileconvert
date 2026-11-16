@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addFiles, convert, cspViolations, expectDone, fx, openApp, row } from './helpers';
+import { MD_SAMPLE, addFiles, convert, cspViolations, expectDone, fx, openApp, row } from './helpers';
 
 // Playwright's WebKit on Windows is not Safari: it has no OffscreenCanvas and no WebCodecs. These tests
 // check that FileConvert does what it can there and explains clearly what it cannot. Downloads are read
@@ -15,7 +15,7 @@ async function resultText(page: import('@playwright/test').Page, name: string): 
 
 test('loads, converts data and documents, and explains what this browser cannot do', async ({ page }) => {
   const w = await openApp(page);
-  await addFiles(page, [fx('data/records.json'), fx('document/sample.md'), fx('document/sample.pdf'), fx('image/photo.jpg'), fx('audio/tone.mp3')]);
+  await addFiles(page, [fx('data/records.json'), MD_SAMPLE, fx('document/sample.pdf'), fx('image/photo.jpg'), fx('audio/tone.mp3')]);
   await convert(page, 'records.json', 'CSV');
   await expectDone(page, 'records.json');
   expect(await resultText(page, 'records.json')).toContain('id,name,email,active,score,tags,address.city,address.zip,note');
