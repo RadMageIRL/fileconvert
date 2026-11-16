@@ -180,10 +180,30 @@ input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px;
 .privacy ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--muted); max-width: 52rem; }
 .privacy strong { color: var(--text); }
 .settings-note { color: var(--faint); font-size: .9rem; }
+.privacy .settings-note { margin: 14px 0 0; }
+
+/* ---------- footer pill and its panel (as in the other RadMage Labs tools) ---------- */
+.pill-panel { margin: 0 0 30px; padding: 14px 20px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+.pill-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.pill-panel-head h2 { margin: 0; font-size: 1.1rem; }
+.pill-close { min-height: 32px; width: 32px; padding: 0; border: 0; background: none; color: var(--faint); border-radius: 8px; flex-shrink: 0; }
+.pill-close:hover:not(:disabled) { background: var(--card-hi); color: var(--text); }
+.pill {
+  margin-left: auto; min-height: 30px; padding: 3px 12px; gap: 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  font-size: .85rem; font-weight: 500; letter-spacing: .01em;
+}
+.pill:hover:not(:disabled) { border-color: var(--line-hi); color: var(--text); }
+.pill[aria-expanded="true"] { border-color: var(--line-hi); color: var(--text); }
+.pill .pill-open, .pill[aria-expanded="true"] .pill-shut { display: none; }
+.pill[aria-expanded="true"] .pill-open { display: block; }
 
 /* ---------- footer, toast ---------- */
-.foot { margin-top: auto; border-top: 1px solid var(--line); background: var(--bg-deep); color: var(--faint); font-size: .9rem; }
-.foot-row { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 14px 0; }
+.foot { margin-top: auto; border-top: 1px solid var(--line); background: var(--bg-deep); color: var(--faint); font-size: .9rem; overflow-anchor: none; }
+.foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 0; }
 .toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;
   background: var(--card-hi); color: var(--text); border: 1px solid var(--line-hi); border-radius: 12px;

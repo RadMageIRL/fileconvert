@@ -110,6 +110,39 @@ test('every control has an accessible name and the page has one main landmark an
   await expect(page.getByRole('link', { name: 'Back to RadMage Labs' })).toHaveAttribute('href', 'https://radmagelabs.com/');
 });
 
+test('the privacy notes open from the footer pill into view, and close with the button, Escape or the pill', async ({ page }) => {
+  await openApp(page);
+  const pill = page.getByRole('button', { name: 'Privacy', exact: true });
+  const panel = page.locator('#privacy');
+  await expect(panel).toBeHidden();
+  await expect(pill).toHaveAttribute('aria-expanded', 'false');
+  await pill.click();
+  await expect(panel).toBeVisible();
+  await expect(pill).toHaveAttribute('aria-expanded', 'true');
+  await expect(panel.getByRole('heading', { name: 'How your privacy is kept' })).toBeInViewport({ ratio: 1 });
+  // When the panel and the footer fit in the window, both are in view: the whole panel and the pill under it.
+  const fits = await page.evaluate(() => document.getElementById('privacy')!.offsetHeight + document.querySelector('footer')!.offsetHeight <= window.innerHeight);
+  if (fits) {
+    await expect(panel).toBeInViewport({ ratio: 1 });
+    await expect(pill).toBeInViewport({ ratio: 1 });
+  }
+  await expect(panel).toContainText('Your files never leave your device.');
+  await expect(panel).toContainText('The only thing remembered between visits is your theme and conversion settings');
+  await page.getByRole('button', { name: 'Close privacy notes' }).click();
+  await expect(panel).toBeHidden();
+  await expect(pill).toHaveAttribute('aria-expanded', 'false');
+  await expect(pill).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(pill).toHaveAttribute('aria-expanded', 'false');
+  await pill.click();
+  await expect(panel).toBeVisible();
+  await pill.click();
+  await expect(panel).toBeHidden();
+});
+
 test('the theme switch works and is remembered', async ({ page }) => {
   await openApp(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

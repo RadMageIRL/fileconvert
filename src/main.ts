@@ -48,9 +48,38 @@ function setupShare(app: App): void {
   });
 }
 
+/** The privacy notes open from a pill in the footer, into a panel just above it. */
+function setupPrivacy(): void {
+  const pill = $<HTMLButtonElement>('privacy-pill');
+  const panel = $('privacy');
+  const foot = pill.closest('footer')!;
+  const isOpen = () => pill.getAttribute('aria-expanded') === 'true';
+  const set = (open: boolean) => {
+    panel.hidden = !open;
+    pill.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    // Show the whole panel with the footer under it, or the panel's top when both do not fit.
+    const top = panel.getBoundingClientRect().top;
+    const bottom = foot.getBoundingClientRect().bottom;
+    if (top < 0 || bottom > window.innerHeight) {
+      const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollBy({ top: Math.min(top, bottom - window.innerHeight), behavior: smooth ? 'smooth' : 'auto' });
+    }
+  };
+  pill.addEventListener('click', () => set(!isOpen()));
+  $('privacy-close').addEventListener('click', () => { set(false); pill.focus(); });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !isOpen()) return;
+    const inside = panel.contains(document.activeElement);
+    set(false);
+    if (inside) pill.focus();
+  });
+}
+
 async function main(): Promise<void> {
   $('version').textContent = `v${VERSION}`;
   setupTheme();
+  setupPrivacy();
   const session = hasTempStore() ? await openSession().catch(() => null) : null;
   const app = new App(loadSettings(), session);
   setupShare(app);

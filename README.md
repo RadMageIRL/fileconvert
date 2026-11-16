@@ -6,7 +6,7 @@ FileConvert is a free file converter for images, audio, video, documents and dat
 
 **Use it at [radmagelabs.com/fileconvert](https://radmagelabs.com/fileconvert/).**
 
-Current version: **v0.1.0**
+Current version: **v0.1.1**
 
 ![FileConvert in the dark theme with a batch of six sample files converted: a HEIC photo to JPG, a FLAC file to MP3, a MOV clip to MP4, a CSV file to XLSX, a Markdown file to PDF and a JSON file to YAML, each with its download button](screenshots/fileconvert.png)
 

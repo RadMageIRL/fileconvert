@@ -87,8 +87,13 @@
       </details>
     </section>
 
-    <section class="info privacy" aria-labelledby="privacy-title">
-      <h2 id="privacy-title">How your privacy is kept</h2>
+    <section id="privacy" class="pill-panel privacy" aria-labelledby="privacy-title" hidden>
+      <div class="pill-panel-head">
+        <h2 id="privacy-title">How your privacy is kept</h2>
+        <button type="button" id="privacy-close" class="pill-close" aria-label="Close privacy notes">
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
       <ul>
         <li><strong>Your files never leave your device.</strong> Every conversion runs in this browser tab, in background workers. FileConvert has no server that receives files, and the page is not allowed to send anything to one: its security policy permits connections only back to this site, to load the app's own code, fonts and codecs.</li>
         <li><strong>No accounts, no ads, no tracking.</strong> There is no sign-in, no advertising, and no analytics on this page.</li>
@@ -107,6 +112,11 @@
       <a href="https://github.com/RadMageIRL/fileconvert">Source on GitHub</a>
       <a href="./THIRD-PARTY-NOTICES.txt">Licenses</a>
       <a href="https://radmagelabs.com/">More tools at RadMage Labs</a>
+      <button type="button" id="privacy-pill" class="pill" aria-expanded="false" aria-controls="privacy" title="How your privacy is kept">
+        <svg class="pill-shut" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <svg class="pill-open" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Privacy
+      </button>
     </div>
   </footer>
 

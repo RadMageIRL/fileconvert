@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.1 - 2026-11-16
+
+Visual style cleanup.
+
+- The privacy notes now open from a Privacy pill in the footer, as in the other RadMage Labs tools, instead of filling the bottom of the page. The text is unchanged.
+
 ## v0.1.0 - 2026-11-15
 
 The first release.
