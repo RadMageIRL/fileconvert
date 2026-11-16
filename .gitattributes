@@ -1,0 +1,5 @@
+# Text is stored and checked out with LF line endings, so a build on Windows and on Linux gives the same bytes.
+* text=auto eol=lf
+# Test fixtures are compared byte for byte; some have CRLF line endings on purpose.
+tests/fixtures/** -text
+*.png binary

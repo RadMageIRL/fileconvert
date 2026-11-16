@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileConvert | Free Private File Converter | RadMage Labs</title>
+  <meta name="description" content="Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.">
+  <link rel="canonical" href="https://radmagelabs.com/fileconvert/">
+  <meta name="theme-color" content="#10151f">
+  <meta name="color-scheme" content="dark light">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="RadMage Labs">
+  <meta property="og:title" content="FileConvert: convert your files, keep your privacy">
+  <meta property="og:description" content="Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.">
+  <meta property="og:url" content="https://radmagelabs.com/fileconvert/">
+  <meta property="og:image" content="https://radmagelabs.com/assets/og/fileconvert.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <script src="./theme.js"></script>
+  <link rel="stylesheet" href="./src/styles.css">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"FileConvert","url":"https://radmagelabs.com/fileconvert/","applicationCategory":"UtilitiesApplication","operatingSystem":"Any modern web browser","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.","author":{"@type":"Person","name":"RadMageIRL"},"publisher":{"@type":"Organization","name":"RadMage Labs","url":"https://radmagelabs.com/"}}</script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="back" href="https://radmagelabs.com/">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Back to RadMage Labs
+      </a>
+      <div class="top-actions">
+        <button type="button" id="share" class="ghost">
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="M8 10V2m0 0L5 5m3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Share
+        </button>
+        <button type="button" id="theme" class="ghost" aria-pressed="false">
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13z" fill="currentColor"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span id="theme-label">Light theme</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <section class="hero" aria-labelledby="title">
+      <div class="brand">
+        <svg aria-hidden="true" class="logo" viewBox="0 0 48 48" width="44" height="44"><rect x="3" y="3" width="42" height="42" rx="11" fill="var(--accent)"/><path d="M15 19h14l-4-4M33 29H19l4 4" fill="none" stroke="var(--accent-ink)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h1 id="title">FileConvert</h1>
+      </div>
+      <p class="promise">Convert your files. Keep your privacy. <span>No accounts, no ads, no nonsense.</span></p>
+      <p class="lede">Images, audio, video, documents and data are converted right here in your browser. Your files are never uploaded, to me or to anyone else.</p>
+    </section>
+
+    <section id="drop" class="drop" aria-label="Add files">
+      <input type="file" id="picker" multiple hidden>
+      <svg aria-hidden="true" viewBox="0 0 48 48" width="48" height="48"><path d="M24 31V11m0 0-7 7m7-7 7 7M10 29v8h28v-8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p class="drop-main"><strong>Drop files here</strong> or</p>
+      <button type="button" id="choose" class="primary">Choose files</button>
+      <p class="drop-sub">Add as many as you like. They stay on your device.</p>
+    </section>
+
+    <section id="work" class="work" hidden aria-labelledby="files-title">
+      <div class="work-head">
+        <h2 id="files-title">Files <span id="count" class="count"></span></h2>
+        <div class="bulk" role="group" aria-label="Batch actions">
+          <label class="bulk-target" id="bulk-target-wrap" hidden>Set all to
+            <select id="bulk-target"></select>
+          </label>
+          <button type="button" id="convert-all" class="primary">Convert all</button>
+          <button type="button" id="cancel-all" hidden>Cancel all</button>
+          <button type="button" id="zip" disabled>Download all (ZIP)</button>
+          <button type="button" id="clear" class="ghost">Clear list</button>
+        </div>
+      </div>
+      <div id="settings" class="settings"></div>
+      <ul id="queue" class="queue" aria-label="Files to convert"></ul>
+    </section>
+
+    <section class="info" aria-labelledby="formats-title">
+      <h2 id="formats-title">What it converts</h2>
+      <div id="formats" class="formats"></div>
+      <details class="limits">
+        <summary>Limits and what is not supported yet</summary>
+        <ul id="limits-list"></ul>
+      </details>
+    </section>
+
+    <section class="info privacy" aria-labelledby="privacy-title">
+      <h2 id="privacy-title">How your privacy is kept</h2>
+      <ul>
+        <li><strong>Your files never leave your device.</strong> Every conversion runs in this browser tab, in background workers. FileConvert has no server that receives files, and the page is not allowed to send anything to one: its security policy permits connections only back to this site, to load the app's own code, fonts and codecs.</li>
+        <li><strong>No accounts, no ads, no tracking.</strong> There is no sign-in, no advertising, and no analytics on this page.</li>
+        <li><strong>What the network is used for.</strong> Opening the page downloads the app. The first conversion of each kind downloads that converter (for example the HEIC decoder or the PDF fonts), once. After that, conversions keep working without a connection while the tab stays open.</li>
+        <li><strong>Large results stay private on your device.</strong> Audio and video results are written to your browser's private storage for this site while you work, and are deleted when you remove them, clear the list, or close the tab. Other results are held in memory.</li>
+        <li><strong>Metadata is left behind.</strong> Converted pictures do not carry the original's EXIF details, such as camera information or GPS location.</li>
+        <li><strong>Files are treated as untrusted.</strong> Scripts, macros and embedded objects in documents are never run. Size and expansion limits stop files built to exhaust memory.</li>
+      </ul>
+      <p class="settings-note">The only thing remembered between visits is your theme and conversion settings, in this browser's local storage.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot-row">
+      <span>FileConvert <span id="version"></span> by RadMage Labs</span>
+      <a href="https://github.com/RadMageIRL/fileconvert">Source on GitHub</a>
+      <a href="./THIRD-PARTY-NOTICES.txt">Licenses</a>
+      <a href="https://radmagelabs.com/">More tools at RadMage Labs</a>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

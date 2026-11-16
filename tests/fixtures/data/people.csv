@@ -1,0 +1,5 @@
+﻿id,name,email,amount,joined,zip,comment
+1,Ada Lovelace,ada@example.com,1200.50,2024-01-15,01234,"Says ""hello"", often"
+2,Grace Hopper,grace@example.com,-35,2023-12-01,10001,"Multi
+line"
+3,Linus éè,linus@example.org,0,2022-07-04,97201,

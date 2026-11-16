@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "name": "Ada",
+    "email": "ada@example.com",
+    "active": true,
+    "score": 9.5,
+    "tags": [
+      "admin",
+      "ops"
+    ],
+    "address": {
+      "city": "London",
+      "zip": "01234"
+    }
+  },
+  {
+    "id": 2,
+    "name": "Grace, \"Amazing\"",
+    "email": "grace@example.com",
+    "active": false,
+    "score": null,
+    "tags": [],
+    "address": {
+      "city": "New York",
+      "zip": "10001"
+    },
+    "note": "Line one\nLine two"
+  },
+  {
+    "id": 3,
+    "name": "Linus éèê ✓",
+    "email": "linus@example.org",
+    "active": true,
+    "score": 7,
+    "tags": [
+      "dev"
+    ],
+    "address": {
+      "city": "Portland",
+      "zip": "97201"
+    }
+  }
+]

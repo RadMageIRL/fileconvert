@@ -1,0 +1,61 @@
+{
+  "name": "fileconvert",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FileConvert: a free, private, browser-based converter for images, audio, video, documents and data. Your files never leave your device.",
+  "license": "MIT",
+  "author": "RadMageIRL",
+  "homepage": "https://radmagelabs.com/fileconvert/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RadMageIRL/fileconvert.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --port 4175 --strictPort",
+    "test": "vitest run",
+    "test:e2e": "playwright test --project chrome --project firefox --project edge --project webkit --project mobile",
+    "test:large": "playwright test --project large",
+    "notices": "node tools/third-party-notices.mjs",
+    "fixtures": "python tools/make-fixtures.py && node tools/make-pdf-fixtures.mjs",
+    "release": "node tools/release.mjs --verify",
+    "serve": "node tools/serve.mjs"
+  },
+  "dependencies": {
+    "@jsquash/avif": "2.1.1",
+    "@jsquash/webp": "1.5.0",
+    "@mediabunny/aac-encoder": "1.66.0",
+    "@mediabunny/flac-encoder": "1.66.0",
+    "@mediabunny/mp3-encoder": "1.66.0",
+    "dompurify": "3.4.18",
+    "fast-xml-parser": "5.12.1",
+    "fflate": "0.8.3",
+    "gifenc": "1.0.3",
+    "gifuct-js": "2.1.2",
+    "html-to-pdfmake": "2.6.0",
+    "libheif-js": "1.23.5",
+    "mammoth": "1.13.0",
+    "markdown-it": "15.0.3",
+    "mediabunny": "1.66.0",
+    "papaparse": "5.7.1",
+    "pdfjs-dist": "6.5.438",
+    "pdfmake": "0.3.14",
+    "utif": "3.1.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@expo-google-fonts/noto-sans": "0.4.2",
+    "@expo-google-fonts/noto-sans-mono": "0.4.2",
+    "@playwright/test": "1.64.1",
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "26.6.5",
+    "@types/papaparse": "5.5.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.0.5"
+  }
+}

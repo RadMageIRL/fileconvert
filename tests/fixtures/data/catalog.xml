@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns:x="urn:example">
+  <book id="b1" lang="en">
+    <title>Converting Files</title>
+    <author>Ada</author>
+    <price currency="USD">12.50</price>
+    <x:tag>one</x:tag>
+  </book>
+  <book id="b2">
+    <title>Privacy &amp; You</title>
+    <author>Grace</author>
+    <summary><![CDATA[Contains <markup> that is text.]]></summary>
+  </book>
+</catalog>

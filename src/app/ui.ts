@@ -1,0 +1,463 @@
+// The interface: the drop zone, the settings panels, the queue rows and the batch actions. Rows are built
+// once and updated in place, so focus and scroll position survive progress updates.
+
+import { AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats';
+import { formatBytes, LIMITS } from '../core/limits';
+import { listSession } from '../core/tempstore';
+import { $, clear, h } from './dom';
+import { Engines, Queue, type Job } from './jobs';
+import { Pool } from './pool';
+import { saveSettings, type Settings } from './settings';
+
+const CATEGORY_NAMES: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data' };
+const ICON_TEXT: Record<Category, string> = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC', data: 'DATA' };
+const list = (ids: readonly FormatId[]) => ids.map(i => FORMATS[i].label).join(', ');
+
+export class App {
+  queue: Queue;
+  private rows = new Map<number, HTMLLIElement>();
+  private thumbs = new Map<number, string>();
+  private zipPool = new Pool(() => new Worker(new URL('../workers/zip.worker.ts', import.meta.url), { type: 'module' }), 1);
+  private zipUrl: string | null = null;
+  private downloadsInFlight = new Set<string>();
+  private announced = new Set<string>();
+
+  constructor(private settings: Settings, private session: string | null, readonly engines = new Engines()) {
+    this.queue = new Queue(engines, () => this.settings, session, job => this.update(job), () => this.relist());
+  }
+
+  start(): void {
+    const picker = $<HTMLInputElement>('picker');
+    $('choose').addEventListener('click', () => picker.click());
+    picker.addEventListener('change', () => {
+      if (picker.files?.length) this.queue.add(picker.files);
+      picker.value = '';
+    });
+    const drop = $('drop');
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+    document.addEventListener('dragenter', e => { if (hasFiles(e)) { depth++; drop.classList.add('over'); } });
+    document.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) drop.classList.remove('over'); });
+    document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy'; } });
+    document.addEventListener('drop', e => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      drop.classList.remove('over');
+      const files = [...(e.dataTransfer?.files ?? [])].filter(f => f.size > 0 || f.type !== '' || /\.[a-z0-9]+$/i.test(f.name));
+      const skipped = (e.dataTransfer?.files.length ?? 0) - files.length;
+      if (skipped) this.toast(`${skipped} ${skipped === 1 ? 'item was' : 'items were'} skipped: folders cannot be added, only files.`);
+      if (files.length) this.queue.add(files);
+    });
+    $('convert-all').addEventListener('click', () => this.queue.convertAll());
+    $('cancel-all').addEventListener('click', () => this.queue.cancelAll());
+    $('clear').addEventListener('click', () => this.clearAll());
+    $('zip').addEventListener('click', () => void this.downloadZip());
+    $<HTMLSelectElement>('bulk-target').addEventListener('change', e => {
+      const v = (e.target as HTMLSelectElement).value as FormatId;
+      if (!v) return;
+      for (const j of this.queue.jobs) if (j.targets.includes(v) && j.status !== 'converting' && j.status !== 'queued') this.queue.setTarget(j, v);
+      (e.target as HTMLSelectElement).value = '';
+    });
+    window.addEventListener('beforeunload', e => {
+      if (this.queue.jobs.some(j => j.status === 'converting' || j.status === 'queued')) e.preventDefault();
+    });
+    this.renderFormats();
+  }
+
+  // ------------------------------------------------------------ helpers
+
+  toast(msg: string, ms = 5000): void {
+    const t = $('toast');
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout((t as unknown as { _timer?: number })._timer);
+    (t as unknown as { _timer?: number })._timer = window.setTimeout(() => { t.hidden = true; }, ms);
+  }
+
+  private announce(msg: string): void {
+    const a = $('announcer');
+    a.textContent = '';
+    window.setTimeout(() => { a.textContent = msg; }, 50);
+  }
+
+  private saveDownload(blob: Blob, name: string): void {
+    const url = URL.createObjectURL(blob);
+    this.downloadsInFlight.add(url);
+    const a = h('a', { href: url, download: name, hidden: true });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    // The URL has to live until the browser has started reading it; a minute is far more than needed.
+    window.setTimeout(() => { URL.revokeObjectURL(url); this.downloadsInFlight.delete(url); }, 60_000);
+  }
+
+  /** Object URLs still alive, for the resource tests. */
+  liveUrls(): number {
+    return this.downloadsInFlight.size + this.thumbs.size + (this.zipUrl ? 1 : 0);
+  }
+
+  async tempFiles(): Promise<string[]> {
+    return this.session ? listSession(this.session) : [];
+  }
+
+  private clearAll(): void {
+    this.queue.clear();
+    for (const url of this.thumbs.values()) URL.revokeObjectURL(url);
+    this.thumbs.clear();
+    if (this.zipUrl) { URL.revokeObjectURL(this.zipUrl); this.zipUrl = null; }
+    this.announced.clear();
+    this.announce('The list was cleared.');
+    $('choose').focus();
+  }
+
+  // ------------------------------------------------------------ list
+
+  private relist(): void {
+    const ul = $('queue');
+    const ids = new Set(this.queue.jobs.map(j => j.id));
+    for (const [id, row] of this.rows) {
+      if (!ids.has(id)) {
+        row.remove();
+        this.rows.delete(id);
+        const t = this.thumbs.get(id);
+        if (t) { URL.revokeObjectURL(t); this.thumbs.delete(id); }
+      }
+    }
+    for (const job of this.queue.jobs) {
+      if (!this.rows.has(job.id)) {
+        const row = h('li', { class: 'job', 'data-id': job.id });
+        this.rows.set(job.id, row);
+        ul.append(row);
+        this.update(job);
+      }
+    }
+    $('work').hidden = this.queue.jobs.length === 0;
+    this.refreshChrome();
+  }
+
+  private refreshChrome(): void {
+    const jobs = this.queue.jobs;
+    const n = jobs.length;
+    $('count').textContent = n ? `(${n})` : '';
+    const running = jobs.some(j => j.status === 'converting' || j.status === 'queued');
+    $('cancel-all').hidden = !running;
+    const convertible = jobs.filter(j => j.status === 'ready' || j.status === 'failed' || j.status === 'canceled');
+    ($('convert-all') as HTMLButtonElement).disabled = convertible.length === 0;
+    $('convert-all').textContent = convertible.length > 1 ? `Convert all (${convertible.length})` : 'Convert';
+    const zip = this.queue.zipAllowed();
+    const zipBtn = $<HTMLButtonElement>('zip');
+    const doneCount = this.queue.outputs().length;
+    zipBtn.disabled = !zip.ok || running;
+    zipBtn.title = zip.reason ?? (running ? 'Wait for the conversions to finish.' : '');
+    zipBtn.textContent = doneCount ? `Download all (ZIP, ${doneCount})` : 'Download all (ZIP)';
+    this.renderBulkTarget();
+    this.renderSettings();
+  }
+
+  private renderBulkTarget(): void {
+    const ready = this.queue.jobs.filter(j => j.targets.length && j.status !== 'unsupported');
+    const wrap = $('bulk-target-wrap');
+    const sel = $<HTMLSelectElement>('bulk-target');
+    if (ready.length < 2) { wrap.hidden = true; return; }
+    const counts = new Map<FormatId, number>();
+    for (const j of ready) for (const t of j.targets) counts.set(t, (counts.get(t) ?? 0) + 1);
+    const opts = [...counts.entries()].filter(([, c]) => c >= 2).map(([t]) => t);
+    const key = opts.join(',');
+    if (sel.dataset.key !== key) {
+      clear(sel);
+      sel.append(h('option', { value: '' }, 'Choose'));
+      for (const t of opts) sel.append(h('option', { value: t }, `${FORMATS[t].label}${counts.get(t)! < ready.length ? ` (${counts.get(t)} files)` : ''}`));
+      sel.dataset.key = key;
+    }
+    wrap.hidden = opts.length === 0;
+  }
+
+  // ------------------------------------------------------------ rows
+
+  /** While a job converts, only its progress changes: update those nodes and leave the buttons alone. */
+  private updateProgress(job: Job, row: HTMLLIElement): boolean {
+    if (job.status !== 'converting' || row.dataset.status !== 'converting') return false;
+    const status = row.querySelector('.job-status');
+    if (!status) return false;
+    const p = status.querySelector('progress') as HTMLProgressElement | null;
+    if (p && job.fraction !== undefined) p.value = job.fraction;
+    const pct = status.querySelector<HTMLElement>('.pct');
+    if (pct) pct.textContent = job.fraction !== undefined ? `${Math.floor(job.fraction * 100)}%` : '';
+    const stage = status.querySelector<HTMLElement>('.stage');
+    if (stage) stage.textContent = job.stage ?? '';
+    return true;
+  }
+
+  private update(job: Job): void {
+    const row = this.rows.get(job.id);
+    if (!row) return;
+    if (this.updateProgress(job, row)) return;
+    const focused = document.activeElement && row.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
+    row.className = `job ${job.status}`;
+    row.dataset.runs = String(job.runs);
+    row.dataset.status = job.status;
+    const cat = job.format ? effectiveCategory(job.format, job.traits) : null;
+    clear(row);
+
+    const icon = h('div', { class: 'job-icon', 'aria-hidden': 'true' });
+    const thumb = this.thumbs.get(job.id);
+    if (thumb) icon.append(h('img', { src: thumb, alt: '' }));
+    else icon.textContent = cat ? ICON_TEXT[cat] : '?';
+
+    const main = h('div', { class: 'job-main' },
+      h('div', { class: 'job-name' }, job.name),
+      h('div', { class: 'job-info' }, job.status === 'checking' ? `Checking, ${formatBytes(job.file.size)}` : job.info));
+    const notes = [...job.notes, ...(job.status === 'done' ? job.warnings : [])];
+    if (notes.length) main.append(h('ul', { class: 'job-notes' }, ...notes.map(n => h('li', {}, n))));
+
+    const status = h('div', { class: 'job-status' });
+    const label = (s: string) => h('span', { class: 'state' }, s);
+    switch (job.status) {
+      case 'checking': status.append(label('Checking the file')); break;
+      case 'ready': status.append(label('Ready')); break;
+      case 'queued': status.append(label('Waiting')); break;
+      case 'converting': {
+        status.append(label('Converting'));
+        // No value means "not measurable": the bar shows activity instead of an invented percentage.
+        const p = h('progress', { max: 1, 'aria-label': `Converting ${job.name}` }) as HTMLProgressElement;
+        if (job.fraction !== undefined) p.value = job.fraction;
+        status.append(p, h('span', { class: 'pct' }, job.fraction !== undefined ? `${Math.floor(job.fraction * 100)}%` : ''), h('span', { class: 'job-info stage' }, job.stage ?? ''));
+        break;
+      }
+      case 'done': status.append(label(`Converted to ${FORMATS[job.madeAs ?? job.target!].label}`), h('span', { class: 'job-info' }, job.summary ?? '')); break;
+      case 'failed': status.append(label('Failed')); break;
+      case 'canceled': status.append(label('Canceled')); break;
+      case 'unsupported': status.append(label('Cannot convert')); break;
+    }
+    main.append(status);
+    if (job.error) main.append(h('div', { class: 'job-error' }, job.error));
+
+    const side = h('div', { class: 'job-side' });
+    if (job.targets.length) {
+      const sel = h('select', { 'aria-label': `Convert ${job.name} to`, 'data-key': 'target', disabled: job.status === 'converting' || job.status === 'queued' }) as HTMLSelectElement;
+      for (const t of job.targets) sel.append(h('option', { value: t, selected: t === job.target }, FORMATS[t].label));
+      sel.addEventListener('change', () => this.queue.setTarget(job, sel.value as FormatId));
+      const groupLabel = cat === 'video' && job.target && AUDIO_OUT.includes(job.target) ? 'Audio as' : 'To';
+      side.append(h('label', { class: 'job-target' }, groupLabel, sel));
+    }
+    if (job.format === 'xlsx' && job.sheets && job.sheets.length > 1) {
+      const sel = h('select', { 'aria-label': `Worksheet to convert from ${job.name}`, 'data-key': 'sheet', disabled: job.status === 'converting' }) as HTMLSelectElement;
+      sel.append(h('option', { value: 'first', selected: job.sheet === 'first' }, `First sheet (${job.sheets[0]})`));
+      sel.append(h('option', { value: 'all', selected: job.sheet === 'all' }, 'All sheets, one CSV each'));
+      for (const s of job.sheets.slice(1)) sel.append(h('option', { value: s, selected: job.sheet === s }, s));
+      sel.addEventListener('change', () => { job.sheet = sel.value; if (job.status === 'done') job.status = 'ready'; this.update(job); });
+      side.append(h('label', { class: 'job-target' }, 'Sheet', sel));
+    }
+    const actions = h('div', { class: 'job-actions' });
+    if (job.status === 'ready' || job.status === 'failed' || job.status === 'canceled') {
+      actions.append(h('button', { type: 'button', class: 'small primary', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, job.status === 'ready' ? 'Convert' : 'Try again'));
+    }
+    if (job.status === 'done' && job.target !== job.madeAs) {
+      actions.append(h('button', { type: 'button', class: 'small primary', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, `Convert to ${FORMATS[job.target!].label}`));
+    } else if (job.status === 'done') {
+      actions.append(h('button', { type: 'button', class: 'small', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, 'Convert again'));
+    }
+    if (job.status === 'converting' || job.status === 'queued') {
+      actions.append(h('button', { type: 'button', class: 'small', 'data-key': 'cancel', onclick: () => this.queue.cancel(job) }, 'Cancel'));
+    }
+    actions.append(h('button', { type: 'button', class: 'small ghost danger', 'data-key': 'remove', 'aria-label': `Remove ${job.name}`, onclick: () => this.removeJob(job) }, 'Remove'));
+    side.append(actions);
+    if (job.status === 'done' && job.outputs.length) {
+      const outs = h('div', { class: 'outputs' });
+      for (const o of job.outputs) {
+        outs.append(h('button', { type: 'button', class: 'small primary', 'data-key': `dl-${o.name}`, title: o.name, onclick: () => this.saveDownload(o.blob, o.name) },
+          h('span', {}, `Download ${o.name}`)));
+      }
+      side.append(outs);
+    }
+    row.append(icon, main, side);
+    if (focused) row.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+
+    if (job.status === 'done') {
+      this.maybeThumb(job);
+      const key = `${job.id}:${job.outputs.map(o => o.name).join(',')}`;
+      if (!this.announced.has(key)) { this.announced.add(key); this.announce(`${job.name} converted to ${FORMATS[job.madeAs!].label}.`); }
+    } else if (job.status === 'failed') {
+      const key = `${job.id}:failed:${job.error}`;
+      if (!this.announced.has(key)) { this.announced.add(key); this.announce(`${job.name} failed: ${job.error}`); }
+    }
+    this.refreshChrome();
+  }
+
+  private maybeThumb(job: Job): void {
+    const out = job.outputs[0];
+    if (!out || !/^image\/(png|jpeg|webp|gif|avif|bmp)$/.test(out.blob.type)) return;
+    if (out.blob.size > 20 * 1048576) return;
+    const old = this.thumbs.get(job.id);
+    if (old) URL.revokeObjectURL(old);
+    const url = URL.createObjectURL(out.blob);
+    this.thumbs.set(job.id, url);
+    const icon = this.rows.get(job.id)?.querySelector('.job-icon');
+    if (icon) { clear(icon); icon.append(h('img', { src: url, alt: '' })); }
+  }
+
+  private removeJob(job: Job): void {
+    const row = this.rows.get(job.id);
+    const next = (row?.nextElementSibling ?? row?.previousElementSibling) as HTMLElement | null;
+    this.queue.remove(job);
+    (next?.querySelector<HTMLElement>('select, button') ?? $('choose')).focus();
+    this.announce(`${job.name} was removed.`);
+  }
+
+  private async downloadZip(): Promise<void> {
+    const files = this.queue.outputs().map(o => ({ name: o.name, blob: o.blob }));
+    if (!files.length) return;
+    const btn = $<HTMLButtonElement>('zip');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Packing ZIP...';
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const temp = this.session ? { session: this.session, name: `batch-${Date.now()}.zip` } : null;
+      const blob = await this.zipPool.run<Blob>('zip', { files, temp }, { onProgress: p => { if (p.fraction !== undefined) btn.textContent = `Packing ZIP ${Math.floor(p.fraction * 100)}%`; } });
+      this.saveDownload(blob, `FileConvert ${stamp}.zip`);
+    } catch (e) {
+      this.toast(`The ZIP could not be made: ${(e as Error).message}`);
+    } finally {
+      btn.textContent = label;
+      this.refreshChrome();
+    }
+  }
+
+  // ------------------------------------------------------------ settings
+
+  private renderedSettingsKey = '';
+
+  private renderSettings(): void {
+    const cats = new Set<Category>();
+    for (const j of this.queue.jobs) if (j.format && j.target && j.status !== 'unsupported') {
+      cats.add(effectiveCategory(j.format, j.traits));
+      if (FORMATS[j.target].category === 'audio') cats.add('audio');
+      if (j.target === 'gif' && effectiveCategory(j.format, j.traits) === 'video') cats.add('video');
+    }
+    const key = [...cats].sort().join(',');
+    if (key === this.renderedSettingsKey) return;
+    this.renderedSettingsKey = key;
+    const box = $('settings');
+    const open = new Set([...box.querySelectorAll('details[open]')].map(d => (d as HTMLElement).dataset.cat));
+    clear(box);
+    const save = () => saveSettings(this.settings);
+    const panel = (cat: Category, hint: string, ...fields: Node[]) => {
+      const d = h('details', { class: 'panel', 'data-cat': cat, open: open.has(cat) }, h('summary', {}, `${CATEGORY_NAMES[cat]} settings`, h('span', { class: 'hint' }, hint)), h('div', { class: 'fields' }, ...fields));
+      box.append(d);
+      return d;
+    };
+    const select = (labelText: string, value: string | number, options: Array<[string | number, string]>, onChange: (v: string) => void) => {
+      const sel = h('select', {}) as HTMLSelectElement;
+      for (const [v, l] of options) sel.append(h('option', { value: String(v), selected: String(v) === String(value) }, l));
+      sel.addEventListener('change', () => { onChange(sel.value); save(); });
+      return h('label', { class: 'field' }, h('span', {}, labelText), sel);
+    };
+    const check = (labelText: string, value: boolean, onChange: (v: boolean) => void) => {
+      const box = h('input', { type: 'checkbox', checked: value }) as HTMLInputElement;
+      box.addEventListener('change', () => { onChange(box.checked); save(); });
+      return h('label', { class: 'field check' }, box, h('span', {}, labelText));
+    };
+    const s = this.settings;
+
+    if (cats.has('image')) {
+      const quality = h('input', { type: 'range', min: 1, max: 100, value: s.image.quality, 'aria-label': 'Quality' }) as HTMLInputElement;
+      const qv = h('output', {}, String(s.image.quality));
+      quality.addEventListener('input', () => { s.image.quality = Number(quality.value); qv.textContent = quality.value; });
+      quality.addEventListener('change', save);
+      const mode = h('select', { 'aria-label': 'Resize' }) as HTMLSelectElement;
+      for (const [v, l] of [['none', 'Keep the size'], ['percent', 'Scale by percent'], ['fit', 'Fit inside a box']]) mode.append(h('option', { value: v, selected: s.image.resize.mode === v }, l));
+      const pct = h('input', { type: 'number', min: 1, max: 400, value: s.image.resize.mode === 'percent' ? s.image.resize.percent : 50, 'aria-label': 'Percent' }) as HTMLInputElement;
+      const bw = h('input', { type: 'number', min: 1, max: LIMITS.imageSide, value: s.image.resize.mode === 'fit' ? s.image.resize.width : 1920, 'aria-label': 'Largest width in pixels' }) as HTMLInputElement;
+      const bh = h('input', { type: 'number', min: 1, max: LIMITS.imageSide, value: s.image.resize.mode === 'fit' ? s.image.resize.height : 1920, 'aria-label': 'Largest height in pixels' }) as HTMLInputElement;
+      const pctRow = h('span', { class: 'row' }, pct, '%');
+      const boxRow = h('span', { class: 'row' }, bw, 'x', bh, 'px');
+      const sync = () => {
+        pctRow.hidden = mode.value !== 'percent';
+        boxRow.hidden = mode.value !== 'fit';
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v) || lo));
+        s.image.resize = mode.value === 'percent' ? { mode: 'percent', percent: clamp(Number(pct.value), 1, 400) }
+          : mode.value === 'fit' ? { mode: 'fit', width: clamp(Number(bw.value), 1, LIMITS.imageSide), height: clamp(Number(bh.value), 1, LIMITS.imageSide) }
+          : { mode: 'none' };
+        save();
+      };
+      for (const el of [mode, pct, bw, bh]) el.addEventListener('change', sync);
+      pctRow.hidden = s.image.resize.mode !== 'percent';
+      boxRow.hidden = s.image.resize.mode !== 'fit';
+      const color = h('input', { type: 'color', value: s.image.background, 'aria-label': 'Background color for transparent areas' }) as HTMLInputElement;
+      color.addEventListener('change', () => { s.image.background = color.value; save(); });
+      panel('image', ' Quality, size, transparency',
+        h('label', { class: 'field' }, h('span', {}, 'Quality (JPG, WebP, AVIF)'), h('span', { class: 'row' }, quality, qv)),
+        h('div', { class: 'field' }, h('span', {}, 'Size'), h('span', { class: 'row' }, mode, pctRow, boxRow)),
+        h('label', { class: 'field' }, h('span', {}, 'Background for transparent areas (JPG, BMP)'), color));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'Fit inside a box never enlarges. Metadata such as EXIF and GPS location is not copied. Orientation is applied to the pixels.'));
+    }
+    if (cats.has('audio')) {
+      panel('audio', ' Bitrate, sample rate, channels',
+        select('Bitrate (MP3, AAC, M4A, OGG)', s.audio.bitrate, [[0, 'Automatic (high quality)'], [96, '96 kbit/s'], [128, '128 kbit/s'], [160, '160 kbit/s'], [192, '192 kbit/s'], [256, '256 kbit/s'], [320, '320 kbit/s']], v => { s.audio.bitrate = Number(v); }),
+        select('Sample rate', s.audio.sampleRate, [[0, 'Keep the original'], [44100, '44.1 kHz'], [48000, '48 kHz']], v => { s.audio.sampleRate = Number(v); }),
+        select('Channels', s.audio.channels, [[0, 'Keep the original'], [2, 'Stereo'], [1, 'Mono']], v => { s.audio.channels = Number(v); }));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'OGG files use the Opus codec at 48 kHz. Audio copied from a video or between MP4, M4A and AAC is not re-encoded when no setting asks for it.'));
+    }
+    if (cats.has('video')) {
+      panel('video', ' Resolution, quality, sound, GIF',
+        select('Resolution', s.video.maxHeight, [[0, 'Keep the original'], [2160, '2160p (4K)'], [1440, '1440p'], [1080, '1080p'], [720, '720p'], [480, '480p'], [360, '360p']], v => { s.video.maxHeight = Number(v); }),
+        select('Quality', s.video.quality, [['original', 'Original (copy when possible)'], ['very-high', 'Very high'], ['high', 'High'], ['medium', 'Medium (smaller file)'], ['low', 'Low (smallest file)']], v => { s.video.quality = v as Settings['video']['quality']; }),
+        check('Remove the sound', s.video.removeAudio, v => { s.video.removeAudio = v; }),
+        select('GIF width', s.video.gifWidth, [[320, '320 px'], [480, '480 px'], [640, '640 px'], [800, '800 px']], v => { s.video.gifWidth = Number(v); }),
+        select('GIF frame rate', s.video.gifFps, [[5, '5 fps'], [10, '10 fps'], [15, '15 fps'], [20, '20 fps']], v => { s.video.gifFps = Number(v); }));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'With Original, streams that already fit the new container are copied without re-encoding, which is fast and lossless. Videos are never enlarged.'));
+    }
+    if (cats.has('document')) {
+      panel('document', ' Page size, text size',
+        select('PDF page size', s.document.pageSize, [['LETTER', 'US Letter'], ['A4', 'A4']], v => { s.document.pageSize = v as 'LETTER' | 'A4'; }),
+        select('Text size (TXT to PDF)', s.document.fontSize, [[9, '9 pt'], [10, '10 pt'], [11, '11 pt'], [12, '12 pt']], v => { s.document.fontSize = Number(v); }));
+    }
+    if (cats.has('data')) {
+      const d = s.data;
+      panel('data', ' CSV, JSON and spreadsheet options',
+        select('CSV separator (output)', d.delimiter, [[',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab']], v => { d.delimiter = v as typeof d.delimiter; }),
+        select('CSV separator (input)', d.inputDelimiter, [['auto', 'Detect'], [',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab'], ['|', 'Pipe']], v => { d.inputDelimiter = v as typeof d.inputDelimiter; }),
+        select('Lists inside JSON records', d.arrays, [['json', 'Keep as JSON text in one cell'], ['columns', 'Spread into numbered columns']], v => { d.arrays = v as typeof d.arrays; }),
+        select('Spreadsheet values', d.values, [['formatted', 'As shown in Excel'], ['raw', 'Underlying values']], v => { d.values = v as typeof d.values; }),
+        check('First CSV row is the header', d.header, v => { d.header = v; }),
+        check('Detect numbers and true/false in CSV', d.detectTypes, v => { d.detectTypes = v; }),
+        check('Rebuild nested objects from dotted column names', d.nest, v => { d.nest = v; }),
+        check('Add a byte order mark to CSV (helps Excel read UTF-8)', d.bom, v => { d.bom = v; }),
+        check('Protect CSV from spreadsheet formulas', d.neutralizeFormulas, v => { d.neutralizeFormulas = v; }));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'Formula protection puts an apostrophe before text cells that start with = + - or @, so opening the CSV in a spreadsheet cannot run them. Numbers with leading zeros, such as ZIP codes, always stay text.'));
+    }
+  }
+
+  // ------------------------------------------------------------ formats section
+
+  private renderFormats(): void {
+    const box = $('formats');
+    const card = (title: string, pairs: Array<[string, string]>, note: string) => h('div', { class: 'fmt' },
+      h('h3', {}, title),
+      h('ul', { class: 'pairs' }, ...pairs.map(([a, b]) => h('li', {}, h('b', {}, a), ` to ${b}`))),
+      h('p', {}, note));
+    box.append(
+      card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF', 'MP4, WebM or GIF']], 'Resize, set quality, keep transparency where the format allows it. HEIC and TIFF are read; HEIC is not written.'),
+      card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
+      card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
+      card('Documents', [['TXT', 'PDF'], ['PDF', 'TXT'], ['Markdown', 'HTML or PDF'], ['HTML', 'PDF'], ['DOCX', 'TXT']], 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
+      card('Data', [['JSON', 'CSV, YAML or XML'], ['CSV', 'JSON or XLSX'], ['YAML', 'JSON'], ['XML', 'JSON'], ['XLSX', 'CSV']], 'Nested data, encodings, worksheets and spreadsheet formulas are handled explicitly.'),
+    );
+    const limits = $('limits-list');
+    const items = [
+      'HEIC is read but not written: the open HEVC encoders are GPL-licensed and patent-encumbered, and none is practical in a browser.',
+      'AVI is not supported yet, for reading or writing. MP4, WebM, MOV and MKV are.',
+      'Audio and video use your browser\'s WebCodecs. Current Chrome, Edge and Firefox have them. Which codecs work depends on the browser and the computer: Firefox cannot decode HEVC video, for example, and AAC encoding falls back to a built-in encoder where the browser has none.',
+      'DOCX to PDF and PDF to DOCX are not offered. Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges your document.',
+      'Markdown and HTML to PDF keep the document structure (headings, lists, tables, code, links, embedded PNG and JPEG pictures) in a clean default style. Stylesheets are not applied and remote images are not downloaded.',
+      'The PDF font covers Latin, Greek and Cyrillic. Other scripts, such as Chinese, Arabic or Hindi, are reported and do not show.',
+      'Animated WebP, APNG and animated AVIF are converted as their first frame. Animated GIF keeps its animation as GIF, MP4 or WebM.',
+      'Pictures lose their metadata (EXIF, GPS). HEIC and TIFF color profiles are not applied.',
+      `Size limits: pictures up to ${LIMITS.imagePixels / 1e6} megapixels and ${formatBytes(LIMITS.imageBytes)}, audio and video up to ${formatBytes(LIMITS.mediaBytes)}, PDFs up to ${formatBytes(LIMITS.pdfBytes)}, text to PDF up to ${formatBytes(LIMITS.textToPdfBytes)}, data files up to ${formatBytes(LIMITS.dataBytes)}.`,
+    ];
+    for (const i of items) limits.append(h('li', {}, i));
+  }
+}
+

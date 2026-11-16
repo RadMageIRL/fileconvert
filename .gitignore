@@ -1,0 +1,19 @@
+node_modules/
+dist/
+release/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+*.log
+.vite/
+
+# Secrets and machine-local settings
+.env
+.env.*
+*.local
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

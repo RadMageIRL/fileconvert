@@ -1,0 +1,17 @@
+# FileConvert YAML sample
+defaults: &defaults
+  retries: 3
+  timeout: 2.5
+services:
+  - name: web
+    <<: *defaults
+    ports: [80, 443]
+    enabled: true
+  - name: worker
+    <<: *defaults
+    enabled: false
+    note: |
+      Multi-line
+      literal text
+released: 2026-11-15
+empty: null
