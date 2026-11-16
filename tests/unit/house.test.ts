@@ -38,6 +38,13 @@ describe('house rules', () => {
     expect(found).toEqual([]);
   });
 
+  test('the page names its canonical address and a link-preview image with a description', () => {
+    const html = read('index.html');
+    expect(html).toContain('<link rel="canonical" href="https://radmagelabs.com/fileconvert/">');
+    expect(html).toContain('<meta property="og:image" content="https://radmagelabs.com/assets/og/fileconvert.png">');
+    expect(html).toMatch(/<meta property="og:image:alt" content="FileConvert [^"]{20,}">/);
+  });
+
   test('no build output, caches or local files are committed', () => {
     expect(files.filter(f => /^(dist|node_modules|local|test-results|playwright-report|release)\//.test(f))).toEqual([]);
     expect(files.filter(f => /(^|\/)\.env(\.|$)/.test(f))).toEqual([]);

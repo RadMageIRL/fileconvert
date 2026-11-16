@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.2 - 2026-11-16
+
+- The link preview image now has a text description (og:image:alt), for screen readers and link previews that show it.
+
 ## v0.1.1 - 2026-11-16
 
 Visual style cleanup.

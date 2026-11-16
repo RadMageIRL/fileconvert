@@ -1,6 +1,6 @@
 {
   "name": "fileconvert",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "FileConvert: a free, private, browser-based converter for images, audio, video, documents and data. Your files never leave your device.",
   "license": "MIT",
