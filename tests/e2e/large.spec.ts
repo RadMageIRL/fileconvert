@@ -200,9 +200,8 @@ test('a 1.2 GB ZIP is unpacked to private storage, not memory, and its files are
 // An ordinary large PDF: 2,000 pages of text, 16 pages of incompressible pictures and 20 nearly white 600 dpi A4
 // scans stored losslessly (104 MB each decompressed), 2.3 GB decompressed in all. It must pass the guard, give its
 // text, and have pages removed in the PDF worker, with the browser's memory measured.
-test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard, converts, and has pages removed', async ({ baseURL }) => {
-  test.setTimeout(900_000);
-  const src = make('ordinary-large.pdf', p => execFileSync(PYTHON, ['-I', '-c', [
+function ordinaryLargePdf(): string {
+  return make('ordinary-large.pdf', p => execFileSync(PYTHON, ['-I', '-c', [
     'import sys, zlib, random',
     'rnd = random.Random(3); objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>", 3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}',
     'kids = []; n = 10',
@@ -229,6 +228,11 @@ test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard
     'out += b"trailer\\n<< /Size %d /Root 1 0 R >>\\nstartxref\\n%d\\n%%%%EOF\\n" % (size, x)',
     'open(sys.argv[1], "wb").write(out)',
   ].join('\n'), p], { timeout: 900_000 }));
+}
+
+test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard, converts, and has pages removed', async ({ baseURL }) => {
+  test.setTimeout(900_000);
+  const src = ordinaryLargePdf();
   const { chromium } = await import('@playwright/test');
   const { mkdtempSync, writeFileSync } = await import('node:fs');
   /** Runs a step in a fresh Chrome with its own profile, sampling the memory of all its processes. */
@@ -286,4 +290,69 @@ test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard
   expect(firstPages).toContain('LARGE-MARK-00001');
   expect(firstPages).toContain('LARGE-MARK-00003');
   expect(firstPages).not.toContain('LARGE-MARK-00002');
+});
+
+// Merge PDFs near its 1 GB limit, through the workspace: the ordinary large PDF twice and 400 MB of incompressible
+// pictures (4,112 pages, about 860 MB), with every browser process's memory sampled while the files are checked and
+// while they are merged.
+test('Merge PDFs: about 860 MB and 4,112 pages in three files merge through the workspace, memory measured', async ({ baseURL }, info) => {
+  test.setTimeout(1_800_000);
+  const { chromium } = await import('@playwright/test');
+  const { copyFileSync, mkdtempSync } = await import('node:fs');
+  const big = ordinaryLargePdf();
+  const copy = join(DIR, 'ordinary-large-again.pdf');
+  if (!existsSync(copy)) copyFileSync(big, copy);
+  const pics = make('pictures-400mb.pdf', p => execFileSync(PYTHON, ['-I', '-c', [
+    'import sys, zlib, random',
+    'rnd = random.Random(5); objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>"}; kids = []; n = 10',
+    'def stream(d, extra=b""): return b"<< /Length %d%s >>\\nstream\\n" % (len(d), extra) + d + b"\\nendstream"',
+    'for i in range(40):',
+    '    objs[n + 2] = stream(zlib.compress(rnd.randbytes(1870 * 1870 * 3), 0), b" /Type /XObject /Subtype /Image /Width 1870 /Height 1870 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode")',
+    '    objs[n + 1] = stream(b"q 595 0 0 595 0 120 cm /Im0 Do Q")',
+    '    objs[n] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 %d 0 R >> >> /Contents %d 0 R >>" % (n + 2, n + 1)',
+    '    kids.append(n); n += 3',
+    'objs[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % k for k in kids), len(kids))',
+    'out = bytearray(b"%PDF-1.7\\n"); offs = {}',
+    'for k in sorted(objs): offs[k] = len(out); out += b"%d 0 obj\\n" % k + objs[k] + b"\\nendobj\\n"',
+    'x = len(out); size = max(objs) + 1',
+    'out += b"xref\\n0 %d\\n0000000000 65535 f \\n" % size + b"".join((b"%010d 00000 n \\n" % offs[k]) if k in offs else b"0000000000 65535 f \\n" for k in range(1, size))',
+    'out += b"trailer\\n<< /Size %d /Root 1 0 R >>\\nstartxref\\n%d\\n%%%%EOF\\n" % (size, x)',
+    'open(sys.argv[1], "wb").write(out)',
+  ].join('\n'), p], { timeout: 900_000 }));
+  const total = [big, pics, copy].reduce((n, f) => n + statSync(f).size, 0);
+  const profile = mkdtempSync(join(tmpdir(), 'fc-profile-'));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', baseURL, acceptDownloads: true });
+  const page = context.pages()[0] ?? await context.newPage();
+  await openApp(page);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('merge-pdf'));
+  const ws = page.locator('#workspace');
+  const base = await browserMemory(profile);
+  let peak = base, sampling = true;
+  const sampler = (async () => { while (sampling) { peak = Math.max(peak, await browserMemory(profile)); await new Promise(r => setTimeout(r, 500)); } })();
+  let t = Date.now();
+  await ws.locator('input[type=file]').setInputFiles([big, pics, copy]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 600_000 });
+  const checkSecs = (Date.now() - t) / 1000, checkRise = peak - base;
+  await expect(ws.locator('.ws-item.rejected')).toHaveCount(0);
+  peak = await browserMemory(profile);
+  const before = peak;
+  const lag = await watchLag(page);
+  t = Date.now();
+  await ws.getByRole('button', { name: 'Merge PDFs' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 1_200_000 });
+  const mergeSecs = (Date.now() - t) / 1000, mergeRise = peak - before;
+  sampling = false;
+  await sampler;
+  const lagMs = await lag();
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 300_000 }), ws.getByRole('button', { name: 'Download merged.pdf' }).click()]);
+  const out = info.outputPath('merged-large.pdf');
+  await dl.saveAs(out);
+  await context.close();
+  record(`Merge PDFs (${(total / 1048576).toFixed(0)} MB in 3 files, 4,112 pages): checked as added in ${checkSecs.toFixed(1)} s, browser memory +${checkRise.toFixed(0)} MB; merged in ${mergeSecs.toFixed(1)} s, +${mergeRise.toFixed(0)} MB over the ${(before - base).toFixed(0)} MB the page held, ${(statSync(out).size / 1048576).toFixed(0)} MB out, worst main-thread gap ${lagMs} ms`);
+  expect(execFileSync('qpdf', ['--check', out], { encoding: 'utf8', maxBuffer: 64 << 20 })).toContain('No syntax or stream encoding errors found');
+  expect(execFileSync('qpdf', ['--show-npages', out], { encoding: 'utf8' }).trim()).toBe('4112');
+  expect(execFileSync('pdftotext', ['-f', '1', '-l', '1', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-00001');
+  expect(execFileSync('pdftotext', ['-f', '2077', '-l', '2077', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-00001');
+  expect(execFileSync('pdftotext', ['-f', '4112', '-l', '4112', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-02036');
+  expect(lagMs).toBeLessThan(500);
 });

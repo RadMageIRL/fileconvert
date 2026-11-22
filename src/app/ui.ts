@@ -8,6 +8,8 @@ import { $, clear, h } from './dom';
 import { Engines, Queue, type Job } from './jobs';
 import { Pool } from './pool';
 import { saveSettings, type Settings } from './settings';
+import type { ToolId } from '../core/tools';
+import { loadTool } from './toolset';
 import type { ToolDefinition } from './tools';
 import type { Workspace } from './workspace';
 
@@ -70,6 +72,11 @@ export class App {
     window.addEventListener('beforeunload', e => {
       if (this.queue.jobs.some(j => j.status === 'converting' || j.status === 'queued') || this.workspace?.running) e.preventDefault();
     });
+  }
+
+  /** Opens one of FileConvert's tools by its id (a tool page does this; the tests too, before a tool has a page). */
+  async openTool(id: ToolId): Promise<Workspace> {
+    return this.openWorkspace(await loadTool(id));
   }
 
   /** Opens a tool in the workspace, in place of the converter. The workspace code loads on first use. */

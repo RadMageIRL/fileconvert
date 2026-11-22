@@ -126,3 +126,27 @@ test('PDF guard and page cleanup in WebKit: a bomb is refused, page 2 of markers
   expect((await import('node:fs')).readFileSync(d.decompressed).includes('PAGE-TWO-SECRET')).toBe(false);
   expect(w.outside).toEqual([]);
 });
+
+test('Merge PDFs in WebKit: the workspace checks, merges and offers the result; independent readers agree', async ({ page }) => {
+  const w = await openApp(page);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('merge-pdf'));
+  const ws = page.locator('#workspace');
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf'), fx('pdf/merge-b.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Merge PDFs' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+  // Playwright's WebKit on Windows does not report downloads, so the result is read from the workspace itself.
+  const bytes = await page.evaluate(async () => {
+    const app = (window as unknown as { __fileconvert: { workspace: { outputs: Array<{ blob: Blob }> } } }).__fileconvert;
+    return [...new Uint8Array(await app.workspace.outputs[0].blob.arrayBuffer())];
+  });
+  type Deep = { qpdf: { ok: boolean }; pages: unknown[]; pageObjects: number; renders: string[]; fields: Record<string, { value: string }> };
+  const d = pyRead<Deep>('pdfdeep', writeTemp(tempDir(), 'merged-webkit.pdf', new Uint8Array(bytes)));
+  const a = pyRead<Deep>('pdfdeep', fx('pdf/merge-a.pdf')), b = pyRead<Deep>('pdfdeep', fx('pdf/merge-b.pdf'));
+  expect(d.qpdf.ok).toBe(true);
+  expect(d.pages).toHaveLength(5);
+  expect(d.pageObjects).toBe(5);
+  expect(d.renders).toEqual([...a.renders, ...b.renders]);
+  expect(d.fields.name_2.value).toBe('Bob');
+  expect(w.outside).toEqual([]);
+});

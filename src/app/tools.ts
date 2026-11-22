@@ -13,6 +13,21 @@ export interface ToolInput {
   name: string;
   /** The format found in the file's bytes, not its name. */
   format: FormatId;
+  /** Pages, when the tool's inspect found them (PDF tools). */
+  pages?: number;
+}
+
+/** What a tool's inspect found about one file. */
+export interface ToolInspection {
+  /** Added to the file's line: "12 pages". */
+  info?: string;
+  pages?: number;
+  /** Shown under the file. */
+  note?: string;
+  /** Why the tool cannot use the file; it stays listed but is never passed to the tool. */
+  error?: string;
+  /** A warning the person has to accept (the tool's confirmLabel) before the tool runs with this file. */
+  confirm?: string;
 }
 
 export type ToolOption =
@@ -50,6 +65,10 @@ export interface ToolDefinition {
   options: readonly ToolOption[];
   /** The run button's label, such as "Merge PDFs". */
   action: string;
+  /** Looks at each file the tool takes as it is added, off the page (the file shows as being checked meanwhile). */
+  inspect?(input: ToolInput, ctx: { signal: AbortSignal; engines: Engines }): Promise<ToolInspection>;
+  /** The check box that accepts every confirm warning from inspect: "Merge anyway". */
+  confirmLabel?: string;
   /** Why the tool cannot run with these files and values, or null when it can. */
   check?(inputs: readonly ToolInput[], values: ToolValues): string | null;
   run(inputs: readonly ToolInput[], values: ToolValues, ctx: ToolContext): Promise<ToolResult>;

@@ -6,7 +6,8 @@ Prints JSON. csv and tsv use Python's csv module; json and jsonl the json module
 saved results, number formats, merged cells, sheet states); docx python-docx (paragraph styles, list levels, run
 formatting, links, tables and pictures); md mistune (CommonMark with GFM tables); mdzip zipfile, mistune and Pillow
 (a Markdown ZIP, extracted and its picture links followed); media zipfile (a DOCX's pictures); pdf qpdf, pypdf,
-Xpdf pdftotext and PDFium (a PDF's structure, text and rendered pages). None of them shares
+Xpdf pdftotext and PDFium (a PDF's structure, text and rendered pages); pdfdeep qpdf, pypdf and PDFium (what a
+merge keeps: bookmarks, links, named destinations, form fields, layers, page boxes, renders). None of them shares
 code with the browser engines.
 """
 
@@ -287,6 +288,241 @@ def read_pdf(path):
     }
 
 
+def read_pdf_deep(path):
+    """What a merge has to keep, as pypdf, qpdf and PDFium see it, page numbers 0-based: every page's boxes, rotation,
+    text and annotations (each link's target page or address, each widget's field and state, whether it has an
+    appearance); bookmarks as a tree with their target pages and open or closed state; named destinations (name tree
+    and the old /Dests dictionary) with their pages; form fields by full name with value, type and default appearance,
+    and the form's fonts by resource name; layers with the hidden ones; page dictionaries in the whole file (more
+    than the page count means hidden copies); and each page rendered by PDFium (SHA-256 of the bitmap, at 72 dpi, and
+    with form fields drawn through PDFium's form engine)."""
+    import hashlib
+    import shutil
+    import subprocess
+    import tempfile
+    import pypdf
+    import pypdfium2
+    from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject, NullObject, NumberObject, TextStringObject, ByteStringObject
+    qpdf = shutil.which('qpdf') or 'C:/msys64/ucrt64/bin/qpdf.exe'
+    check = subprocess.run([qpdf, '--check', path], capture_output=True, text=True)
+    decompressed = os.path.join(tempfile.mkdtemp(prefix='pdf-'), 'qdf.pdf')
+    subprocess.run([qpdf, '--qdf', '--object-streams=disable', '--decode-level=all', path, decompressed], capture_output=True)
+    with open(decompressed, 'rb') as f:
+        qdf = f.read()
+    import re
+    page_objects = len(re.findall(rb'/Type\s*/Page(?![a-zA-Z])', qdf))
+    r = pypdf.PdfReader(path)
+    root = r.trailer['/Root'].get_object()
+    page_ids = {p.indirect_reference.idnum: i for i, p in enumerate(r.pages)}
+
+    def obj(v):
+        return v.get_object() if isinstance(v, IndirectObject) else v
+
+    def text(v):
+        v = obj(v)
+        if isinstance(v, (TextStringObject, ByteStringObject, str)):
+            return str(v)
+        return None
+
+    name_tree = {}
+
+    def walk_names(node, depth=0):
+        node = obj(node)
+        if not isinstance(node, DictionaryObject) or depth > 32:
+            return
+        arr = obj(node.get('/Names'))
+        if isinstance(arr, ArrayObject):
+            for i in range(0, len(arr) - 1, 2):
+                k = obj(arr[i])
+                key = k.original_bytes.decode('latin-1') if hasattr(k, 'original_bytes') else str(k)
+                name_tree.setdefault(key, arr[i + 1])
+        for kid in obj(node.get('/Kids')) or []:
+            walk_names(kid, depth + 1)
+    names = obj(root.get('/Names'))
+    if isinstance(names, DictionaryObject):
+        walk_names(names.get('/Dests'))
+    old_dests = obj(root.get('/Dests'))
+
+    def dest_page(d, follow=True):
+        d = obj(d)
+        if isinstance(d, (TextStringObject, ByteStringObject, NameObject, str)) and follow:
+            key = d.original_bytes.decode('latin-1') if hasattr(d, 'original_bytes') else str(d)
+            if isinstance(d, NameObject):
+                key = str(d)[1:]
+            target = name_tree.get(key)
+            if target is None and isinstance(old_dests, DictionaryObject):
+                target = old_dests.get('/' + key)
+            return dest_page(target, False) if target is not None else 'missing'
+        if isinstance(d, DictionaryObject):
+            d = obj(d.get('/D'))
+        if isinstance(d, ArrayObject) and len(d):
+            first = d[0]
+            if isinstance(first, IndirectObject):
+                return page_ids.get(first.idnum, 'not-a-page')
+            return 'number' if isinstance(first, NumberObject) else 'bad'
+        return None
+
+    def action(a):
+        a = obj(a)
+        if not isinstance(a, DictionaryObject):
+            return None
+        s = a.get('/S')
+        if s == '/GoTo':
+            return {'page': dest_page(a.get('/D'))}
+        if s == '/URI':
+            return {'uri': text(a.get('/URI'))}
+        return {'action': str(s)}
+
+    def outline(first, depth=0):
+        out = []
+        item = obj(first)
+        seen = set()
+        while isinstance(item, DictionaryObject) and id(item) not in seen and depth < 64:
+            seen.add(id(item))
+            entry = {'title': text(item.get('/Title'))}
+            if '/Dest' in item:
+                entry['page'] = dest_page(item['/Dest'])
+            elif '/A' in item:
+                entry.update(action(item['/A']) or {})
+            count = obj(item.get('/Count'))
+            if '/First' in item:
+                entry['open'] = not (isinstance(count, NumberObject) and int(count) < 0)
+                entry['count'] = int(count) if isinstance(count, NumberObject) else None
+                entry['children'] = outline(item['/First'], depth + 1)
+            out.append(entry)
+            item = obj(item.get('/Next'))
+        return out
+    outlines = obj(root.get('/Outlines'))
+
+    def full_name(f):
+        parts = []
+        node = f
+        for _ in range(64):
+            if '/T' in node:
+                parts.append(text(node['/T']))
+            parent = obj(node.get('/Parent'))
+            if not isinstance(parent, DictionaryObject):
+                break
+            node = parent
+        return '.'.join(reversed(parts))
+
+    def inherited(f, key):
+        node = f
+        for _ in range(64):
+            if key in node:
+                return obj(node[key])
+            node = obj(node.get('/Parent'))
+            if not isinstance(node, DictionaryObject):
+                return None
+        return None
+
+    pages = []
+    for i, p in enumerate(r.pages):
+        annots = []
+        for a in obj(p.get('/Annots')) or []:
+            a = obj(a)
+            entry = {'subtype': str(a.get('/Subtype'))}
+            if a.get('/Subtype') == '/Link':
+                if '/Dest' in a:
+                    entry['page'] = dest_page(a['/Dest'])
+                elif '/A' in a:
+                    entry.update(action(a['/A']) or {'action': None})
+            if a.get('/Subtype') == '/Widget':
+                entry['field'] = full_name(a)
+                entry['as'] = str(a.get('/AS')) if '/AS' in a else None
+                entry['ap'] = '/AP' in a
+            if a.get('/Subtype') == '/FreeText':
+                entry['da'] = text(a.get('/DA'))
+            if '/Contents' in a:
+                entry['contents'] = text(a['/Contents'])
+            annots.append(entry)
+        pages.append({
+            'mediabox': [float(x) for x in p.mediabox], 'cropbox': [float(x) for x in p.cropbox], 'rotate': p.rotation,
+            'text': p.extract_text(), 'annots': annots,
+        })
+    fields = {}
+    af = obj(root.get('/AcroForm'))
+
+    def walk_fields(f, depth=0):
+        f = obj(f)
+        if not isinstance(f, DictionaryObject) or depth > 64:
+            return
+        kids = [obj(k) for k in obj(f.get('/Kids')) or []]
+        named = [k for k in kids if '/T' in k]
+        if named:
+            for k in named:
+                walk_fields(k, depth + 1)
+            return
+        v = inherited(f, '/V')
+        if isinstance(v, DictionaryObject):
+            v = 'signature' if v.get('/Type') == '/Sig' or '/ByteRange' in v else 'dictionary'
+        fields[full_name(f)] = {
+            'value': text(v) if text(v) is not None else (str(v) if v is not None else None),
+            'type': str(inherited(f, '/FT')),
+            'da': text(inherited(f, '/DA')) or (text(af.get('/DA')) if isinstance(af, DictionaryObject) else None),
+        }
+    form = None
+    if isinstance(af, DictionaryObject):
+        for f in obj(af.get('/Fields')) or []:
+            walk_fields(f)
+        dr = obj(af.get('/DR'))
+        fonts = obj(dr.get('/Font')) if isinstance(dr, DictionaryObject) else None
+        form = {
+            'da': text(af.get('/DA')),
+            'fonts': {str(k)[1:]: str(obj(v).get('/BaseFont')) for k, v in fonts.items()} if isinstance(fonts, DictionaryObject) else {},
+            'needAppearances': bool(obj(af.get('/NeedAppearances'))),
+            'co': len(obj(af.get('/CO')) or []),
+        }
+    layers = None
+    oc = obj(root.get('/OCProperties'))
+    if isinstance(oc, DictionaryObject):
+        d = obj(oc.get('/D')) or {}
+        groups = [obj(g) for g in obj(oc.get('/OCGs')) or []]
+        base_off = d.get('/BaseState') == '/OFF'
+        on = {id(obj(g)) for g in obj(d.get('/ON')) or []}
+        off = {id(obj(g)) for g in obj(d.get('/OFF')) or []}
+        layers = {
+            'groups': [text(g.get('/Name')) for g in groups],
+            'hidden': sorted(text(g.get('/Name')) for g in groups if (id(g) not in on) if (base_off or id(g) in off)),
+            'configs': '/Configs' in oc,
+        }
+    dests = {k: dest_page(v, False) for k, v in name_tree.items()}
+    if isinstance(old_dests, DictionaryObject):
+        for k, v in old_dests.items():
+            dests.setdefault(str(k)[1:], dest_page(v, False))
+    info = r.trailer.get('/Info')
+    info = obj(info) if info is not None else None
+    doc = pypdfium2.PdfDocument(path)
+    renders, form_renders = [], []
+    for i in range(len(doc)):
+        renders.append(hashlib.sha256(doc[i].render(scale=1).to_numpy().tobytes()).hexdigest())
+    import contextlib
+    import io as _io
+    # pypdfium2 prints a note when a file has XFA data (its build has no XFA); the AcroForm fields still draw.
+    with contextlib.redirect_stderr(_io.StringIO()), contextlib.redirect_stdout(_io.StringIO()):
+        doc.init_forms()
+    for i in range(len(doc)):
+        form_renders.append(hashlib.sha256(doc[i].render(scale=1, may_draw_forms=True).to_numpy().tobytes()).hexdigest())
+    return {
+        'qpdf': {'ok': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout, 'out': (check.stdout + check.stderr).strip()[-400:]},
+        'version': r.pdf_header,
+        'pages': pages,
+        'pageObjects': page_objects,
+        'outline': outline(outlines.get('/First')) if isinstance(outlines, DictionaryObject) else [],
+        'outlineCount': int(obj(outlines.get('/Count'))) if isinstance(outlines, DictionaryObject) and '/Count' in outlines else None,
+        'dests': dests,
+        'fields': fields,
+        'form': form,
+        'layers': layers,
+        'catalog': sorted(k for k in root.keys()),
+        'info': {str(k): text(v) for k, v in info.items()} if isinstance(info, DictionaryObject) else None,
+        'metadata': '/Metadata' in root,
+        'renders': renders,
+        'formRenders': form_renders,
+        'decompressed': decompressed,
+    }
+
+
 def read_media(path):
     """The picture parts of a DOCX (word/media), by SHA-256, as zipfile reads them."""
     import hashlib
@@ -321,6 +557,8 @@ elif kind == 'media':
     result = read_media(path)
 elif kind == 'pdf':
     result = read_pdf(path)
+elif kind == 'pdfdeep':
+    result = read_pdf_deep(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

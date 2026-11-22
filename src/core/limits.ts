@@ -41,6 +41,14 @@ export const LIMITS = {
   pdfImagePixels: 100_000_000,
   pdfFunctionSamples: 10_000_000,
   pdfRowBytes: 4 * MB,
+  /**
+   * Merge PDFs: files at once, and their size together. The merge holds the result as it grows plus one file at a
+   * time, then writes the result whole: 863 MB in three files raised Chrome's memory by 2.1 to 2.7 GB. Where the
+   * browser says how much memory the device has (Chrome, Edge), the size is also capped per gigabyte of it.
+   */
+  pdfMergeFiles: 200,
+  pdfMergeBytes: 1024 * MB,
+  pdfMergeBytesPerDeviceGB: 128 * MB,
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,

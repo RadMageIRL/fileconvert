@@ -6,6 +6,7 @@ import type { FormatId } from './formats.ts';
 export const TOOLS = {
   'remove-image-metadata': { accepts: ['jpg', 'png', 'webp'] },
   'images-to-tiff': { accepts: ['jpg', 'png', 'webp', 'avif', 'heic', 'bmp', 'gif', 'tiff', 'ico'] },
+  'merge-pdf': { accepts: ['pdf'] },
 } as const satisfies Record<string, { accepts: readonly FormatId[] }>;
 
 export type ToolId = keyof typeof TOOLS;

@@ -1,8 +1,10 @@
 // The tool workspace: the one interface every tool (./tools.ts) runs in. It keeps the files in order and lets
 // them be reordered by dragging or from the keyboard, shows the tool's options, runs the tool with progress and
 // cancel, gives the results unique safe names, and offers them one by one or as a ZIP. Files are checked by
-// their bytes, as in the converter; files a tool does not take stay listed with the reason. Loaded only when a
-// tool opens, so the converter pages do not pay for it.
+// their bytes, as in the converter, and then by the tool's own inspect when it has one (a PDF tool reads each PDF's
+// pages and signature as it is added); files a tool does not take stay listed with the reason. A warning a file
+// raises (a signed PDF that will lose its signature) has to be accepted with a check box before the tool runs.
+// Loaded only when a tool opens, so the converter pages do not pay for it.
 
 import { FORMATS } from '../core/formats';
 import { formatBytes } from '../core/limits';
@@ -19,7 +21,11 @@ interface Entry extends ToolInput {
   checking: boolean;
   /** Why the tool cannot use this file. Such files are listed but never passed to the tool. */
   error?: string;
-  note?: string;
+  notes: string[];
+  /** A warning to accept before the tool runs with this file. */
+  confirm?: string;
+  /** Stops the tool's inspect when the file is removed. */
+  inspecting?: AbortController;
 }
 
 /** What the page lends the workspace. */
@@ -46,7 +52,11 @@ export class Workspace {
   private controller: AbortController | null = null;
   private names = new NameRegistry();
   private dragId: number | null = null;
+  /** The warnings accepted, and which files raised them (a new warning has to be accepted again). */
+  private confirmed = false;
+  private confirmFor = '';
   private list!: HTMLOListElement;
+  private confirmBox!: HTMLElement;
   private runBox!: HTMLElement;
   private outBox!: HTMLElement;
   private picker!: HTMLInputElement;
@@ -73,23 +83,46 @@ export class Workspace {
     if (this.entries.some(e => e.checking)) return 'Checking the files.';
     if (n < min) return min === 1 ? 'Add a file to start.' : `Add at least ${min} files.`;
     if (n > max) return `This tool takes up to ${max} ${max === 1 ? 'file' : 'files'}. Remove ${n - max}.`;
-    return this.def.check?.(this.accepted(), this.values) ?? null;
+    const own = this.def.check?.(this.accepted(), this.values) ?? null;
+    if (own) return own;
+    if (this.raised().length && !this.confirmed) return `Check "${this.def.confirmLabel ?? 'Go on anyway'}" first.`;
+    return null;
+  }
+
+  /** The accepted files that raised a warning. */
+  private raised(): Entry[] {
+    return this.accepted().filter(e => e.confirm);
   }
 
   add(files: Iterable<File>): void {
     if (this.running) return;
     for (const file of files) {
-      const e: Entry = { id: this.nextId++, file, name: file.name || 'unnamed', format: 'txt', info: formatBytes(file.size), checking: true };
+      const e: Entry = { id: this.nextId++, file, name: file.name || 'unnamed', format: 'txt', info: formatBytes(file.size), checking: true, notes: [] };
       this.entries.push(e);
-      void sniffBlob(file, e.name).then(s => {
+      void sniffBlob(file, e.name).then(async s => {
         e.info = `${s.label}, ${formatBytes(file.size)}`;
         if (s.format && this.def.accepts.includes(s.format)) {
           e.format = s.format;
-          if (s.mismatch) e.note = s.mismatch;
+          if (s.mismatch) e.notes.push(s.mismatch);
         } else {
           e.error = s.format
             ? `${this.def.title} takes ${this.acceptedLabels()} files; this is ${s.label}.`
             : s.reason ?? 'This file cannot be used.';
+        }
+        if (e.error || !this.def.inspect || !this.entries.includes(e)) return;
+        const ac = new AbortController();
+        e.inspecting = ac;
+        try {
+          const r = await this.def.inspect({ id: e.id, file, name: e.name, format: e.format }, { signal: ac.signal, engines: this.host.engines });
+          if (r.info) e.info += `, ${r.info}`;
+          if (r.pages !== undefined) e.pages = r.pages;
+          if (r.note) e.notes.push(r.note);
+          if (r.error) e.error = r.error;
+          if (r.confirm) e.confirm = r.confirm;
+        } catch (err) {
+          if (!(err instanceof CanceledError) && !ac.signal.aborted) e.error = isLoadFailure(err) ? loadFailureMessage() : (err as Error).message || 'The file could not be read.';
+        } finally {
+          e.inspecting = undefined;
         }
       }, () => { e.error = 'The file could not be read.'; }).finally(() => {
         e.checking = false;
@@ -101,6 +134,7 @@ export class Workspace {
 
   remove(id: number): void {
     if (this.running) return;
+    this.entries.find(e => e.id === id)?.inspecting?.abort();
     this.entries = this.entries.filter(e => e.id !== id);
     this.changed();
   }
@@ -134,6 +168,8 @@ export class Workspace {
 
   /** The list or the options changed, so earlier results no longer match them. */
   private changed(): void {
+    const raised = this.raised().map(e => e.id).join(',');
+    if (raised !== this.confirmFor) { this.confirmFor = raised; this.confirmed = false; }
     if (this.state !== 'running') {
       this.dropOutputs();
       if (this.state !== 'idle') { this.state = 'idle'; this.error = undefined; }
@@ -150,7 +186,7 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format }) => ({ id, file, name, format }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages }) => ({ id, file, name, format, pages }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;
@@ -202,6 +238,7 @@ export class Workspace {
   }
 
   dispose(): void {
+    for (const e of this.entries) e.inspecting?.abort();
     this.cancel();
     this.dropOutputs();
     clear(this.root);
@@ -232,6 +269,7 @@ export class Workspace {
       this.picker.value = '';
     });
     this.list = h('ol', { class: 'ws-list', 'aria-label': this.def.ordered ? 'Files, in order' : 'Files' }) as HTMLOListElement;
+    this.confirmBox = h('div', { class: 'ws-confirm', hidden: true });
     this.runBox = h('div', { class: 'ws-run' });
     this.outBox = h('div', { class: 'ws-out' });
     this.root.append(
@@ -241,6 +279,7 @@ export class Workspace {
         h('span', { class: 'drop-sub' }, `${this.acceptedLabels()}${this.def.maxInputs > 1 ? `, up to ${this.def.maxInputs} files` : ''}. You can also drop files on the page.`)),
       this.list,
       this.optionsBox(),
+      this.confirmBox,
       this.runBox,
       this.outBox,
     );
@@ -335,7 +374,7 @@ export class Workspace {
       const main = h('div', { class: 'ws-main' },
         h('div', { class: 'job-name' }, e.name),
         h('div', { class: 'job-info' }, e.checking ? `Checking, ${e.info}` : e.info));
-      if (e.note) main.append(h('ul', { class: 'job-notes' }, h('li', {}, e.note)));
+      if (e.notes.length) main.append(h('ul', { class: 'job-notes' }, ...e.notes.map(n => h('li', {}, n))));
       if (e.error) main.append(h('div', { class: 'job-error' }, e.error));
       const actions = h('div', { class: 'job-actions' });
       if (ordered && usable) {
@@ -348,6 +387,7 @@ export class Workspace {
       this.list.append(li);
     }
     this.list.hidden = this.entries.length === 0;
+    this.renderConfirm();
     for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-lock]')) el.disabled = this.running;
     this.renderRun();
     this.renderOutputs();
@@ -357,6 +397,21 @@ export class Workspace {
       if (el?.disabled && /^(up|down)-/.test(focused)) el = this.root.querySelector(`[data-key="${CSS.escape(focused.startsWith('up-') ? focused.replace('up-', 'down-') : focused.replace('down-', 'up-'))}"]`);
       (el && !el.disabled ? el : this.root.querySelector<HTMLElement>('[data-key="add"]'))?.focus();
     }
+  }
+
+  /** The warnings files raised, and the check box that accepts them. */
+  private renderConfirm(): void {
+    const box = this.confirmBox;
+    const raised = this.raised();
+    clear(box);
+    box.hidden = raised.length === 0;
+    if (!raised.length) return;
+    const input = h('input', { type: 'checkbox', checked: this.confirmed, 'data-key': 'confirm', 'data-lock': '' }) as HTMLInputElement;
+    input.addEventListener('change', () => { this.confirmed = input.checked; this.renderRun(); });
+    box.append(
+      h('p', { class: 'ws-confirm-title', id: 'ws-confirm-title' }, raised.length === 1 ? 'Before you go on' : `Before you go on (${raised.length} files)`),
+      h('ul', { class: 'job-notes', 'aria-labelledby': 'ws-confirm-title' }, ...raised.map(e => h('li', {}, e.confirm!))),
+      h('label', { class: 'field check' }, input, h('span', {}, this.def.confirmLabel ?? 'Go on anyway')));
   }
 
   private renderRun(): void {
