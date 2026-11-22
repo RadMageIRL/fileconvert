@@ -230,15 +230,17 @@ test('removing and clearing releases thumbnails and temporary files', async ({ p
   await expect(page.locator('#choose')).toBeFocused();
 });
 
-test('archives and other unsupported files are explained, not converted', async ({ page }) => {
+test('unsupported files are explained, not converted; archives are offered for unpacking', async ({ page }) => {
   await openApp(page);
   const { zipSync } = await import('fflate');
   await page.locator('#picker').setInputFiles([
     { name: 'photos.zip', mimeType: 'application/zip', buffer: Buffer.from(zipSync({ 'a.txt': new Uint8Array([65]) })) },
     { name: 'layers.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: Buffer.concat([Buffer.from('8BPS'), Buffer.alloc(64)]) },
+    { name: 'old.rar', mimeType: 'application/vnd.rar', buffer: Buffer.concat([Buffer.from('Rar!'), Buffer.alloc(64)]) },
   ]);
-  await expect(row(page, 'photos.zip').locator('.job-error')).toContainText('Extract the files');
+  await expect(row(page, 'photos.zip').getByRole('button', { name: 'Extract files' })).toBeVisible();
   await expect(row(page, 'layers.psd').locator('.job-error')).toContainText('PSD files are not supported');
+  await expect(row(page, 'old.rar').locator('.job-error')).toContainText('RAR archives are not supported. ZIP, TAR and GZ archives can be unpacked.');
   await expect(page.locator('#convert-all')).toBeDisabled();
 });
 

@@ -2,14 +2,15 @@
 // the README's support table check (tests/unit/formats.test.ts) and the engines all read from here, so a
 // conversion is offered only if it is listed below.
 
-export type Category = 'image' | 'audio' | 'video' | 'document' | 'data';
+export type Category = 'image' | 'audio' | 'video' | 'document' | 'data' | 'archive';
 
 export type FormatId =
   | 'jpg' | 'png' | 'webp' | 'avif' | 'heic' | 'bmp' | 'gif' | 'tiff' | 'ico' | 'svg'
   | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg' | 'aiff'
   | 'mp4' | 'webm' | 'mov' | 'mkv' | 'ts'
   | 'txt' | 'pdf' | 'md' | 'html' | 'docx'
-  | 'json' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx';
+  | 'json' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx'
+  | 'zip' | 'tar' | 'gz';
 
 export interface Format {
   id: FormatId;
@@ -66,6 +67,11 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   yaml: f('yaml', 'YAML', 'yaml', ['yaml', 'yml'], 'application/yaml', 'data'),
   xml: f('xml', 'XML', 'xml', ['xml'], 'application/xml', 'data'),
   xlsx: f('xlsx', 'XLSX', 'xlsx', ['xlsx'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'data'),
+
+  // Archives are unpacked, never converted into other archive formats; they have no outputs.
+  zip: f('zip', 'ZIP', 'zip', ['zip'], 'application/zip', 'archive'),
+  tar: f('tar', 'TAR', 'tar', ['tar'], 'application/x-tar', 'archive'),
+  gz: f('gz', 'GZ', 'gz', ['gz', 'tgz'], 'application/gzip', 'archive'),
 };
 
 export const IMAGE_OUT: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff', 'ico'];
@@ -88,7 +94,7 @@ export interface InputTraits {
 }
 
 /** The engine that performs a conversion. */
-export type Engine = 'image' | 'media' | 'gif-to-video' | 'video-to-gif' | 'document' | 'data';
+export type Engine = 'image' | 'media' | 'gif-to-video' | 'video-to-gif' | 'document' | 'data' | 'archive';
 
 const DOCUMENT_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   txt: ['pdf'],
@@ -142,6 +148,8 @@ export function targetsFor(input: FormatId, traits: InputTraits = {}): FormatId[
       return [...(DOCUMENT_ROUTES[input] ?? [])];
     case 'data':
       return [...(DATA_ROUTES[input] ?? [])];
+    case 'archive':
+      return [];
   }
 }
 
@@ -150,6 +158,7 @@ export function engineFor(input: FormatId, to: FormatId, traits: InputTraits = {
   if (cat === 'image') return (to === 'mp4' || to === 'webm') ? 'gif-to-video' : 'image';
   if (cat === 'video' && to === 'gif') return 'video-to-gif';
   if (cat === 'audio' || cat === 'video') return 'media';
+  if (cat === 'archive') return 'archive';
   return cat === 'document' ? 'document' : 'data';
 }
 
@@ -157,7 +166,8 @@ export function engineFor(input: FormatId, to: FormatId, traits: InputTraits = {
 export function allConversions(): Array<[FormatId, FormatId]> {
   const pairs: Array<[FormatId, FormatId]> = [];
   for (const id of Object.keys(FORMATS) as FormatId[]) {
-    const traits: InputTraits = id === 'gif' ? { animated: true } : {};
+    // Animated GIF, WebP and PNG add the video outputs; their still outputs are the same either way.
+    const traits: InputTraits = ANIMATED_IN.includes(id) ? { animated: true } : {};
     for (const to of targetsFor(id, traits)) pairs.push([id, to]);
   }
   return pairs;

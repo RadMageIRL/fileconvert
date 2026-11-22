@@ -160,9 +160,16 @@ describe('catalog search', () => {
     expect(answers(parseQuery('jpg to heic'), none)[0]).toMatch(/^HEIC is read but not written/);
     expect(answers(parseQuery('docx to pdf'), none)).toEqual(['FileConvert does not convert DOCX to PDF.']);
     expect(answers(parseQuery('avi to mp4'), none)[0]).toMatch(/^AVI video is not supported yet/);
+    expect(answers(parseQuery('webp to mp4'), none)).toEqual(['WebP to MP4 is supported. Add your file to the converter at the top of the page and choose MP4.']);
     const yaml = answers(parseQuery('yaml'), none);
     expect(yaml).toContain('YAML converts to JSON.');
     expect(yaml).toContain('YAML can be made from JSON.');
+    // Archives are unpacked, never converted, and that is what is said about them.
+    expect(answers(parseQuery('zip'), none)).toEqual(['ZIP archives are unpacked, not converted: add one to the converter at the top of the page and choose Extract files, then download the files inside or convert them.']);
+    expect(answers(parseQuery('tgz to png'), none)[0]).toMatch(/^GZ archives are unpacked, not converted/);
+    expect(answers(parseQuery('zip to tar'), none)[1]).toBe('FileConvert does not turn one archive format into another, such as ZIP to TAR.');
+    expect(answers(parseQuery('pdf to zip'), none)).toEqual(['FileConvert unpacks ZIP, TAR and GZ archives but does not make them, apart from downloading several converted files together as one ZIP.']);
+    expect(answers(parseQuery('rar'), none)).toEqual(['RAR and 7-Zip archives are not supported. ZIP, TAR and GZ archives can be unpacked, and their files converted.']);
   });
 
   test('formats listed as not supported are really not in the registry', () => {

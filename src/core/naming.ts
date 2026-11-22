@@ -26,12 +26,13 @@ export function safeBase(name: string): string {
 export class NameRegistry {
   private taken = new Set<string>();
 
-  /** Reserves and returns a unique name like "photo.png", "photo (2).png". */
+  /** Reserves and returns a unique name like "photo.png", "photo (2).png", or "README (2)" with no extension. */
   claim(base: string, ext: string): string {
     const clean = safeBase(base + '.x');
     const e = ext.replace(/[^a-z0-9]/gi, '').toLowerCase();
     for (let n = 1; ; n++) {
-      const name = n === 1 ? `${clean}.${e}` : `${clean} (${n}).${e}`;
+      const stem = n === 1 ? clean : `${clean} (${n})`;
+      const name = e ? `${stem}.${e}` : stem;
       const key = name.toLowerCase();
       if (!this.taken.has(key)) {
         this.taken.add(key);

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test } from '@playwright/test';
-import { addFiles, convert, download, expectDone, ffdecode, ffprobe, fx, openApp, ready, row } from './helpers';
+import { addFiles, convert, convertAllTo, download, downloadZip, expectDone, ffdecode, ffprobe, fx, openApp, ready, row, tempDir, writeTemp } from './helpers';
 
 // AIFF and MPEG-TS input (v0.2.0), checked by FFmpeg: lossless results must decode to exactly the samples FFmpeg
 // decodes from the source, and transport streams must give the codecs, duration and frames they hold.
@@ -122,4 +122,38 @@ test('MPEG-TS with MPEG-2 video (TV recordings): the video is named as not decod
   expect(Math.abs(a.length - b.length)).toBeLessThan(4 * 1152 * 2);
   const n = Math.min(a.length, b.length) - (Math.min(a.length, b.length) % 2);
   expect(maxDiff(a.subarray(0, n), b.subarray(0, n))).toBeLessThanOrEqual(2);
+});
+
+// Output label, extension, FFmpeg's container name, codec: every audio output, from big-endian and float AIFF.
+const AUDIO_OUT: Array<[string, string, string, string]> = [
+  ['MP3', 'mp3', 'mp3', 'mp3'], ['WAV', 'wav', 'wav', 'pcm_s16le'], ['FLAC', 'flac', 'flac', 'flac'],
+  ['AAC', 'aac', 'aac', 'aac'], ['M4A', 'm4a', 'mov,mp4,m4a,3gp,3g2,mj2', 'aac'], ['OGG', 'ogg', 'ogg', 'opus'],
+];
+
+test('AIFF and AIFF-C to every audio format', async ({ page }, info) => {
+  test.slow();
+  const inputs = ['tone16.aiff', 'tone-float.aifc'];
+  await openApp(page);
+  for (const [label, ext, container, codec] of AUDIO_OUT) {
+    if (await page.locator('li.job').count()) await page.locator('#clear').click();
+    await addFiles(page, inputs.map(f => fx(`audio/${f}`)));
+    await convertAllTo(page, label);
+    for (const f of inputs) await expectDone(page, f);
+    const zip = await downloadZip(page, info);
+    const dir = tempDir();
+    expect(Object.keys(zip.entries).sort(), label).toEqual([`tone-float.${ext}`, `tone16.${ext}`]);
+    for (const [name, data] of Object.entries(zip.entries)) {
+      const path = writeTemp(dir, name, data);
+      const probe = ffprobe(path);
+      const a = probe.streams.filter(s => s.codec_type === 'audio');
+      expect(probe.format.format_name, name).toBe(container);
+      expect(a.map(s => s.codec_name), name).toEqual([codec]);
+      // Raw AAC has no duration field; count its 1024-sample frames instead.
+      const seconds = ext === 'aac'
+        ? Number(execFileSync('ffprobe', ['-v', 'error', '-count_packets', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', path], { encoding: 'utf8' }).trim()) * 1024 / Number(a[0].sample_rate)
+        : Number(probe.format.duration);
+      expect(Math.abs(seconds - 1), `${name} lasts ${seconds}`).toBeLessThan(0.12);
+      ffdecode(path);
+    }
+  }
 });

@@ -14,30 +14,36 @@ Current version: **v0.1.2**
 
 | From | To |
 |---|---|
-| **Images:** JPG, PNG, WebP, AVIF, HEIC/HEIF, BMP, GIF, TIFF | JPG, PNG, WebP, AVIF, GIF, BMP, TIFF |
-| Animated GIF | Animated GIF, MP4, WebM |
-| **Audio:** MP3, WAV, FLAC, AAC, M4A, OGG (Vorbis or Opus) | MP3, WAV, FLAC, AAC, M4A, OGG (Opus) |
-| **Video:** MP4, WebM, MOV, MKV | MP4, WebM, MOV, MKV, GIF, or any audio format above (the soundtrack) |
+| **Images:** JPG, PNG, WebP, AVIF, HEIC/HEIF, BMP, GIF, TIFF (every page), ICO/CUR, SVG | JPG, PNG, WebP, AVIF, GIF, BMP, TIFF (one page or multi-page), ICO |
+| Animated GIF, WebP and PNG (APNG) | Animated GIF, animated WebP, MP4, WebM |
+| **Audio:** MP3, WAV, FLAC, AAC, M4A, OGG (Vorbis or Opus), AIFF/AIFF-C | MP3, WAV, FLAC, AAC, M4A, OGG (Opus) |
+| **Video:** MP4, WebM, MOV, MKV, MPEG-TS (.ts, .mts, .m2ts) | MP4, WebM, MOV, MKV, GIF, or any audio format above (the soundtrack) |
 | **Documents:** TXT | PDF |
 | PDF | TXT |
 | Markdown | HTML, PDF |
 | HTML | PDF |
 | DOCX | TXT |
-| **Data:** JSON | CSV, YAML, XML |
-| CSV | JSON, XLSX |
+| **Data:** JSON | CSV, TSV, XLSX, YAML, XML |
+| CSV | JSON, TSV, XLSX |
+| TSV | JSON, CSV, XLSX |
 | YAML | JSON |
 | XML | JSON |
-| XLSX | CSV |
+| XLSX | CSV, TSV, JSON |
+| **Archives:** ZIP, TAR, GZ (.tar.gz, .tgz) | Unpacked, not converted: download the files inside, or convert them |
 
 Every pair in this table is tested in the browser. Pictures, audio, video, PDFs and spreadsheets are checked by decoding the results with independent programs (Pillow, FFmpeg, Xpdf's pdftotext, openpyxl), not by looking at file extensions.
 
+Two tools work on a set of files: **Remove photo metadata** takes camera details, dates, GPS location and other hidden data out of JPG, PNG and WebP photos without recompressing them, and **Combine images into a TIFF** makes one multi-page TIFF from pictures in the order you choose.
+
 ### What each kind of conversion does
 
-- **Images:** quality for JPG, WebP and AVIF; resizing by percent or to fit inside a box (never enlarging); transparency kept where the output format can hold it and replaced by a background color you choose where it cannot (JPG, BMP), with a note saying so. EXIF orientation is applied to the pixels. An animated GIF stays animated when converted to GIF, MP4 or WebM.
+- **Images:** quality for JPG, WebP and AVIF; resizing by percent or to fit inside a box (never enlarging); transparency kept where the output format can hold it and replaced by a background color you choose where it cannot (JPG, BMP), with a note saying so. EXIF orientation is applied to the pixels. Animated GIF, WebP and PNG stay animated as GIF, WebP, MP4 or WebM, with each frame's timing, the loop count, transparency and the source's disposal and blending rules; the output menu marks the formats that keep only the first frame. Every page of a multi-page TIFF converts, one file per page or one TIFF holding them all, and TIFF can be written with lossless LZW compression. ICO output is a favicon (16, 32 and 48 pixels), all six sizes up to 256, or one size. An SVG is drawn at its own size, two or four times larger, or a width you choose, after it has been cleaned (see Privacy and security).
 - **Audio:** bitrate, sample rate and channels. Streams are copied without re-encoding when nothing asks for a change and the new container can hold them (an M4A to AAC, for example). Descriptive tags such as title and artist are kept.
 - **Video:** resolution (2160p down to 360p, never enlarging), quality, and removing the sound. With quality set to Original, streams that fit the new container are copied, which is fast and lossless; MP4, MOV and MKV get H.264 video with AAC audio and WebM gets VP9 with Opus when re-encoding is needed. Video to GIF uses your choice of width and frame rate.
 - **Documents:** PDFs are written with real, selectable text in Noto Sans and Noto Sans Mono. Plain text keeps its layout (monospaced, tabs expanded, long lines wrapped); Markdown and HTML keep their structure: headings, emphasis, lists, tables, code, block quotes, links and embedded PNG or JPEG pictures. PDF to TXT reads the text layer page by page. DOCX to TXT writes one line per paragraph, keeps line breaks, marks list items and puts table cells on one line separated by tabs.
-- **Data:** nested JSON becomes dotted CSV columns (`address.city`), with lists kept as JSON text or spread into numbered columns; CSV can rebuild the nesting. CSV delimiters are detected, text encodings (UTF-8, UTF-16, Windows-1252) are detected and reported, numbers are recognized without breaking leading zeros such as ZIP codes, and integers beyond 2^53 stay exact. XLSX to CSV lets you pick a worksheet or get one CSV per sheet, with values as Excel displays them or the underlying values. XML attributes become `@` keys and element text `#text`, both ways.
+- **Data:** nested JSON becomes dotted CSV columns (`address.city`), with lists kept as JSON text or spread into numbered columns; CSV can rebuild the nesting. CSV delimiters are detected, text encodings (UTF-8, UTF-16, Windows-1252) are detected and reported, numbers are recognized without breaking leading zeros such as ZIP codes, and integers beyond 2^53 stay exact. XLSX to CSV or TSV lets you pick a worksheet or get one file per sheet, with values as Excel displays them or the underlying values. XLSX to JSON keeps numbers, true/false and empty cells as JSON values and writes dates as ISO 8601 text; JSON to XLSX writes typed cells, one sheet per list, and never a formula. XML attributes become `@` keys and element text `#text`, both ways.
+- **Audio and video inputs added in v0.2.0:** AIFF and AIFF-C (8 to 32-bit, float, mu-law and A-law) and MPEG-TS. When a transport stream holds something the browser cannot convert, such as MPEG-2 video from a TV recording, it is named before converting instead of being dropped.
+- **Archives:** a ZIP, TAR or GZ file gets **Extract files** instead of a list of outputs. Its files are listed with what each one is; download any of them, or select the ones that can be converted and add them to the list without choosing them again. Archives are never converted into another archive format.
 
 Anything that is lost or changed on the way (transparency, animation frames, a color profile, a character the PDF font lacks, a formula without a saved result) is listed under the file in a short note. Nothing is dropped silently.
 
@@ -58,9 +64,11 @@ Share copies the page's public address (for example `https://radmagelabs.com/fil
 - **Files stay on your device.** There is no server that receives files. Every conversion runs in this browser tab, in background workers, and the page's Content Security Policy only allows connections back to the site itself (to load the app's own code, fonts and codecs). It cannot send anything anywhere else.
 - **No accounts, no ads, no analytics.**
 - **What the network is used for:** loading the page, and the first time you use each kind of conversion, loading that converter (for example the HEIC decoder, or the PDF fonts). Once loaded, it keeps working offline while the tab stays open.
-- **Temporary storage:** audio and video results are written to your browser's private storage for this site (the origin private file system) so large results do not have to fit in memory. They are deleted when you remove them from the list, clear the list, or close the tab; files left behind by a tab that crashed are deleted the next time the page opens. Other results are held in memory. Only your theme and settings are remembered between visits, in local storage.
-- **Metadata is left behind.** Converted pictures carry no EXIF data (camera, date, GPS location). Audio and video keep descriptive tags such as title and artist, but not other container metadata, such as a phone's recording location.
+- **Temporary storage:** audio and video results, and files unpacked from archives, are written to your browser's private storage for this site (the origin private file system) so large files do not have to fit in memory. They are deleted when you remove them from the list (an archive's files stay while a file taken from it is still in the list), clear the list, or close the tab; files left behind by a tab that crashed are deleted the next time the page opens. In a private (Incognito) window the browser keeps this storage in memory instead of on disk, so very large results and archives use memory there. Other results are held in memory. Only your theme and settings are remembered between visits, in local storage.
+- **Metadata is left behind.** Converted pictures carry no EXIF data (camera, date, GPS location). Audio and video keep descriptive tags such as title and artist, but not other container metadata, such as a phone's recording location. To clean a photo without converting it, **Remove photo metadata** copies the picture data byte for byte and lists what it removed and kept; the picture itself can still show who or where it is.
 - **Files are treated as untrusted.** Detection reads the bytes, not the name, and warns when the extension is wrong. Images are checked for decompression bombs (a tiny file claiming billions of pixels) before decoding. DOCX and XLSX packages are inflated as a stream and counted before any library unpacks them, so ZIP bombs are refused even when their directory lies. XML with entity declarations (XXE, billion laughs) is refused, YAML alias bombs are refused, and nesting depth is limited. Markdown and HTML are sanitized with DOMPurify before use: scripts, event handlers, forms, frames and `javascript:` links are removed, nothing in a document is fetched, and macros and embedded objects in DOCX files are never run.
+- **SVG files are cleaned before they are drawn:** only drawing elements and attributes are kept; scripts, event handlers, HTML content, animation and every reference to a file, font or stylesheet outside the SVG are removed; SVGs that declare entities are refused. The cleaned drawing is then drawn as a picture, where browsers run nothing and fetch nothing.
+- **Archives are unpacked with limits on what they actually hold,** not on what their headers claim: compressed data is fed in small pieces and counted, a file that unpacks to more than its listed size or expands more than 1000 times is stopped, and the number of files and the total size are capped. Paths are only shown, never used: `..`, absolute paths and drive letters are dropped and each download gets a safe, unique name. Links, devices, encrypted files and unsupported compression methods are listed, not unpacked; archives inside archives are unpacked only when you ask. Checksums are verified.
 - **Spreadsheet formulas:** CSV results protect text cells that start with `=`, `+`, `-` or `@` with a leading apostrophe, so opening them in a spreadsheet cannot run a formula (you can turn this off). CSV to XLSX stores such cells as text, never as formulas.
 - **File names** are reduced to safe names before they are used for downloads or inside a ZIP: no paths, no characters Windows forbids, no reserved names and no text-direction tricks.
 
@@ -80,17 +88,19 @@ Which audio and video codecs work depends on the browser and the computer, becau
 ## Known limitations
 
 - **HEIC is read but not written.** The open HEVC encoders are GPL-licensed and patent-encumbered, and none is practical in a browser.
-- **AVI is not supported yet**, for reading or writing.
+- **AVI and WMA are not supported yet**, for reading or writing. RAR and 7-Zip archives are not supported.
 - **DOCX to PDF and PDF to DOCX are not offered.** Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges a document.
 - **Scanned PDFs need OCR** (optical character recognition), which FileConvert does not do. It says so when a PDF, or some of its pages, has no text layer.
 - **Markdown and HTML to PDF** keep the document's structure in a clean default style. Stylesheets and page layout CSS are not applied, and pictures from the web are not downloaded (they become their description). Only PNG and JPEG pictures embedded in the file are included.
 - **The PDF fonts cover Latin, Greek and Cyrillic.** Other scripts (Chinese, Japanese, Korean, Arabic, Hebrew, Hindi and others) are reported and do not show.
-- **Animated WebP, APNG and animated AVIF** become their first frame, with a note. Animated GIF keeps its animation.
+- **Animated AVIF** becomes its first frame, with a note. Animated WebP and APNG are read with the browser's ImageDecoder, which current Chrome, Edge and Firefox have.
+- **SVG text** uses the fonts installed on your device; fonts an SVG links to on the web are not downloaded, and pictures it links to are left out (pictures embedded in the file are drawn).
+- **Compressed AIFF-C** (such as IMA ADPCM) is refused with its codec named. In an MPEG-TS file, MPEG-2 video converts to its sound only, and sound in a private stream (AVCHD camcorders) is reported, not converted.
 - **Color profiles:** the browser applies the color profile of the pictures it decodes (JPG, PNG, WebP, AVIF, GIF, BMP). HEIC and TIFF color profiles are not applied, so wide-gamut photos can look slightly less vivid.
 - **GIF output** holds 256 colors per frame without dithering, so photos and gradients can show banding. Video to GIF is limited to 900 frames.
 - **HDR video** that is re-encoded is not tone-mapped and can look washed out.
 - **CSV has no types:** with number detection on, a digit string without leading zeros (such as `10001`) becomes a number; turn detection off to keep everything as text.
-- **Size limits** keep the browser from running out of memory: pictures up to 100 megapixels and 300 MB, audio and video up to 8 GB, PDFs up to 500 MB, text to PDF up to 8 MB, data files up to 200 MB, and the batch ZIP up to about 4 GB.
+- **Size limits** keep the browser from running out of memory: pictures up to 100 megapixels and 300 MB, audio and video up to 8 GB, PDFs up to 500 MB, text to PDF up to 8 MB, data files up to 200 MB, SVG files up to 20 MB, archives up to 10,000 files and 4 GB unpacked (1 GB where the browser has no private file storage), a combined TIFF up to 1,000 pages, and the batch ZIP up to about 4 GB.
 
 ## Development
 

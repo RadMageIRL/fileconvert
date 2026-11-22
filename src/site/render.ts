@@ -90,25 +90,28 @@ export function formatsHtml(): string {
   const card = (title: string, pairs: Array<[string, string]>, note: string) =>
     `<div class="fmt"><h3>${esc(title)}</h3><ul class="pairs">${pairs.map(([a, b]) => `<li><b>${esc(a)}</b> to ${esc(b)}</li>`).join('')}</ul><p>${esc(note)}</p></div>`;
   return [
-    card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF', 'MP4, WebM or GIF']], 'Resize, set quality, keep transparency where the format allows it. HEIC and SVG are read but not written; an SVG is drawn at the size you choose.'),
+    card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF, WebP or PNG', 'GIF, WebP, MP4 or WebM, keeping the animation']], 'Resize, set quality, keep transparency where the format allows it. HEIC and SVG are read but not written; an SVG is drawn at the size you choose.'),
     card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
     card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
     card('Documents', routes('document'), 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
     card('Data', routes('data'), 'Nested data, encodings, worksheets, dates and spreadsheet formulas are handled explicitly.'),
+    card('Archives', [['ZIP, TAR, GZ, .tar.gz', 'unpacked: download the files inside, or convert them without adding them again']], 'Archives are unpacked, never converted into another archive format. Links, encrypted files and archives inside archives are listed, not opened.'),
   ].join('');
 }
 
 export function limitsHtml(): string {
   const items = [
     'HEIC is read but not written: the open HEVC encoders are GPL-licensed and patent-encumbered, and none is practical in a browser.',
-    'AVI is not supported yet, for reading or writing. MP4, WebM, MOV and MKV are.',
+    'AVI and WMA are not supported yet. MP4, WebM, MOV, MKV and MPEG-TS video and AIFF audio are read.',
     'Audio and video use your browser\'s WebCodecs. Current Chrome, Edge and Firefox have them. Which codecs work depends on the browser and the computer: Firefox cannot decode HEVC video, for example, and AAC encoding falls back to a built-in encoder where the browser has none.',
     'DOCX to PDF and PDF to DOCX are not offered. Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges your document.',
     'Markdown and HTML to PDF keep the document structure (headings, lists, tables, code, links, embedded PNG and JPEG pictures) in a clean default style. Stylesheets are not applied and remote images are not downloaded.',
     'The PDF font covers Latin, Greek and Cyrillic. Other scripts, such as Chinese, Arabic or Hindi, are reported and do not show.',
     'Animated GIF, WebP and PNG (APNG) keep their animation as GIF, WebP, MP4 or WebM; formats that hold one picture get the first frame, and the menu says which is which. Animated WebP and APNG need ImageDecoder, which current Chrome, Edge and Firefox have. Animated AVIF is read as its first frame.',
-    'Pictures lose their metadata (EXIF, GPS). HEIC and TIFF color profiles are not applied.',
-    `Size limits: pictures up to ${LIMITS.imagePixels / 1e6} megapixels and ${formatBytes(LIMITS.imageBytes)}, audio and video up to ${formatBytes(LIMITS.mediaBytes)}, PDFs up to ${formatBytes(LIMITS.pdfBytes)}, text to PDF up to ${formatBytes(LIMITS.textToPdfBytes)}, data files up to ${formatBytes(LIMITS.dataBytes)}.`,
+    'Converted pictures lose their metadata (EXIF, GPS). Remove photo metadata takes it out of JPG, PNG and WebP photos without converting them. HEIC and TIFF color profiles are not applied.',
+    'SVG files are cleaned before they are drawn: scripts, animation, HTML content and anything outside the file (images, fonts, stylesheets) are removed, and text uses the fonts on this device.',
+    'ZIP, TAR and GZ archives are unpacked; RAR and 7-Zip are not supported. Encrypted, linked and unusually compressed files in an archive are listed but not unpacked.',
+    `Size limits: pictures up to ${LIMITS.imagePixels / 1e6} megapixels and ${formatBytes(LIMITS.imageBytes)}, audio and video up to ${formatBytes(LIMITS.mediaBytes)}, PDFs up to ${formatBytes(LIMITS.pdfBytes)}, text to PDF up to ${formatBytes(LIMITS.textToPdfBytes)}, data files up to ${formatBytes(LIMITS.dataBytes)}, SVG files up to ${formatBytes(LIMITS.svgBytes)}, archives up to ${LIMITS.archiveEntries.toLocaleString('en-US')} files and ${formatBytes(LIMITS.archiveBytes)} unpacked.`,
   ];
   return items.map(i => `<li>${esc(i)}</li>`).join('');
 }

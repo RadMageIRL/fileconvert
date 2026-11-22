@@ -73,4 +73,19 @@ test('TSV is its own format: recognized by name, converted to CSV and XLSX, and 
   const tsv = await download(page, 'records.json', info);
   expect(tsv.filename).toBe('records.tsv');
   expect(readFileSync(tsv.path, 'utf8').split('\r\n')[0]).toBe('\ufeffid\tname\temail\tactive\tscore\ttags\taddress.city\taddress.zip\tnote');
+
+  // TSV to JSON, CSV to TSV, Excel to TSV.
+  await convert(page, 'table.tsv', 'JSON');
+  expect(JSON.parse(readFileSync((await download(page, 'table.tsv', info)).path, 'utf8'))).toEqual([{ name: 'Ada', note: 'a, b' }, { name: 'Grace', note: '=1+1' }]);
+  await addFiles(page, [fx('data/people.csv'), fx('data/workbook.xlsx')]);
+  await convert(page, 'people.csv', 'TSV');
+  const tsvPath = (await download(page, 'people.csv', info)).path;
+  const fromCsv = readFileSync(tsvPath, 'utf8');
+  // Python's csv module reads the TSV (excel-tab) back to exactly the rows it reads from the CSV.
+  const rows = (path: string, dialect: string) => JSON.parse(execFileSync(PYTHON, ['-I', '-c', 'import csv, sys, json; print(json.dumps(list(csv.reader(open(sys.argv[1], encoding="utf-8-sig", newline=""), dialect=sys.argv[2]))))', path, dialect], { encoding: 'utf8' }));
+  expect(rows(tsvPath, 'excel-tab')).toEqual(rows(fx('data/people.csv'), 'excel'));
+  // A field holding quote marks is quoted, as Excel and Python's excel-tab dialect write it, so it reads back exactly.
+  expect(fromCsv.split('\r\n').slice(0, 2)).toEqual(['\ufeffid\tname\temail\tamount\tjoined\tzip\tcomment', '1\tAda Lovelace\tada@example.com\t1200.50\t2024-01-15\t01234\t"Says ""hello"", often"']);
+  await convert(page, 'workbook.xlsx', 'TSV');
+  expect(readFileSync((await download(page, 'workbook.xlsx', info)).path, 'utf8')).toContain('Ada\t2024-01-15\t1200.5\t01234\tTRUE');
 });

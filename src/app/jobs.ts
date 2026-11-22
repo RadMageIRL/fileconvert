@@ -7,7 +7,8 @@ import { formatBytes, LIMITS } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
 import { sniffBlob, type Sniffed } from '../core/sniff';
-import { deleteTempFile } from '../core/tempstore';
+import { deleteTempFile, deleteTempPrefix } from '../core/tempstore';
+import type { ExtractResult, Extracted, Skipped } from '../engines/archive/extract';
 import type { DataResult } from '../engines/data/options';
 import type { FontFile } from '../engines/document/fonts';
 import { readHeader } from '../engines/image/header';
@@ -55,6 +56,17 @@ export interface Job {
   startedAt?: number;
   /** Conversions finished so far (done, failed or canceled), shown on the row for the tests. */
   runs: number;
+  /** An archive's unpacked files, each with the format found in its bytes (null when it cannot be converted). */
+  archive?: { entries: ArchiveEntry[]; skipped: Skipped[] };
+  /** Temporary files of an unpacked archive, by name prefix. */
+  tempPrefix?: string;
+  /** The archive a file was taken from, by job id: its temporary files must outlive this job. */
+  parent?: number;
+}
+
+export interface ArchiveEntry extends Extracted {
+  format: FormatId | null;
+  label: string;
 }
 
 // Each Worker is created with the URL written inline, the form the bundler recognizes and builds.
@@ -64,7 +76,8 @@ export class Engines {
   inspect = new Pool(() => new Worker(new URL('../workers/media.worker.ts', import.meta.url), { type: 'module' }), 1);
   document = new Pool(() => new Worker(new URL('../workers/document.worker.ts', import.meta.url), { type: 'module' }), 1);
   data = new Pool(() => new Worker(new URL('../workers/data.worker.ts', import.meta.url), { type: 'module' }), 1);
-  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data]; }
+  archive = new Pool(() => new Worker(new URL('../workers/zip.worker.ts', import.meta.url), { type: 'module' }), 1);
+  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data, this.archive]; }
 }
 
 /**
@@ -136,6 +149,14 @@ export class Queue {
       }
       const fmt = FORMATS[s.format];
       const parts = [s.label, formatBytes(job.file.size)];
+      if (fmt.category === 'archive') {
+        // An archive is unpacked, not converted: its row offers Extract files instead of a list of formats.
+        job.info = parts.join(', ');
+        job.notes.push('An archive. Unpack it to download its files or convert them; FileConvert does not turn one archive format into another.');
+        job.status = 'ready';
+        this.onChange(job);
+        return;
+      }
       const missing = missingCapability(fmt.category);
       if (missing) {
         job.status = 'unsupported';
@@ -242,11 +263,17 @@ export class Queue {
   /** Queues every job that is ready (or finished with a different output than now chosen). */
   convertAll(): void {
     for (const j of this.jobs) {
+      // Archives are unpacked one at a time, on request; Convert all converts.
+      if (j.format && FORMATS[j.format].category === 'archive') continue;
       if (j.status === 'ready' || j.status === 'canceled' || j.status === 'failed') this.convert(j);
     }
   }
 
   convert(job: Job): void {
+    if (job.format && FORMATS[job.format].category === 'archive' && (job.status === 'ready' || job.status === 'failed' || job.status === 'canceled')) {
+      void this.extract(job);
+      return;
+    }
     if (!job.format || !job.target || job.status === 'converting' || job.status === 'queued' || job.status === 'checking' || job.status === 'unsupported') return;
     job.status = 'queued';
     job.error = undefined;
@@ -264,6 +291,10 @@ export class Queue {
   }
 
   cancel(job: Job): void {
+    if (job.status === 'converting' && job.format && FORMATS[job.format].category === 'archive') {
+      job.controller?.abort();
+      return;
+    }
     if (job.status === 'queued') {
       this.pending = this.pending.filter(j => j !== job);
       if (job.reserved && !job.outputs.some(o => o.name === job.reserved)) this.names.release(job.reserved);
@@ -283,7 +314,71 @@ export class Queue {
     this.cancel(job);
     this.dropOutputs(job);
     this.jobs = this.jobs.filter(j => j !== job);
+    this.dropArchive(job);
+    // A file taken from an archive that was already removed: the archive's files go once none is left.
+    if (job.parent !== undefined && !this.jobs.some(j => j.id === job.parent)) {
+      const orphans = this.jobs.filter(j => j.parent === job.parent);
+      if (!orphans.length && this.session) void deleteTempPrefix(this.session, `arc-${job.parent}-`);
+    }
     this.onListChange();
+  }
+
+  /** Deletes an archive's unpacked files, unless files taken from it are still in the list. */
+  private dropArchive(job: Job): void {
+    if (!job.tempPrefix || !this.session) return;
+    if (this.jobs.some(j => j.parent === job.id)) return;
+    // Every run of this archive, including one kept earlier for files taken from it.
+    void deleteTempPrefix(this.session, `arc-${job.id}-`);
+  }
+
+  /** Unpacks an archive in the archive worker, then reads what each file is. */
+  private async extract(job: Job): Promise<void> {
+    if (job.tempPrefix && this.session && !this.jobs.some(j => j.parent === job.id)) await deleteTempPrefix(this.session, job.tempPrefix);
+    const controller = new AbortController();
+    Object.assign(job, { controller, status: 'converting', stage: 'Unpacking', fraction: 0, error: undefined, warnings: [], archive: undefined });
+    job.startedAt = performance.now();
+    this.onChange(job);
+    const prefix = `arc-${job.id}-${Date.now()}`;
+    const temp = this.session ? { session: this.session, prefix } : null;
+    job.tempPrefix = temp ? prefix : undefined;
+    try {
+      const r = await this.engines.archive.run<ExtractResult>('extract', { file: job.file, kind: job.format, name: job.name, temp }, {
+        signal: controller.signal,
+        onProgress: p => { if (p.fraction !== undefined) job.fraction = p.fraction; this.onChange(job); },
+      });
+      job.stage = 'Checking the files';
+      this.onChange(job);
+      const entries: ArchiveEntry[] = [];
+      for (const e of r.entries) {
+        const s = await sniffBlob(e.file, e.name);
+        const ok = s.format !== null && (FORMATS[s.format].category === 'archive' || targetsFor(s.format).length > 0) && !missingCapability(FORMATS[s.format].category);
+        entries.push({ ...e, format: ok ? s.format : null, label: s.label });
+      }
+      job.archive = { entries, skipped: r.skipped };
+      job.warnings = [...r.warnings];
+      if (r.skipped.length) job.warnings.push(`${r.skipped.length} ${r.skipped.length === 1 ? 'entry was' : 'entries were'} not unpacked; ${r.skipped.length === 1 ? 'it is' : 'they are'} listed with the reason.`);
+      const size = entries.reduce((n, e) => n + e.size, 0);
+      job.summary = `${entries.length} ${entries.length === 1 ? 'file' : 'files'}, ${formatBytes(size)}`;
+      job.status = 'done';
+      job.fraction = 1;
+    } catch (e) {
+      if (this.session) void deleteTempPrefix(this.session, prefix);
+      job.tempPrefix = undefined;
+      if (e instanceof CanceledError || controller.signal.aborted) { job.status = 'canceled'; job.error = undefined; }
+      else { job.status = 'failed'; job.error = isLoadFailure(e) ? loadFailureMessage() : (e as Error).message || 'The archive could not be unpacked.'; }
+    }
+    job.controller = undefined;
+    job.stage = undefined;
+    job.runs++;
+    this.onChange(job);
+  }
+
+  /** Adds files unpacked from an archive to the list, without uploading or copying them. */
+  addFromArchive(job: Job, indexes: number[]): Job[] {
+    const entries = indexes.map(i => job.archive?.entries[i]).filter((e): e is ArchiveEntry => !!e && e.format !== null);
+    const added = this.add(entries.map(e => new File([e.file], e.name, { type: FORMATS[e.format!].mime })));
+    for (const a of added) a.parent = job.id;
+    return added;
   }
 
   clear(): void {
@@ -291,7 +386,9 @@ export class Queue {
       this.cancel(j);
       this.dropOutputs(j);
     }
+    const archives = this.jobs.filter(j => j.tempPrefix);
     this.jobs = [];
+    for (const a of archives) this.dropArchive(a);
     this.names.clear();
     this.onListChange();
   }

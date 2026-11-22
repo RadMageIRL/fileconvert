@@ -41,6 +41,13 @@ export const LIMITS = {
   zipEntries: 20_000,
   zipInflatedBytes: 1024 * MB,
   zipRatio: 1000,
+  /** Archives that are unpacked: files, bytes unpacked in all (in private storage, or in memory without it), and
+   *  the expansion that marks a decompression bomb once a file is past 64 MB. */
+  archiveEntries: 10_000,
+  archiveBytes: 4096 * MB,
+  archiveInMemoryBytes: 1024 * MB,
+  archiveRatio: 1000,
+  archiveRatioFloor: 64 * MB,
   /** The batch ZIP download. */
   batchZipBytes: 4000 * MB,
 } as const;

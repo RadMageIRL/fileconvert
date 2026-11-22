@@ -700,4 +700,4 @@ export function commonPages(): Page[] {
   return PAGES.filter(p => p.common !== undefined).sort((a, b) => a.common! - b.common!);
 }
 
-export const CATEGORY_LABELS: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data' };
+export const CATEGORY_LABELS: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data', archive: 'Archives' };

@@ -58,6 +58,38 @@ describe('ICO', () => {
     }
   });
 
+  /** A one-picture ICO holding an 8 x 2 24-bit bitmap, its AND mask rows (top row first), and a listed size. */
+  function dibIco(maskTop: number, maskBottom: number, listedSize?: number): Uint8Array {
+    const xorStride = 24, andStride = 4, w = 8, h = 2;
+    const body = new Uint8Array(40 + xorStride * h + andStride * h);
+    const v = new DataView(body.buffer);
+    v.setUint32(0, 40, true); v.setInt32(4, w, true); v.setInt32(8, h * 2, true); v.setUint16(12, 1, true); v.setUint16(14, 24, true);
+    for (let i = 40; i < 40 + xorStride * h; i += 3) body.set([0, 128, 255], i); // orange, as blue-green-red
+    // Rows are stored bottom-up: the bottom row first.
+    body[40 + xorStride * h] = maskBottom;
+    body[40 + xorStride * h + andStride] = maskTop;
+    const file = new Uint8Array(22 + body.length);
+    const d = new DataView(file.buffer);
+    d.setUint16(2, 1, true); d.setUint16(4, 1, true);
+    file[6] = w; file[7] = h; d.setUint16(10, 1, true); d.setUint16(12, 24, true);
+    d.setUint32(14, listedSize ?? body.length, true); d.setUint32(18, 22, true);
+    file.set(body, 22);
+    return file;
+  }
+
+  test('the AND mask is read most significant bit first, row by row from the bottom', () => {
+    const b = dibIco(0b10000000, 0b00000001);
+    const d = decodeIcoBitmap(b, readIcoDirectory(b)[0]);
+    const alpha = (x: number, y: number) => d.rgba[(y * 8 + x) * 4 + 3];
+    expect([alpha(0, 0), alpha(7, 0), alpha(0, 1), alpha(7, 1)]).toEqual([0, 255, 255, 0]);
+    expect([...d.rgba.slice(4, 8)]).toEqual([255, 128, 0, 255]);
+  });
+
+  test('a bitmap listed as smaller than its pixels need is refused as cut short', () => {
+    const b = dibIco(0, 0, 40 + 10);
+    expect(() => decodeIcoBitmap(b, readIcoDirectory(b)[0])).toThrow('This ICO picture is cut short.');
+  });
+
   test('a directory pointing past the end of the file, and a file that is not an icon, are refused', () => {
     expect(() => readIcoDirectory(fx('hostile/bad-offsets.ico'))).toThrow('None of the pictures in this ICO file could be read');
     expect(() => readIcoDirectory(fx('image/alpha.png'))).toThrow('not a valid ICO file');

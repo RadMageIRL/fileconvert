@@ -12,7 +12,7 @@ const BLUE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYP
 const KITCHEN_SINK = `<?xml version="1.0"?>
 <?xml-stylesheet href="https://example.com/pi.css" type="text/css"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="30" viewBox="0 0 40 30" onload="fetch('https://example.com/onload'); window.top.__pwned = 1">
-  <style>@import url(https://example.com/import.css); @font-face { font-family: x; src: url(https://example.com/font.woff); } .e { fill: url(https://example.com/paint.svg#p); }</style>
+  <style>@import url(https://example.com/import.css); @import "https://example.com/import-string.css"; @font-face { font-family: x; src: url(https://example.com/font.woff); } .e { fill: url(https://example.com/paint.svg#p); }</style>
   <style>rect.esc { background: u\\72l(https://example.com/escaped); }</style>
   <script>window.top.__pwned = 2; fetch('https://example.com/script');</script>
   ${RED_BOX}
@@ -54,9 +54,12 @@ test('a hostile SVG is drawn correctly while nothing in it runs and nothing is f
   const notes = row(page, 'attack.svg').locator('.job-notes');
   // The script element and the javascript: link.
   await expect(notes).toContainText('2 scripts were removed; nothing in the file ran.');
-  await expect(notes).toContainText('event handlers were removed');
-  await expect(notes).toContainText('outside the SVG were removed; nothing was downloaded.');
-  await expect(notes).toContainText('HTML content (foreignObject) was removed');
+  // onload and onclick (the <set> that adds one is animation).
+  await expect(notes).toContainText('2 event handlers were removed.');
+  // Exact, so that each kind is known to be removed: the stylesheet instruction, @import (both forms), @font-face, three CSS
+  // url()s, the remote and same-origin images, the nested SVG image, <use> and <feImage>.
+  await expect(notes).toContainText('12 references to files, fonts or stylesheets outside the SVG were removed; nothing was downloaded.');
+  await expect(notes).toContainText('1 block of HTML content (foreignObject) was removed');
   await expect(notes).toContainText('Animation was removed');
   await expect(notes).toContainText('A stylesheet with CSS escapes was removed');
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();

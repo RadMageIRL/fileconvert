@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { describe, expect, test } from 'vitest';
-import { allConversions, effectiveCategory, engineFor, FORMATS, formatByExtension, targetsFor } from '../../src/core/formats';
+import { allConversions, ANIMATED_IN, effectiveCategory, engineFor, FORMATS, formatByExtension, targetsFor } from '../../src/core/formats';
 import { isLoadFailure } from '../../src/core/loading';
 import { NameRegistry, safeBase } from '../../src/core/naming';
 import { serve } from '../../src/core/rpc';
@@ -55,7 +55,9 @@ describe('format detection reads the bytes, not the name', () => {
     const avi = sniffFile('video/clip.avi');
     expect(avi.reason).toMatch(/AVI is not supported yet/);
     const zip = zipSync({ 'a.txt': new Uint8Array([65]) });
-    expect(sniff(zip, zip, zip.length, 'x.zip').reason).toMatch(/Extract the files/);
+    expect(sniff(zip, zip, zip.length, 'x.zip')).toMatchObject({ format: 'zip', label: 'ZIP archive' });
+    const rar = new TextEncoder().encode('Rar!\u001a\u0007\u0000');
+    expect(sniff(rar, rar, rar.length, 'x.rar').reason).toBe('RAR archives are not supported. ZIP, TAR and GZ archives can be unpacked.');
     const svg = new TextEncoder().encode('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect(sniff(svg, svg, svg.length, 'x.svg').label).toBe('SVG image');
   });
@@ -73,8 +75,12 @@ describe('format registry', () => {
     expect(pairs.length).toBeGreaterThan(100);
     for (const [from, to] of pairs) {
       expect(FORMATS[to]).toBeDefined();
-      expect(engineFor(from, to, from === 'gif' ? { animated: true } : {})).toBeTruthy();
+      expect(engineFor(from, to, ANIMATED_IN.includes(from) ? { animated: true } : {})).toBeTruthy();
     }
+    // Animated WebP and PNG to video are listed, so search answers them.
+    const keys = new Set(pairs.map(([a, b]) => `${a}>${b}`));
+    for (const k of ['gif>mp4', 'webp>mp4', 'webp>webm', 'png>mp4', 'png>webm']) expect(keys.has(k), k).toBe(true);
+    expect(keys.has('jpg>mp4')).toBe(false);
   });
 
   test('HEIC is read but never offered as an output; AVI does not exist', () => {

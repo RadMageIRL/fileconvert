@@ -2,7 +2,7 @@
 // only filters it, and answers "does it convert X to Y?" from the format registry for conversions that have no
 // page of their own. Unsupported formats people often ask for get the same reason the converter would give.
 
-import { allConversions, FORMATS, targetsFor, type FormatId } from '../core/formats';
+import { allConversions, ANIMATED_IN, FORMATS, targetsFor, type FormatId } from '../core/formats';
 import { $, clear, h } from './dom';
 
 const STOP = new Set(['to', 'into', 'convert', 'converter', 'conversion', 'converting', 'file', 'files', 'from', 'a', 'an', 'the', 'online', 'free', 'and', 'or', 'as', 'in', 'for', 'my']);
@@ -15,7 +15,7 @@ for (const f of Object.values(FORMATS)) {
 }
 for (const [w, id] of [['excel', 'xlsx'], ['spreadsheet', 'xlsx'], ['word', 'docx'], ['quicktime', 'mov'], ['matroska', 'mkv']] as const) WORDS.set(w, id);
 
-const ARCHIVE = 'Archives are not converted. Extract the files and add them instead.';
+const ARCHIVE = 'RAR and 7-Zip archives are not supported. ZIP, TAR and GZ archives can be unpacked, and their files converted.';
 const RAW = 'Camera RAW files are not supported. Export a JPG or TIFF from your camera software first.';
 /** Formats that are recognized but not converted, with the reason. Kept in step with src/core/sniff.ts. */
 export const NOT_SUPPORTED: Readonly<Record<string, string>> = {
@@ -27,7 +27,7 @@ export const NOT_SUPPORTED: Readonly<Record<string, string>> = {
   odt: 'OpenDocument files (ODT, ODS, ODP) are not supported yet.', ods: 'OpenDocument files (ODT, ODS, ODP) are not supported yet.', odp: 'OpenDocument files (ODT, ODS, ODP) are not supported yet.',
   epub: 'EPUB books are not supported.', rtf: 'RTF documents are not supported.',
   psd: 'Photoshop files (PSD) are not supported.', jxl: 'JPEG XL is not supported yet.',
-  zip: ARCHIVE, rar: ARCHIVE, '7z': ARCHIVE, tar: ARCHIVE, gz: ARCHIVE,
+  rar: ARCHIVE, '7z': ARCHIVE,
   raw: RAW, cr2: RAW, cr3: RAW, nef: RAW, arw: RAW, dng: RAW, orf: RAW, rw2: RAW, raf: RAW,
 };
 
@@ -61,7 +61,14 @@ const listOf = (ids: FormatId[]) => ids.map(label).join(', ');
 export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boolean): string[] {
   const out = [...q.unsupported];
   const [a, b] = q.formats;
-  if (a && b) {
+  const archive = (f: FormatId | undefined) => !!f && FORMATS[f].category === 'archive';
+  if (archive(a)) {
+    // Archives are unpacked, never converted into another archive format.
+    out.push(`${label(a)} archives are unpacked, not converted: add one to the converter at the top of the page and choose Extract files, then download the files inside or convert them.`);
+    if (b && archive(b) && b !== a) out.push(`FileConvert does not turn one archive format into another, such as ${label(a)} to ${label(b)}.`);
+  } else if (archive(b)) {
+    out.push(`FileConvert unpacks ZIP, TAR and GZ archives but does not make them, apart from downloading several converted files together as one ZIP.`);
+  } else if (a && b) {
     if (PAIRS.has(`${a}>${b}`)) {
       if (!hasPage(a, b)) out.push(`${label(a)} to ${label(b)} is supported. Add your file to the converter at the top of the page and choose ${label(b)}.`);
     } else if (b === 'heic') {
@@ -70,7 +77,7 @@ export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boo
       out.push(`FileConvert does not convert ${label(a)} to ${label(b)}.`);
     }
   } else if (a) {
-    const to = targetsFor(a, a === 'gif' ? { animated: true } : {}).filter(t => t !== a);
+    const to = targetsFor(a, ANIMATED_IN.includes(a) ? { animated: true } : {}).filter(t => t !== a);
     const from = (Object.keys(FORMATS) as FormatId[]).filter(x => x !== a && PAIRS.has(`${x}>${a}`));
     if (to.length) out.push(`${label(a)} converts to ${listOf(to)}.`);
     if (from.length) out.push(`${label(a)} can be made from ${listOf(from)}.`);

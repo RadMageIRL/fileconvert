@@ -55,8 +55,24 @@ test('a conversion page loads with its content, and the catalog search works', a
   await expect(page.locator('html[data-ready="true"]')).toBeAttached();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Convert JSON to CSV');
   await page.getByRole('searchbox', { name: 'Search conversions' }).fill('heic');
-  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG']);
+  // The TIFF tool takes HEIC pictures, so it matches too.
+  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF']);
   await addFiles(page, [fx('data/records.json')]);
   await expect(row(page, 'records.json').getByRole('combobox', { name: 'Convert records.json to' })).toHaveValue('csv');
   expect(errors).toEqual([]);
+});
+
+test('a ZIP is unpacked, and a file from it converts, without OffscreenCanvas or WebCodecs', async ({ page }) => {
+  const { zipSync, strToU8 } = await import('fflate');
+  await openApp(page);
+  const zip = zipSync({ 'data/records.json': strToU8('[{"a":1,"b":"x"},{"a":2,"b":"y"}]'), 'notes.md': strToU8('# Notes\n') });
+  await addFiles(page, [{ name: 'bundle.zip', mimeType: 'application/zip', buffer: Buffer.from(zip) }]);
+  await row(page, 'bundle.zip').getByRole('button', { name: 'Extract files' }).click();
+  await expect(row(page, 'bundle.zip').locator('.arc-item .arc-path')).toHaveText(['data/records.json', 'notes.md']);
+  await row(page, 'bundle.zip').getByRole('checkbox', { name: 'Select data/records.json' }).check();
+  await row(page, 'bundle.zip').getByRole('button', { name: 'Add 1 to the list' }).click();
+  await convert(page, 'records.json', 'CSV');
+  await expectDone(page, 'records.json');
+  // Blob.text() decodes as UTF-8 and drops the byte order mark the CSV starts with.
+  expect(await resultText(page, 'records.json')).toBe('a,b\r\n1,x\r\n2,y\r\n');
 });

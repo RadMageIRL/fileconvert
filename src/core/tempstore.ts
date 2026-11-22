@@ -91,6 +91,11 @@ export async function deleteTempFile(session: string, name: string): Promise<voi
   }
 }
 
+/** Page side: deletes every temporary file whose name starts with a prefix (all files of one archive). */
+export async function deleteTempPrefix(session: string, prefix: string): Promise<void> {
+  for (const name of await listSession(session)) if (name.startsWith(prefix)) await deleteTempFile(session, name);
+}
+
 /** Page side: deletes everything this tab stored. */
 export async function clearSession(session: string): Promise<void> {
   try {

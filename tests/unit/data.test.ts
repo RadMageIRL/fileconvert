@@ -264,7 +264,8 @@ describe('large inputs', () => {
     expect(run('csv', 'xlsx', csv).summary).toBe('300,001 rows, 2 columns');
     const json = enc(JSON.stringify(Array.from({ length: 300_000 }, (_, i) => [i, 'x'])));
     expect(run('json', 'csv', json).summary).toBe('300,000 rows, 2 columns');
-  });
+    // About 2 s alone; other test files unpacking archives run alongside it.
+  }, 30_000);
 });
 
 describe('boundaries', () => {

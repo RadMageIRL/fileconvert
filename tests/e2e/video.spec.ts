@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { expect, test } from '@playwright/test';
 import { addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, ffdecode, ffprobe, fx, openApp, pillow, row, tempDir, writeTemp } from './helpers';
 
-const INPUTS = ['clip.mp4', 'clip.webm', 'clip-vp8.webm', 'clip.mov', 'clip.mkv'];
+// MPEG-TS (v0.2.0) holds the same 2 second, 320 x 240 picture with H.264 and AAC.
+const INPUTS = ['clip.mp4', 'clip.webm', 'clip-vp8.webm', 'clip.mov', 'clip.mkv', 'clip-h264-aac.ts'];
 const OUTPUTS: Array<[string, string, string, string, string | null]> = [
   // label, extension, FFmpeg container, video codec, audio codec
   ['MP4', 'mp4', 'mov,mp4,m4a,3gp,3g2,mj2', 'h264', 'aac'],

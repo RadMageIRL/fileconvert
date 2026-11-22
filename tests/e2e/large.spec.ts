@@ -129,3 +129,70 @@ test('a 50 MB CSV to JSON and to XLSX', async ({ page }) => {
   record(`50 MB CSV to XLSX: ${((Date.now() - t1) / 1000).toFixed(1)} s, worst main-thread gap ${worst} ms`);
   expect(worst).toBeLessThan(500);
 });
+
+/** Private memory of every process of a Chrome started with this profile folder, in MB (Windows only; 0 elsewhere). */
+async function browserMemory(profile: string): Promise<number> {
+  if (process.platform !== 'win32') return 0;
+  const { execFile } = await import('node:child_process');
+  const marker = profile.split(/[\\/]/).pop()!;
+  const script = `(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${marker}*' } | Measure-Object -Property PrivatePageCount -Sum).Sum`;
+  return new Promise(resolve => execFile('powershell', ['-NoProfile', '-Command', script], (err, out) => resolve(err ? 0 : Number(String(out).trim()) / 1048576)));
+}
+
+// A normal, on-disk profile: Playwright's default contexts are off the record, and there, as in a private window,
+// Chrome keeps the private file system in memory (measured: the browser process grows by what is unpacked).
+test('a 1.2 GB ZIP is unpacked to private storage, not memory, and its files are byte-exact', async ({ baseURL }, info) => {
+  const src = make('archive-1200mb.zip', p => execFileSync(PYTHON, ['-I', '-c', [
+    'import sys, os, zipfile, hashlib, random',
+    'h = hashlib.sha256(); rnd = random.Random(7)',
+    'with zipfile.ZipFile(sys.argv[1], "w") as z:',
+    '    for name in ["random-1.bin", "random-2.bin"]:',
+    '        with z.open(zipfile.ZipInfo(name), "w", force_zip64=True) as f:',
+    '            for _ in range(25): f.write(rnd.randbytes(16 * 1048576))',
+    '    info = zipfile.ZipInfo("log.txt"); info.compress_type = zipfile.ZIP_DEFLATED',
+    '    with z.open(info, "w", force_zip64=True) as f:',
+    '        for block in range(400):',
+    '            chunk = "".join(f"{block * 26000 + i},event-{rnd.randrange(1000)},user{rnd.randrange(50000)},{rnd.random():.6f}\\n" for i in range(26000)).encode()',
+    '            h.update(chunk); f.write(chunk)',
+    'open(sys.argv[1] + ".sha256", "w").write(h.hexdigest())',
+  ].join('\n'), p], { timeout: 900_000 }));
+  const expectedSha = (await import('node:fs')).readFileSync(src + '.sha256', 'utf8').trim();
+  const { chromium } = await import('@playwright/test');
+  const { mkdtempSync } = await import('node:fs');
+  const profile = mkdtempSync(join(tmpdir(), 'fc-profile-'));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', baseURL, acceptDownloads: true });
+  const page = context.pages()[0] ?? await context.newPage();
+  await openApp(page);
+  await addFiles(page, [src]);
+  await expect(row(page, 'archive-1200mb.zip').getByRole('button', { name: 'Extract files' })).toBeVisible();
+  const base = await browserMemory(profile);
+  let peak = base;
+  let sampling = true;
+  const sampler = (async () => { while (sampling) { peak = Math.max(peak, await browserMemory(profile)); await new Promise(r => setTimeout(r, 1000)); } })();
+  const lag = await watchLag(page);
+  const t0 = Date.now();
+  await row(page, 'archive-1200mb.zip').getByRole('button', { name: 'Extract files' }).click();
+  await expect(row(page, 'archive-1200mb.zip')).toHaveClass(/done/, { timeout: 900_000 });
+  const secs = (Date.now() - t0) / 1000;
+  sampling = false;
+  await sampler;
+  const worst = await lag();
+  const items = row(page, 'archive-1200mb.zip').locator('.arc-item:not(.skipped)');
+  await expect(items).toHaveCount(3);
+  const unpacked = await page.evaluate(() => (window as unknown as { __fileconvert: { queue: { jobs: Array<{ archive?: { entries: Array<{ size: number }> } }> } } }).__fileconvert.queue.jobs[0].archive!.entries.reduce((n, e) => n + e.size, 0));
+  const out = info.outputPath('log.txt');
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 600_000 }), row(page, 'archive-1200mb.zip').getByRole('button', { name: 'Download log.txt' }).click()]);
+  await dl.saveAs(out);
+  const { createHash } = await import('node:crypto');
+  const { createReadStream } = await import('node:fs');
+  const sha = await new Promise<string>((resolve, reject) => { const h = createHash('sha256'); createReadStream(out).on('data', c => h.update(c)).on('end', () => resolve(h.digest('hex'))).on('error', reject); });
+  expect(sha).toBe(expectedSha);
+  const rise = peak - base;
+  record(`ZIP of ${(statSync(src).size / 1048576).toFixed(0)} MB unpacked to ${(unpacked / 1048576).toFixed(0)} MB in private storage: ${secs.toFixed(1)} s, browser memory rose ${rise.toFixed(0)} MB at most (from ${base.toFixed(0)} MB), worst main-thread gap ${worst} ms`);
+  expect(worst).toBeLessThan(500);
+  // Held in memory, the files alone would add 1,200 MB.
+  if (base) expect(rise).toBeLessThan(400);
+  await row(page, 'archive-1200mb.zip').getByRole('button', { name: 'Remove archive-1200mb.zip' }).click();
+  await expect.poll(() => page.evaluate(async () => (await (window as unknown as { __fileconvert: { tempFiles(): Promise<string[]> } }).__fileconvert.tempFiles()).length), { timeout: 60_000 }).toBe(0);
+  await context.close();
+});

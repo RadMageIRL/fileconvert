@@ -11,11 +11,11 @@ import { saveSettings, type Settings } from './settings';
 import type { ToolDefinition } from './tools';
 import type { Workspace } from './workspace';
 
-const CATEGORY_NAMES: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data' };
+const CATEGORY_NAMES: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data', archive: 'Archives' };
 /** An output's name in the menu; for an animation, whether the output keeps it moving. */
 const optionLabel = (t: FormatId, animated?: boolean) => !animated || FORMATS[t].category !== 'image' ? FORMATS[t].label
   : ANIMATED_OUT.includes(t) ? `${FORMATS[t].label} (animated)` : `${FORMATS[t].label} (first frame)`;
-const ICON_TEXT: Record<Category, string> = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC', data: 'DATA' };
+const ICON_TEXT: Record<Category, string> = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC', data: 'DATA', archive: 'ZIP' };
 
 export class App {
   queue: Queue;
@@ -25,6 +25,8 @@ export class App {
   private zipUrl: string | null = null;
   private downloadsInFlight = new Set<string>();
   private announced = new Set<string>();
+  /** Files ticked in each unpacked archive, by job id. */
+  private picked = new Map<number, Set<number>>();
   /** The open tool, if any. Tools replace the converter on their page. */
   workspace: Workspace | null = null;
 
@@ -165,7 +167,7 @@ export class App {
     $('count').textContent = n ? `(${n})` : '';
     const running = jobs.some(j => j.status === 'converting' || j.status === 'queued');
     $('cancel-all').hidden = !running;
-    const convertible = jobs.filter(j => j.status === 'ready' || j.status === 'failed' || j.status === 'canceled');
+    const convertible = jobs.filter(j => (j.status === 'ready' || j.status === 'failed' || j.status === 'canceled') && !(j.format && FORMATS[j.format].category === 'archive'));
     ($('convert-all') as HTMLButtonElement).disabled = convertible.length === 0;
     $('convert-all').textContent = convertible.length > 1 ? `Convert all (${convertible.length})` : 'Convert';
     const zip = this.queue.zipAllowed();
@@ -221,6 +223,7 @@ export class App {
     row.dataset.runs = String(job.runs);
     row.dataset.status = job.status;
     const cat = job.format ? effectiveCategory(job.format, job.traits) : null;
+    const isArchive = cat === 'archive';
     clear(row);
 
     const icon = h('div', { class: 'job-icon', 'aria-hidden': 'true' });
@@ -244,14 +247,14 @@ export class App {
       case 'ready': status.append(label('Ready')); break;
       case 'queued': status.append(label('Waiting')); break;
       case 'converting': {
-        status.append(label('Converting'));
+        status.append(label(isArchive ? 'Unpacking' : 'Converting'));
         // No value means "not measurable": the bar shows activity instead of an invented percentage.
         const p = h('progress', { max: 1, 'aria-label': `Converting ${job.name}` }) as HTMLProgressElement;
         if (job.fraction !== undefined) p.value = job.fraction;
         status.append(p, h('span', { class: 'pct' }, job.fraction !== undefined ? `${Math.floor(job.fraction * 100)}%` : ''), h('span', { class: 'job-info stage' }, job.stage ?? ''));
         break;
       }
-      case 'done': status.append(label(`Converted to ${FORMATS[job.madeAs ?? job.target!].label}`), h('span', { class: 'job-info' }, job.summary ?? '')); break;
+      case 'done': status.append(label(isArchive ? 'Unpacked' : `Converted to ${FORMATS[job.madeAs ?? job.target!].label}`), h('span', { class: 'job-info' }, job.summary ?? '')); break;
       case 'failed': status.append(label('Failed')); break;
       case 'canceled': status.append(label('Canceled')); break;
       case 'unsupported': status.append(label('Cannot convert')); break;
@@ -277,9 +280,10 @@ export class App {
     }
     const actions = h('div', { class: 'job-actions' });
     if (job.status === 'ready' || job.status === 'failed' || job.status === 'canceled') {
-      actions.append(h('button', { type: 'button', class: 'small primary', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, job.status === 'ready' ? 'Convert' : 'Try again'));
+      actions.append(h('button', { type: 'button', class: 'small primary', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, job.status === 'ready' ? (isArchive ? 'Extract files' : 'Convert') : 'Try again'));
     }
-    if (job.status === 'done' && job.target !== job.madeAs) {
+    if (isArchive) { /* an unpacked archive offers its files below, not another conversion */ }
+    else if (job.status === 'done' && job.target !== job.madeAs) {
       actions.append(h('button', { type: 'button', class: 'small primary', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, `Convert to ${FORMATS[job.target!].label}`));
     } else if (job.status === 'done') {
       actions.append(h('button', { type: 'button', class: 'small', 'data-key': 'convert', onclick: () => this.queue.convert(job) }, 'Convert again'));
@@ -298,9 +302,13 @@ export class App {
       side.append(outs);
     }
     row.append(icon, main, side);
+    if (isArchive && job.status === 'done' && job.archive) row.append(this.archiveList(job));
     if (focused) row.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)?.focus();
 
-    if (job.status === 'done') {
+    if (job.status === 'done' && isArchive) {
+      const key = `${job.id}:unpacked:${job.runs}`;
+      if (!this.announced.has(key)) { this.announced.add(key); this.announce(`${job.name} was unpacked: ${job.summary ?? ''}.`); }
+    } else if (job.status === 'done') {
       this.maybeThumb(job);
       const key = `${job.id}:${job.outputs.map(o => o.name).join(',')}`;
       if (!this.announced.has(key)) { this.announced.add(key); this.announce(`${job.name} converted to ${FORMATS[job.madeAs!].label}.`); }
@@ -309,6 +317,41 @@ export class App {
       if (!this.announced.has(key)) { this.announced.add(key); this.announce(`${job.name} failed: ${job.error}`); }
     }
     this.refreshChrome();
+  }
+
+  /** The files of an unpacked archive: download any of them, or tick the ones to add to the list for converting. */
+  private archiveList(job: Job): HTMLElement {
+    const { entries, skipped } = job.archive!;
+    const picked = this.picked.get(job.id) ?? new Set<number>();
+    this.picked.set(job.id, picked);
+    const SHOWN = 500;
+    const convertible = entries.map((e, i) => e.format ? i : -1).filter(i => i >= 0);
+    const add = h('button', { type: 'button', class: 'small primary', 'data-key': 'arc-add', disabled: picked.size === 0, onclick: () => {
+      const added = this.queue.addFromArchive(job, [...picked]);
+      picked.clear();
+      this.toast(`${added.length} ${added.length === 1 ? 'file was' : 'files were'} added to the list, ready to convert.`);
+      this.update(job);
+    } }, picked.size ? `Add ${picked.size} to the list` : 'Add to the list');
+    const all = h('button', { type: 'button', class: 'small', 'data-key': 'arc-all', disabled: convertible.length === 0, onclick: () => {
+      for (const i of convertible) picked.add(i);
+      this.update(job);
+    } }, `Select all that can be converted (${convertible.length})`);
+    const list = h('ul', { class: 'archive-list' });
+    entries.slice(0, SHOWN).forEach((e, i) => {
+      const box = e.format ? h('input', { type: 'checkbox', checked: picked.has(i), 'aria-label': `Select ${e.path}`, 'data-key': `arc-${i}` }) as HTMLInputElement : null;
+      box?.addEventListener('change', () => { if (box.checked) picked.add(i); else picked.delete(i); this.update(job); });
+      list.append(h('li', { class: e.format ? 'arc-item' : 'arc-item no-convert' },
+        box ?? h('span', { class: 'arc-spacer', 'aria-hidden': 'true' }),
+        h('span', { class: 'arc-path', title: e.path }, e.path),
+        h('span', { class: 'job-info' }, `${e.label}, ${formatBytes(e.size)}${e.format ? '' : ', cannot be converted'}`),
+        h('button', { type: 'button', class: 'small', 'data-key': `arc-dl-${i}`, 'aria-label': `Download ${e.path}`, onclick: () => this.saveDownload(e.file, e.name) }, 'Download')));
+    });
+    for (const s of skipped.slice(0, 50)) list.append(h('li', { class: 'arc-item skipped' }, h('span', { class: 'arc-spacer', 'aria-hidden': 'true' }), h('span', { class: 'arc-path', title: s.path }, s.path), h('span', { class: 'job-info' }, `Not unpacked: ${s.reason}`)));
+    const more = entries.length > SHOWN ? h('p', { class: 'note' }, `The first ${SHOWN} of ${entries.length} files are listed. Select all adds every file that can be converted.`) : null;
+    return h('details', { class: 'archive', open: true },
+      h('summary', {}, `Files in ${job.name} (${entries.length})`),
+      h('div', { class: 'archive-actions' }, all, add),
+      list, more);
   }
 
   private maybeThumb(job: Job): void {

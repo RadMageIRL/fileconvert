@@ -19,7 +19,9 @@ describe('house rules', () => {
   });
 
   test('no em dashes anywhere in the repository', () => {
-    const offenders = files.filter(f => TEXT.test(f) && read(f).includes('\u2014'));
+    // MPEG-TS video fixtures end in .ts but are binary; their bytes are not text.
+    const binary = (f: string) => /^tests\/fixtures\/video\/.*\.ts$/.test(f);
+    const offenders = files.filter(f => TEXT.test(f) && !binary(f) && read(f).includes('\u2014'));
     expect(offenders).toEqual([]);
   });
 

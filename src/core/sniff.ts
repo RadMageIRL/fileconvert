@@ -3,6 +3,7 @@
 // whole large file, and works the same in the browser and in Node (unit tests).
 
 import { extensionOf, formatByExtension, FORMATS, type FormatId } from './formats';
+import { isTarHeader } from '../engines/archive/tarheader';
 
 export const SNIFF_BYTES = 64 * 1024;
 
@@ -146,7 +147,7 @@ function sniffZip(head: Uint8Array, tail: Uint8Array, ext: string): Sniffed {
     // The directory is beyond the bytes read (a very large package). Let the engine check it fully.
     return ext === 'docx' ? { format: 'docx', label: 'Word document' } : { format: 'xlsx', label: 'Excel workbook' };
   }
-  return unsupported('ZIP archive', 'ZIP archives are not converted. Extract the files and add them instead.');
+  return { format: 'zip', label: 'ZIP archive' };
 }
 
 /** True when the bytes look like text: no NUL bytes outside a UTF-16 pattern and no other control bytes in bulk. */
@@ -196,7 +197,7 @@ function sniffText(head: Uint8Array, ext: string, size: number): Sniffed {
   return { format: 'txt', label: ext ? `Plain text (.${ext})` : 'Plain text' };
 }
 
-function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): Sniffed {
+function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string, name?: string): Sniffed {
   if (starts(head, [0xff, 0xd8, 0xff])) return { format: 'jpg', label: 'JPEG image' };
   if (starts(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { format: 'png', label: 'PNG image' };
   if (ascii(head, 0, 6) === 'GIF87a' || ascii(head, 0, 6) === 'GIF89a') return { format: 'gif', label: 'GIF image' };
@@ -229,14 +230,16 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): 
   if (ascii(head, 0, 4) === 'FORM' && (ascii(head, 8, 4) === 'AIFF' || ascii(head, 8, 4) === 'AIFC')) return { format: 'aiff', label: ascii(head, 8, 4) === 'AIFC' ? 'AIFF-C audio' : 'AIFF audio' };
   if (ascii(head, 0, 4) === 'OggS') return sniffOgg(head);
   if (ascii(head, 0, 1024).includes('%PDF-')) return { format: 'pdf', label: 'PDF document' };
-  if (starts(head, [0x50, 0x4b, 0x03, 0x04])) return sniffZip(head, tail, ext);
+  if (starts(head, [0x50, 0x4b, 0x03, 0x04]) || starts(head, [0x50, 0x4b, 0x05, 0x06])) return sniffZip(head, tail, ext);
+  // TAR: the ustar mark in the first header, or a valid header checksum on a .tar file (old TARs have no mark).
+  if (head.length >= 512 && (ascii(head, 257, 5) === 'ustar' || ext === 'tar') && isTarHeader(head)) return { format: 'tar', label: 'TAR archive' };
   // A UTF-16 byte order mark (FF FE, FE FF) also looks like an MPEG audio frame header; text wins.
   if ((starts(head, [0xff, 0xfe]) || starts(head, [0xfe, 0xff])) && looksLikeText(head)) return sniffText(head, ext, size);
   const mpeg = sniffMpegAudio(head, ext);
   if (mpeg) return mpeg;
-  if (ascii(head, 0, 4) === 'Rar!') return unsupported('RAR archive', 'Archives are not converted. Extract the files and add them instead.');
-  if (starts(head, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])) return unsupported('7-Zip archive', 'Archives are not converted. Extract the files and add them instead.');
-  if (starts(head, [0x1f, 0x8b])) return unsupported('Gzip archive', 'Archives are not converted. Extract the files and add them instead.');
+  if (ascii(head, 0, 4) === 'Rar!') return unsupported('RAR archive', 'RAR archives are not supported. ZIP, TAR and GZ archives can be unpacked.');
+  if (starts(head, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])) return unsupported('7-Zip archive', '7-Zip archives are not supported. ZIP, TAR and GZ archives can be unpacked.');
+  if (starts(head, [0x1f, 0x8b, 0x08])) return { format: 'gz', label: ext === 'tgz' || /\.tar\.gz$/i.test(name ?? '') ? 'TAR archive, gzipped' : 'Gzip file' };
   if (ascii(head, 0, 2) === 'MZ') return unsupported('Windows program', 'Programs are not converted.');
   if (starts(head, [0x7f, 0x45, 0x4c, 0x46])) return unsupported('Linux program', 'Programs are not converted.');
   if (ascii(head, 0, 4) === '8BPS') return unsupported('Photoshop document', 'PSD files are not supported.');
@@ -265,7 +268,7 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): 
  */
 export function sniff(head: Uint8Array, tail: Uint8Array, size: number, name: string): Sniffed {
   const ext = extensionOf(name);
-  const result = detect(head, tail, size, ext);
+  const result = detect(head, tail, size, ext, name);
   const claimed = formatByExtension(name);
   if (result.format && claimed && claimed !== result.format) {
     const family = (x: FormatId) => (x === 'm4a' || x === 'mp4' || x === 'mov') ? 'iso' : (x === 'mkv' || x === 'webm') ? 'mkv' : x;
