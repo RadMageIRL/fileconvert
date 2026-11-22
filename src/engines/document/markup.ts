@@ -138,7 +138,15 @@ export function markdownToHtml(bytes: Uint8Array, baseName: string): { bytes: Ui
 
 // ------------------------------------------------------------------ Markdown output (Turndown)
 
-export type MarkdownPictures = 'embed' | 'describe';
+/**
+ * Pictures inside a document, in Markdown: kept inside the file as data URLs (it stands alone), written as separate
+ * files in a ZIP beside the Markdown (for GitHub and other viewers that do not show data URLs), or replaced by
+ * their description.
+ */
+export type MarkdownPictures = 'embed' | 'files' | 'describe';
+
+/** A Markdown result: one .md file, or (pictures as files) a ZIP holding the .md and its assets folder. */
+export interface MarkdownResult { bytes: Uint8Array; warnings: string[]; summary: string; ext: 'md' | 'zip' }
 
 interface Turndown { turndown(html: string | Node): string }
 
@@ -190,12 +198,111 @@ const markdownPictures = (mode: MarkdownPictures): PicturePolicy => src => mode 
 
 function pictureNotes(counts: Counts, mode: MarkdownPictures, warnings: string[]): void {
   if (counts.described) warnings.push(`${counts.described} ${counts.described === 1 ? 'picture was' : 'pictures were'} replaced by ${counts.described === 1 ? 'its' : 'their'} description, as chosen in Documents settings.`);
-  else if (counts.kept - counts.remote > 0 && mode === 'embed') warnings.push(`${counts.kept - counts.remote} ${counts.kept - counts.remote === 1 ? 'picture is' : 'pictures are'} kept inside the Markdown as data URLs, so the file stands alone; some Markdown viewers, such as GitHub, do not show those. Documents settings can put a description in place of each instead.`);
-  if (counts.remote) warnings.push(`${counts.remote} ${counts.remote === 1 ? 'picture is' : 'pictures are'} referred to by ${counts.remote === 1 ? 'its' : 'their'} web or relative address, as in the original; nothing was downloaded.`);
+  else if (counts.kept - counts.remote > 0 && mode === 'embed') warnings.push(`${counts.kept - counts.remote} ${counts.kept - counts.remote === 1 ? 'picture is' : 'pictures are'} kept inside the Markdown as data URLs, so the file stands alone; some Markdown viewers, such as GitHub, do not show those. Documents settings can put the pictures in separate files in a ZIP with the Markdown, or a description in place of each, instead.`);
+  if (counts.remote) warnings.push(`${counts.remote} ${counts.remote === 1 ? 'picture is' : 'pictures are'} referred to by ${counts.remote === 1 ? 'its' : 'their'} web or relative address, as in the original; nothing was downloaded${mode === 'files' ? `, so ${counts.remote === 1 ? 'it is' : 'they are'} not in the ZIP` : ''}.`);
+}
+
+/** File extensions for the picture types a document can carry. */
+const PICTURE_EXT: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif',
+  'image/bmp': 'bmp', 'image/tiff': 'tif', 'image/svg+xml': 'svg', 'image/x-emf': 'emf', 'image/emf': 'emf', 'image/x-wmf': 'wmf', 'image/wmf': 'wmf',
+  'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico',
+};
+
+/** The bytes of a data URL, base64 or percent-encoded, or null when it cannot be read. */
+function dataUrlBytes(src: string): { mime: string; bytes: Uint8Array } | null {
+  const m = /^data:([^,;]*)((?:;[^,;]*)*),(.*)$/is.exec(src);
+  if (!m) return null;
+  const mime = (m[1] || 'text/plain').trim().toLowerCase();
+  try {
+    if (/;base64/i.test(m[2])) {
+      const bin = atob(m[3].replace(/\s+/g, ''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { mime, bytes };
+    }
+    return { mime, bytes: utf8(decodeURIComponent(m[3])) };
+  } catch {
+    return null;
+  }
+}
+
+/** A name for asset files that needs no escaping in a Markdown link or a URL: lowercase letters, digits, hyphens. */
+export function assetSlug(base: string): string {
+  return base.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'picture';
+}
+
+interface Assets { html: string; files: Array<[string, Uint8Array]>; unreadable: number; svgCleaned: number }
+
+/**
+ * Takes every picture held inside the clean HTML as a data URL out into a file of its own, assets/<slug>-<n>.<ext>,
+ * and points the picture at that relative path. The same picture used twice is one file. SVG pictures are cleaned
+ * by the SVG engine's allowlist first, so a file written beside the Markdown cannot carry scripts or outside links.
+ */
+async function extractPictures(clean: string, slug: string): Promise<Assets> {
+  const doc = new DOMParser().parseFromString(`<!doctype html><body>${clean}</body>`, 'text/html');
+  const paths = new Map<string, string>();
+  const files: Array<[string, Uint8Array]> = [];
+  let unreadable = 0, svgCleaned = 0;
+  for (const img of doc.querySelectorAll('img')) {
+    const src = img.getAttribute('src') ?? '';
+    if (!/^data:/i.test(src)) continue;
+    let path = paths.get(src);
+    if (!path) {
+      const pic = dataUrlBytes(src);
+      let bytes = pic?.bytes;
+      if (pic?.mime === 'image/svg+xml') {
+        try {
+          const { sanitizeSvg } = await import('../image/svg');
+          const { doc: svg } = sanitizeSvg(new TextDecoder().decode(pic.bytes));
+          bytes = utf8(new XMLSerializer().serializeToString(svg));
+          svgCleaned++;
+        } catch {
+          bytes = undefined;
+        }
+      }
+      if (!pic || !bytes || !/^image\//.test(pic.mime)) {
+        unreadable++;
+        const alt = img.getAttribute('alt')?.trim();
+        img.replaceWith(doc.createTextNode(alt ? `[Image: ${alt}]` : '[Image]'));
+        continue;
+      }
+      const ext = PICTURE_EXT[pic.mime] ?? (pic.mime.slice(6).replace(/[^a-z0-9]/g, '').slice(0, 8) || 'img');
+      path = `assets/${slug}-${files.length + 1}.${ext}`;
+      paths.set(src, path);
+      files.push([path, bytes]);
+    }
+    img.setAttribute('src', path);
+  }
+  return { html: doc.body.innerHTML, files, unreadable, svgCleaned };
+}
+
+/**
+ * Clean HTML to the Markdown result the setting asks for. With pictures as files, the Markdown and an assets folder
+ * go into one ZIP: name.md at the top and assets/ beside it, so the relative links work wherever the ZIP is
+ * extracted, in a GitHub repository too. A document with no pictures inside it gives the .md alone.
+ */
+async function markdownResult(clean: string, mode: MarkdownPictures, baseName: string, warnings: string[]): Promise<MarkdownResult> {
+  if (mode !== 'files') return { ...await writeMarkdown(clean, warnings), warnings, ext: 'md' };
+  const assets = await extractPictures(clean, assetSlug(baseName));
+  if (assets.unreadable) warnings.push(`${assets.unreadable} ${assets.unreadable === 1 ? 'picture' : 'pictures'} inside the document could not be read and ${assets.unreadable === 1 ? 'was' : 'were'} replaced by ${assets.unreadable === 1 ? 'its' : 'their'} description.`);
+  if (assets.svgCleaned) warnings.push(`${assets.svgCleaned} SVG ${assets.svgCleaned === 1 ? 'picture was' : 'pictures were'} cleaned before being written as a file: scripts, event handlers and links outside the picture are removed.`);
+  const md = await writeMarkdown(assets.html, warnings);
+  if (!assets.files.length) {
+    warnings.push('There are no pictures inside the document to write as files, so the result is the Markdown file alone.');
+    return { ...md, warnings, ext: 'md' };
+  }
+  const { zipSync } = await import('fflate');
+  const entries: Record<string, [Uint8Array, { level: 0 | 6 }]> = { [`${baseName}.md`]: [md.bytes, { level: 6 }] };
+  // Pictures are already compressed (SVG and BMP are not, and are deflated).
+  for (const [path, bytes] of assets.files) entries[path] = [bytes, { level: /\.(svg|bmp|tif|emf|wmf)$/.test(path) ? 6 : 0 }];
+  const n = assets.files.length;
+  warnings.push(`The Markdown and its ${n === 1 ? 'picture are' : `${n} pictures are`} in a ZIP: ${baseName}.md, with the ${n === 1 ? 'picture' : 'pictures'} in an assets folder beside it (assets/${assetSlug(baseName)}-1.${assets.files[0][0].split('.').pop()}${n > 1 ? ', ...' : ''}). The links are relative, so they work wherever the ZIP is extracted, a GitHub repository included.`);
+  return { bytes: zipSync(entries), warnings, summary: `${md.summary}, ${n === 1 ? '1 picture' : `${n} pictures`}`, ext: 'zip' };
 }
 
 /** HTML file to Markdown. The page body is converted whole; head contents (title, styles, scripts) are not body text. */
-export async function htmlToMarkdown(bytes: Uint8Array, mode: MarkdownPictures): Promise<{ bytes: Uint8Array; warnings: string[]; summary: string }> {
+export async function htmlToMarkdown(bytes: Uint8Array, mode: MarkdownPictures, baseName = 'document'): Promise<MarkdownResult> {
   const warnings: string[] = [];
   const text = readMarkup(bytes, warnings);
   const parsed = new DOMParser().parseFromString(text, 'text/html');
@@ -204,8 +311,7 @@ export async function htmlToMarkdown(bytes: Uint8Array, mode: MarkdownPictures):
   const clean = sanitize(parsed.body?.innerHTML ?? text, markdownPictures(mode), counts);
   warnings.push(...removedNote(counts));
   pictureNotes(counts, mode, warnings);
-  const r = await writeMarkdown(clean, warnings);
-  return { ...r, warnings };
+  return markdownResult(clean, mode, baseName, warnings);
 }
 
 // ------------------------------------------------------------------ DOCX to HTML and Markdown (Mammoth's HTML from the worker)
@@ -219,15 +325,14 @@ export function docxHtmlToPage(fragment: string, baseName: string, workerNotes: 
   return { bytes: utf8(htmlPage(body, firstHeading(body) ?? baseName, false)), warnings, summary: 'Standalone HTML page' };
 }
 
-export async function docxHtmlToMarkdown(fragment: string, mode: MarkdownPictures, workerNotes: string[]): Promise<{ bytes: Uint8Array; warnings: string[]; summary: string }> {
+export async function docxHtmlToMarkdown(fragment: string, mode: MarkdownPictures, workerNotes: string[], baseName = 'document'): Promise<MarkdownResult> {
   const warnings = [...workerNotes];
   const counts = newCounts();
   const clean = sanitize(fragment, markdownPictures(mode), counts);
   warnings.push(...removedNote(counts));
   pictureNotes(counts, mode, warnings);
   warnings.push('Headings, paragraphs, lists, tables, links, bold, italic, strikethrough, code, quotes, footnotes and pictures are kept. Underline, fonts, colors, alignment, page layout, headers and footers, comments and tracked changes are not.');
-  const r = await writeMarkdown(clean, warnings);
-  return { ...r, warnings };
+  return markdownResult(clean, mode, baseName, warnings);
 }
 
 // ------------------------------------------------------------------ Markdown to DOCX (the clean HTML goes to the worker)
@@ -237,16 +342,38 @@ export interface DocxRequest { html: string; title: string; warnings: string[] }
 /** Pictures Word shows that a Markdown file can carry inside itself. */
 const WORD_PICTURE = /^data:image\/(png|jpe?g|gif|bmp);base64,/i;
 
+function wordPictureNotes(counts: Counts, source: string, warnings: string[]): void {
+  const web = counts.remote, other = counts.described - counts.remote;
+  if (web) warnings.push(`${web} ${web === 1 ? 'picture from the web or a relative address became its' : 'pictures from the web or relative addresses became their'} description; nothing is downloaded.`);
+  if (other) warnings.push(`${other} ${other === 1 ? 'picture in a format Word cannot show became its' : 'pictures in formats Word cannot show became their'} description. PNG, JPEG, GIF and BMP pictures inside the ${source} are included.`);
+}
+
 export function markdownToDocxRequest(bytes: Uint8Array, baseName: string): DocxRequest {
   const warnings: string[] = [];
   const text = readMarkup(bytes, warnings);
   const counts = newCounts();
   const html = sanitize(md().render(text), src => WORD_PICTURE.test(src) ? 'keep' : 'describe', counts);
   warnings.push(...removedNote(counts, ' from the inline HTML'));
-  const web = counts.remote, other = counts.described - counts.remote;
-  if (web) warnings.push(`${web} ${web === 1 ? 'picture from the web or a relative address became its' : 'pictures from the web or relative addresses became their'} description; nothing is downloaded.`);
-  if (other) warnings.push(`${other} ${other === 1 ? 'picture in a format Word cannot show became its' : 'pictures in formats Word cannot show became their'} description. PNG, JPEG, GIF and BMP pictures inside the Markdown are included.`);
+  wordPictureNotes(counts, 'Markdown', warnings);
   return { html, title: firstHeading(html) ?? baseName, warnings };
+}
+
+/**
+ * HTML file to DOCX. The body is sanitized as for every other output (scripts, handlers, forms, frames, embedded
+ * objects and javascript: links removed; styles dropped, so the document uses Word's own styles), pictures from
+ * the web or a relative address become their description, and the worker's Word writer does the rest.
+ */
+export function htmlToDocxRequest(bytes: Uint8Array, baseName: string): DocxRequest {
+  const warnings: string[] = [];
+  const text = readMarkup(bytes, warnings);
+  const parsed = new DOMParser().parseFromString(text, 'text/html');
+  if (parsed.querySelector('link[rel~="stylesheet"], style, [style]')) warnings.push('Styles (fonts, colors, sizes, layout) are not applied: the document has the page\'s structure in Word\'s own styles, so headings, lists and links behave as Word\'s do.');
+  const counts = newCounts();
+  const html = sanitize(parsed.body?.innerHTML ?? text, src => WORD_PICTURE.test(src) ? 'keep' : 'describe', counts);
+  warnings.push(...removedNote(counts));
+  wordPictureNotes(counts, 'HTML file', warnings);
+  warnings.push('Headings, paragraphs, lists with their numbering, tables with merged cells, links (links within the page included), code, quotes, bold, italic, underline, strikethrough, subscript, superscript and pictures inside the file are kept. Fonts, colors, sizes, alignment and page layout are not, and the whole page body is converted, menus and footers included.');
+  return { html, title: parsed.title?.trim() || firstHeading(html) || baseName, warnings };
 }
 
 // ------------------------------------------------------------------ PDF output

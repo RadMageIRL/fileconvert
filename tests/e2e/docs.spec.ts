@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { strFromU8, unzipSync } from 'fflate';
-import { expect, test, type Page } from '@playwright/test';
-import { addFiles, convert, download, expectDone, fx, libreoffice, openApp, pyRead, row, unexpectedViolations, type FilePayload } from './helpers';
+import { expect, test } from '@playwright/test';
+import { addFiles, convert, documentsSetting, download, expectDone, fx, libreoffice, openApp, pyRead, row, unexpectedViolations, type FilePayload } from './helpers';
 
 // Phase 1B documents in the browser (v0.2.0): HTML to Markdown, DOCX to HTML and Markdown, Markdown to DOCX.
 // Markdown results are read back by mistune and DOCX results by python-docx and LibreOffice (tests/e2e/readers.py),
@@ -19,12 +19,6 @@ interface Md {
 interface Docx {
   blocks: Array<{ type: 'p'; style: string; level: number | null; text: string; runs: Array<Record<string, unknown> & { text: string }> } | { type: 'table'; header: boolean; rows: string[][] }>;
   pictures: Array<{ type: string; bytes: number }>; title: string; author: string;
-}
-
-async function documentsSetting(page: Page, label: string, value: string): Promise<void> {
-  const panel = page.locator('details.panel[data-cat="document"]');
-  if (!(await panel.evaluate(d => (d as HTMLDetailsElement).open))) await panel.locator('summary').click();
-  await panel.getByLabel(label).selectOption(value);
 }
 
 test('HTML to Markdown: structure kept, nothing unsafe, nothing fetched; mistune reads it back', async ({ page }, info) => {

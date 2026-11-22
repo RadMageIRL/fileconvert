@@ -92,7 +92,7 @@ describe('format registry', () => {
     expect(targetsFor('txt')).toEqual(['pdf']);
     expect(targetsFor('pdf')).toEqual(['txt']);
     expect(targetsFor('md')).toEqual(['html', 'pdf', 'docx']);
-    expect(targetsFor('html')).toEqual(['pdf', 'md']);
+    expect(targetsFor('html')).toEqual(['pdf', 'md', 'docx']);
     expect(targetsFor('docx')).toEqual(['txt', 'html', 'md']);
     expect(targetsFor('json')).toEqual(['csv', 'xlsx', 'tsv', 'jsonl', 'yaml', 'xml']);
     expect(targetsFor('jsonl')).toEqual(['json', 'csv', 'xlsx', 'tsv']);

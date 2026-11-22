@@ -631,7 +631,7 @@ export const PAGES: readonly Page[] = [
       'Task list boxes ([ ] and [x]) stay as text.',
       'Files up to 8 MB.',
     ],
-    related: ['docx-to-markdown', 'markdown-to-pdf', 'docx-to-html'],
+    related: ['docx-to-markdown', 'html-to-docx', 'docx-to-html'],
     keywords: ['md', 'word', 'doc', 'readme', 'notes', 'pandoc'],
   },
   {
@@ -642,13 +642,13 @@ export const PAGES: readonly Page[] = [
     details: [
       'Mammoth reads the document on your device. Headings, bold, italic, strikethrough, links, nested bullet and numbered lists, block quotes, code blocks and footnotes become their Markdown forms.',
       'Tables become GitHub-flavored Markdown tables; several paragraphs in a cell are joined with line breaks, and a | in a cell is escaped.',
-      'Pictures are kept inside the Markdown as data URLs, or replaced by their description if you choose that in Documents settings.',
+      'Pictures are kept inside the Markdown as data URLs, so the file stands alone. Documents settings can instead put them in separate files, in a ZIP with the Markdown and an assets folder whose links work in a GitHub repository, or replace each by its description.',
       'Text in a code font such as Consolas or Courier New becomes code, and Word, LibreOffice and pandoc code styles become code blocks.',
     ],
     limits: [
       'Underline, fonts, colors, alignment, page layout, headers and footers, comments and tracked changes are not part of Markdown.',
       'Merged table cells are split, since Markdown tables cannot merge cells, and numbered lists start at 1.',
-      'Some Markdown viewers, such as GitHub, do not show pictures kept as data URLs.',
+      'Some Markdown viewers, such as GitHub, do not show pictures kept as data URLs; choose separate files for those.',
       'Documents up to 200 MB, with up to 100 MB of pictures.',
     ],
     related: ['docx-to-html', 'markdown-to-docx', 'html-to-markdown'],
@@ -688,11 +688,31 @@ export const PAGES: readonly Page[] = [
     limits: [
       'The whole page body is converted, menus and footers included; delete what you do not need.',
       'Layout, colors and fonts are not part of Markdown. Subscript and superscript stay as HTML tags.',
-      'Pictures inside the HTML as data URLs stay inside the Markdown, unless Documents settings say Description only.',
+      'Pictures inside the HTML as data URLs stay inside the Markdown, unless Documents settings choose separate files (a ZIP with the Markdown and an assets folder) or Description only.',
       'Files up to 8 MB.',
     ],
-    related: ['docx-to-markdown', 'markdown-to-pdf', 'markdown-to-docx'],
+    related: ['docx-to-markdown', 'html-to-docx', 'markdown-to-docx'],
     keywords: ['md', 'web', 'page', 'htm', 'readme', 'notes', 'gfm', 'github'],
+  },
+  {
+    slug: 'html-to-docx', from: 'html', to: 'docx', category: 'document',
+    blurb: 'Web pages as editable Word documents',
+    description: 'Convert HTML pages to Word DOCX documents with headings, lists, tables, links, code and pictures in Word\'s own styles. Scripts removed, in your browser.',
+    intro: 'Turn a saved web page, an HTML export or a report into a Word document you can edit, comment on and send. FileConvert cleans the page and writes the document on your device.',
+    details: [
+      'Headings use Word\'s Heading 1 to 6 styles, so the navigation pane and a table of contents work. Lists are real Word lists, nested as in the page and starting at the same number.',
+      'Tables keep their header row and their merged cells, and a table inside a cell stays inside it. Links keep their address, and links within the page jump to the heading they name.',
+      'Bold, italic, underline, strikethrough, highlighting, subscript, superscript, block quotes and code blocks are kept, with code in Code Block and Inline Code styles you can change in Word.',
+      'PNG, JPEG, GIF and BMP pictures inside the HTML file are included, scaled to fit the page. Pages are US Letter or A4, chosen in Documents settings.',
+    ],
+    limits: [
+      'This keeps the structure, not the look: the page\'s fonts, colors, sizes, alignment and layout are not applied.',
+      'Pictures from the web or a relative address are never downloaded: they become their description, as do WebP, AVIF and SVG pictures.',
+      'Scripts, forms, frames, videos and event handlers are removed first. The whole page body is converted, menus and footers included.',
+      'Files up to 8 MB.',
+    ],
+    related: ['html-to-markdown', 'markdown-to-docx', 'docx-to-html'],
+    keywords: ['htm', 'web', 'page', 'word', 'doc', 'report', 'export'],
   },
   // ------------------------------------------------------------------ data
   {

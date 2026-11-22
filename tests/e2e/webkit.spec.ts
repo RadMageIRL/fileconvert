@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { MD_SAMPLE, addFiles, convert, cspViolations, expectDone, fx, openApp, row } from './helpers';
+import { MD_SAMPLE, addFiles, convert, cspViolations, documentsSetting, expectDone, fx, openApp, pyRead, row, tempDir, writeTemp } from './helpers';
 
 // Playwright's WebKit on Windows is not Safari: it has no OffscreenCanvas and no WebCodecs. These tests
 // check that FileConvert does what it can there and explains clearly what it cannot. Downloads are read
@@ -75,4 +75,30 @@ test('a ZIP is unpacked, and a file from it converts, without OffscreenCanvas or
   await expectDone(page, 'records.json');
   // Blob.text() decodes as UTF-8 and drops the byte order mark the CSV starts with.
   expect(await resultText(page, 'records.json')).toBe('a,b\r\n1,x\r\n2,y\r\n');
+});
+
+test('HTML to DOCX, and Markdown with its pictures in a ZIP, without OffscreenCanvas or WebCodecs', async ({ page }) => {
+  const w = await openApp(page);
+  await addFiles(page, [fx('document/page.html'), fx('document/structure.html')]);
+  const bytesOf = (n: string) => page.evaluate(async name => {
+    const app = (window as unknown as { __fileconvert: { queue: { jobs: Array<{ name: string; outputs: Array<{ name: string; blob: Blob }> }> } } }).__fileconvert;
+    const out = app.queue.jobs.find(j => j.name === name)!.outputs[0];
+    return { name: out.name, bytes: [...new Uint8Array(await out.blob.arrayBuffer())] };
+  }, n);
+  await convert(page, 'page.html', 'DOCX');
+  await expectDone(page, 'page.html');
+  const docx = await bytesOf('page.html');
+  expect(docx.name).toBe('page.docx');
+  const d = pyRead<{ blocks: Array<{ type: string; style?: string; text?: string }> }>('docx', writeTemp(tempDir(), docx.name, new Uint8Array(docx.bytes)));
+  expect(d.blocks.filter(b => b.style === 'Heading 1').map(b => b.text)).toEqual(['Converting a page']);
+  await documentsSetting(page, 'Pictures in Markdown (from DOCX or HTML)', 'files');
+  await convert(page, 'structure.html', 'Markdown');
+  await expectDone(page, 'structure.html');
+  const zip = await bytesOf('structure.html');
+  expect(zip.name).toBe('structure.zip');
+  const z = pyRead<{ bad_crc: string | null; images: Array<{ url: string; exists: boolean }> }>('mdzip', writeTemp(tempDir(), zip.name, new Uint8Array(zip.bytes)));
+  expect(z.bad_crc).toBeNull();
+  expect(z.images).toHaveLength(6);
+  expect(z.images.every(i => i.exists)).toBe(true);
+  expect(w.outside).toEqual([]);
 });

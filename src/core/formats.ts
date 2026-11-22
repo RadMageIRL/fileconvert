@@ -103,7 +103,7 @@ const DOCUMENT_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   txt: ['pdf'],
   pdf: ['txt'],
   md: ['html', 'pdf', 'docx'],
-  html: ['pdf', 'md'],
+  html: ['pdf', 'md', 'docx'],
   docx: ['txt', 'html', 'md'],
 };
 const DATA_ROUTES: Partial<Record<FormatId, FormatId[]>> = {

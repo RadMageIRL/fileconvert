@@ -527,6 +527,10 @@ export class Queue {
   private async runDocument(job: Job, from: FormatId, to: FormatId, s: Settings, onProgress: (p: { fraction?: number; stage?: string }) => void, signal: AbortSignal) {
     const base = safeBase(job.name);
     const asBlob = (bytes: Uint8Array, ext: string) => [{ blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: FORMATS[to].mime }), ext }];
+    // Markdown with its pictures as separate files is a ZIP holding the .md and an assets folder.
+    const markdownOut = (r: { bytes: Uint8Array; ext: 'md' | 'zip' }) => r.ext === 'zip'
+      ? [{ blob: new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/zip' }), ext: 'zip' }]
+      : asBlob(r.bytes, 'md');
     if (from === 'txt' && to === 'pdf') {
       const r = await this.engines.document.run<{ bytes: Uint8Array; warnings: string[]; summary: string }>('textToPdf', { file: job.file, options: s.document, title: base }, { onProgress, signal });
       job.warnings = r.warnings; job.summary = r.summary;
@@ -537,9 +541,14 @@ export class Queue {
       if (signal.aborted) throw new CanceledError();
       onProgress({ stage: to === 'md' ? 'Writing Markdown' : 'Writing the page' });
       const markup = await import('../engines/document/markup');
-      const r = to === 'md' ? await markup.docxHtmlToMarkdown(fragment.html, s.document.mdPictures, fragment.warnings) : markup.docxHtmlToPage(fragment.html, base, fragment.warnings);
+      if (to === 'md') {
+        const r = await markup.docxHtmlToMarkdown(fragment.html, s.document.mdPictures, fragment.warnings, base);
+        job.warnings = r.warnings; job.summary = r.summary;
+        return markdownOut(r);
+      }
+      const r = markup.docxHtmlToPage(fragment.html, base, fragment.warnings);
       job.warnings = r.warnings; job.summary = r.summary;
-      return asBlob(r.bytes, FORMATS[to].ext);
+      return asBlob(r.bytes, 'html');
     }
     if (from === 'docx' && to === 'txt') {
       const r = await this.engines.document.run<{ bytes: Uint8Array; warnings: string[]; summary: string }>('docxToText', { file: job.file }, { onProgress, signal });
@@ -568,13 +577,13 @@ export class Queue {
       return asBlob(r.bytes, 'html');
     }
     if (from === 'html' && to === 'md') {
-      const r = await markup.htmlToMarkdown(bytes, s.document.mdPictures);
+      const r = await markup.htmlToMarkdown(bytes, s.document.mdPictures, base);
       job.warnings = r.warnings; job.summary = r.summary;
-      return asBlob(r.bytes, 'md');
+      return markdownOut(r);
     }
-    if (from === 'md' && to === 'docx') {
+    if ((from === 'md' || from === 'html') && to === 'docx') {
       onProgress({ stage: 'Reading the document' });
-      const req = markup.markdownToDocxRequest(bytes, base);
+      const req = from === 'md' ? markup.markdownToDocxRequest(bytes, base) : markup.htmlToDocxRequest(bytes, base);
       const r = await this.engines.document.run<{ bytes: Uint8Array; warnings: string[] }>('renderDocx', { html: req.html, title: req.title, pageSize: s.document.pageSize }, { onProgress, signal });
       job.warnings = [...req.warnings, ...r.warnings];
       job.summary = 'Word document';

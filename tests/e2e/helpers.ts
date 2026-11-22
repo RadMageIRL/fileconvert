@@ -183,8 +183,15 @@ export function writeTemp(dir: string, name: string, data: Uint8Array): string {
 }
 
 /** Reads a document or data result with Python's own readers (tests/e2e/readers.py), never with FileConvert's code. */
-export function pyRead<T = unknown>(kind: 'csv' | 'tsv' | 'json' | 'jsonl' | 'xlsx' | 'docx' | 'md', path: string): T {
+export function pyRead<T = unknown>(kind: 'csv' | 'tsv' | 'json' | 'jsonl' | 'xlsx' | 'docx' | 'md' | 'mdzip' | 'media', path: string): T {
   return JSON.parse(execFileSync(PYTHON, ['-I', resolve('tests/e2e/readers.py'), kind, path], { encoding: 'utf8', maxBuffer: 64 << 20 }));
+}
+
+/** Chooses a value in the Documents settings panel, opening the panel first. */
+export async function documentsSetting(page: Page, label: string, value: string): Promise<void> {
+  const panel = page.locator('details.panel[data-cat="document"]');
+  if (!(await panel.evaluate(d => (d as HTMLDetailsElement).open))) await panel.locator('summary').click();
+  await panel.getByLabel(label).selectOption(value);
 }
 
 /** LibreOffice, an independent office suite, for reading DOCX results: it converts a file and returns the new path. */

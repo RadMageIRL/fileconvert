@@ -1,7 +1,8 @@
 """Writes the Phase 1B document and data fixtures in tests/fixtures/ (v0.2.0): rich Markdown, HTML and DOCX
 documents, XLS and ODS workbooks, JSON Lines, XML and YAML tables, and hostile files for each.
 
-    python tools/make-doc-fixtures.py
+    python tools/make-doc-fixtures.py              (all of them)
+    python tools/make-doc-fixtures.py structure    (document/structure.html only; needs only Pillow)
 
 Needs Python with Pillow, openpyxl and python-docx, and LibreOffice (soffice on PATH, or in its default Windows
 folder), which writes the XLS, ODS and one of the DOCX files from sources made here. Everything is synthetic. Run it
@@ -55,6 +56,63 @@ def picture_bytes(color, size, fmt):
     buf = io.BytesIO()
     Image.new('RGB', size, color).save(buf, fmt, **({'quality': 90} if fmt == 'JPEG' else {}))
     return buf.getvalue()
+
+
+def structure_html():
+    """document/structure.html: the parts of real web pages that Markdown never produces (sections, divs, figures,
+    definition lists, details, merged and nested table cells, links within the page, numbered lists that start
+    later) and pictures inside the file in five formats, one of them used twice and an SVG carrying a script."""
+    def data(mime, raw):
+        return f'data:{mime};base64,' + base64.b64encode(raw).decode('ascii')
+    buf = io.BytesIO()
+    Image.new('RGB', (40, 30), (40, 160, 70)).save(buf, 'WEBP', lossless=True)
+    webp = buf.getvalue()
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" onload="alert(1)"><script>alert(2)</script>'
+           '<rect width="40" height="40" fill="#2288aa"/><image href="https://example.com/x.png" width="10" height="10"/></svg>').encode('ascii')
+    png = data('image/png', picture_bytes((200, 30, 40), (60, 40), 'PNG'))
+    write(os.path.join(DOC, 'structure.html'), f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Page structure sample</title>
+</head>
+<body>
+<header><p>Site header</p></header>
+<nav><a href="#part-2">Jump to part 2</a></nav>
+<main>
+<section>
+<h1>Page structure</h1>
+<div><div><p>A paragraph inside two divs.</p>Loose text in a div.</div></div>
+<h4>Fourth level</h4>
+<h5>Fifth level</h5>
+<h6>Sixth level</h6>
+<figure><img src="{data('image/jpeg', picture_bytes((30, 60, 200), (60, 40), 'JPEG'))}" alt="Blue JPEG"><figcaption>A JPEG with a caption</figcaption></figure>
+<p><img src="{data('image/gif', picture_bytes((40, 160, 70), (30, 20), 'GIF'))}" alt="Green GIF"> <img src="{png}" alt="Red PNG"> <img src="{png}" alt="Red PNG again"></p>
+<p><img src="{data('image/webp', webp)}" alt="WebP picture"> <img src="{data('image/svg+xml', svg)}" alt="SVG drawing"></p>
+<dl><dt>Term</dt><dd>Its definition</dd></dl>
+<details><summary>Summary line</summary><p>Text inside details.</p></details>
+<p><u>underlined</u>, <mark>marked</mark>, <s>struck</s>, <kbd>Ctrl</kbd>+<kbd>C</kbd> and <q>a quotation</q>.</p>
+<table>
+<tr><th colspan="2">Two columns wide</th><th>Third</th></tr>
+<tr><td rowspan="2">Two rows tall</td><td>b1</td><td>c1</td></tr>
+<tr><td>b2</td><td><table><tr><td>Nested cell</td></tr></table></td></tr>
+</table>
+<ol start="7"><li>Seventh</li><li>Eighth</li></ol>
+<h2 id="part-2">Part 2</h2>
+<p>Text in a <span>span</span>, after the link that jumps here.</p>
+<pre><span class="kw">def</span> f():<br>    return <b>1</b></pre>
+<aside>Aside text.</aside>
+</section>
+</main>
+<footer><p>Site footer</p></footer>
+</body>
+</html>
+""")
+
+
+if sys.argv[1:] == ['structure']:
+    structure_html()
+    sys.exit(0)
 
 
 PNG = picture_bytes((200, 30, 40), (120, 80), 'PNG')
@@ -499,5 +557,7 @@ write(os.path.join(BAD, 'unsafe-tags.yaml'), """- !!python/object/apply:os.syste
 """)
 write(os.path.join(BAD, 'deep.yaml'), '[' * 20000 + ']' * 20000 + '\n')
 write(os.path.join(BAD, 'external-dtd.xml'), '<?xml version="1.0"?>\n<!DOCTYPE r SYSTEM "https://example.com/r.dtd">\n<r><row><a>1</a></row><row><a>2</a></row></r>\n')
+
+structure_html()
 
 print('Phase 1B fixtures written to', os.path.normpath(ROOT))
