@@ -5,7 +5,7 @@
 // they are, which is lossless and fast. Inputs are read in pieces, never loaded whole.
 
 import {
-  ALL_FORMATS, AdtsOutputFormat, BlobSource, BufferTarget, CanvasSink, CanvasSource, Conversion,
+  ALL_FORMATS, AdtsOutputFormat, BlobSource, BufferTarget, CanvasSink, CanvasSource, Conversion, CustomSource,
   ConversionCanceledError, FlacOutputFormat, Input, MkvOutputFormat, MovOutputFormat, Mp3OutputFormat,
   Mp4OutputFormat, OggOutputFormat, Output, Quality, StreamTarget, WavOutputFormat, WebMOutputFormat,
   canEncodeAudio, canEncodeVideo,
@@ -17,6 +17,8 @@ import type { Progress } from '../../core/rpc';
 import { createTempFile } from '../../core/tempstore';
 import { GifWriter } from '../image/encoders';
 import { openFrames } from '../image/frames';
+import { readAiff, wavView } from './aiff';
+import { tsStreams, unreadableStreams } from './tsinfo';
 
 export interface MediaOptions {
   /** Largest output height in pixels, or 0 for the original size. Never upscales. */
@@ -41,6 +43,10 @@ export interface MediaInfo {
   duration: number | null;
   video: null | { codec: string | null; width: number; height: number; rotation: number; decodable: boolean; hdr: boolean };
   audio: null | { codec: string | null; channels: number; sampleRate: number; decodable: boolean };
+  /** A transport stream's video that Mediabunny cannot read at all (MPEG-2, for example), by name. */
+  unreadableVideo?: string | null;
+  /** Other things about the file that the queue should say. */
+  notes?: string[];
   /** Every track, for the "this file has 3 audio tracks" note. */
   videoTracks: number;
   audioTracks: number;
@@ -79,12 +85,14 @@ function ensureEncoders(): Promise<void> {
   return polyfills;
 }
 
-function openInput(file: Blob): Input {
+/** Opens a media file; an AIFF file is read through its WAV view (./aiff). */
+async function openInput(file: Blob, format?: FormatId): Promise<Input> {
+  if (format === 'aiff') return new Input({ source: new CustomSource(wavView(file, await readAiff(file))), formats: ALL_FORMATS });
   return new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
 }
 
-export async function inspectMedia(file: Blob): Promise<MediaInfo> {
-  const input = openInput(file);
+export async function inspectMedia(file: Blob, kind?: FormatId): Promise<MediaInfo> {
+  const input = await openInput(file, kind);
   try {
     if (!(await input.canRead())) throw new Error('This file is not a media file FileConvert can read, or it is damaged.');
     const format = await input.getFormat();
@@ -94,9 +102,20 @@ export async function inspectMedia(file: Blob): Promise<MediaInfo> {
     const a = await input.getPrimaryAudioTrack();
     let duration: number | null = await input.getDurationFromMetadata().catch(() => null);
     if (duration === null || !Number.isFinite(duration)) duration = await input.computeDuration().catch(() => null);
+    // Timestamps need not start at zero (a transport stream often starts after a second or so).
+    if (duration !== null) duration = Math.max(0, duration - await input.getFirstTimestamp().catch(() => 0));
+    let unreadableVideo: string | null = null;
+    const notes: string[] = [];
+    if (kind === 'ts') {
+      const u = unreadableStreams(tsStreams(new Uint8Array(await file.slice(0, 2 * 1048576).arrayBuffer())), { video: videoTracks.length, audio: audioTracks.length });
+      unreadableVideo = u.video;
+      notes.push(...u.audio);
+    }
     return {
       container: format.name,
       duration,
+      unreadableVideo,
+      notes,
       videoTracks: videoTracks.length,
       audioTracks: audioTracks.length,
       video: v ? {
@@ -194,7 +213,7 @@ export async function convertMedia(file: Blob, from: FormatId, to: FormatId, o: 
   await ensureEncoders();
   const warnings: string[] = [];
   const audioOnly = AUDIO_OUT.includes(to);
-  const input = openInput(file);
+  const input = await openInput(file, from);
   const out = await makeTarget(temp);
   try {
     if (!(await input.canRead())) throw new Error(`This ${FORMATS[from].label} file could not be read. It may be damaged or use a layout FileConvert does not support.`);
@@ -300,7 +319,7 @@ export async function convertMedia(file: Blob, from: FormatId, to: FormatId, o: 
 
 export async function videoToGif(file: Blob, o: MediaOptions, progress: Progress): Promise<MediaResult> {
   const warnings: string[] = [];
-  const input = openInput(file);
+  const input = await openInput(file);
   try {
     const v = await input.getPrimaryVideoTrack();
     if (!v) throw new Error('This file has no video track.');

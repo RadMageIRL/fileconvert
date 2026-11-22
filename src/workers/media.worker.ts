@@ -5,8 +5,8 @@ import { convertMedia, gifToVideo, inspectMedia, videoToGif, type MediaOptions, 
 interface Payload { file: Blob; from: FormatId; to: FormatId; options: MediaOptions; temp: TempTarget | null }
 
 serve({
-  async inspect(p: { file: Blob }) {
-    return { result: await inspectMedia(p.file) };
+  async inspect(p: { file: Blob; format?: FormatId }) {
+    return { result: await inspectMedia(p.file, p.format) };
   },
   async convert(p: Payload, progress) {
     return { result: await convertMedia(p.file, p.from, p.to, p.options, progress, p.temp) };

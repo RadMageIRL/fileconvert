@@ -444,7 +444,46 @@ export const PAGES: readonly Page[] = [
     related: ['wav-to-mp3', 'm4a-to-mp3', 'mp4-to-mp3'],
     keywords: ['audio', 'music', 'lossless', 'album'],
   },
+  {
+    slug: 'aiff-to-mp3', from: 'aiff', to: 'mp3', category: 'audio',
+    blurb: 'Mac and studio audio as MP3',
+    description: 'Convert AIFF and AIFF-C audio from a Mac, GarageBand or a recorder to MP3 at the bitrate you choose. Read on your device and never uploaded.',
+    intro: 'AIFF is Apple\'s uncompressed audio format, used by Logic, GarageBand and many recorders. MP3 makes it a fraction of the size and plays everywhere.',
+    details: [
+      'AIFF and AIFF-C are read directly: 8, 16, 24 and 32-bit samples, little-endian (sowt), 32 and 64-bit float, mu-law and A-law.',
+      'Encoded with LAME (WebAssembly) at an automatic high-quality bitrate unless you choose 96 to 320 kbit/s in Audio settings.',
+      'Long recordings are read in pieces, never loaded whole, and the result goes to your browser\'s private storage.',
+      'For a lossless copy, convert to FLAC or WAV instead: 16-bit AIFF comes out sample for sample.',
+    ],
+    limits: [
+      'Compressed AIFF-C (IMA ADPCM, MACE and others) is not supported, and FileConvert names the codec.',
+      'WAV results are 16-bit, so 24-bit and float recordings are rounded to 16 bits there.',
+      'Files up to 8 GB.',
+    ],
+    related: ['wav-to-mp3', 'flac-to-mp3', 'm4a-to-mp3'],
+    keywords: ['aif', 'aifc', 'apple', 'mac', 'garageband', 'logic', 'audio', 'studio'],
+  },
   // ------------------------------------------------------------------ video
+  {
+    slug: 'ts-to-mp4', from: 'ts', to: 'mp4', category: 'video',
+    blurb: 'Camcorder and recorder streams as MP4',
+    description: 'Convert MPEG-TS video (.ts, .mts, .m2ts) with H.264 to MP4, copied without re-encoding where possible. Converted in your browser, never uploaded.',
+    intro: 'MPEG transport streams come from camcorders, screen and game recorders, live streams and TV tuners. MP4 holds the same H.264 video and plays in every player and editor.',
+    details: [
+      'H.264 video with AAC sound is copied into the MP4 without re-encoding when Quality is Original: fast, with every frame kept.',
+      'The stream table at the start of the file is read, so anything that cannot be converted is named rather than left out silently.',
+      'Resolution and quality can be set in Video settings, and the sound can be removed.',
+      'MPEG audio (MP2), as TV recordings carry, converts to any audio format.',
+    ],
+    limits: [
+      'MPEG-2 video, used by TV recordings and DVDs, cannot be decoded in a browser; only its sound converts, and FileConvert says so.',
+      'AC-3 sound converts in Edge; in other browsers the picture converts without sound, with a note first.',
+      'Sound that AVCHD camcorders store in a private stream cannot be read; the picture still converts, with a note.',
+      'Files up to 8 GB.',
+    ],
+    related: ['mkv-to-mp4', 'mov-to-mp4', 'mp4-to-mp3'],
+    keywords: ['mts', 'm2ts', 'camcorder', 'avchd', 'stream', 'recording', 'tv', 'transport'],
+  },
   {
     slug: 'mov-to-mp4', from: 'mov', to: 'mp4', category: 'video', common: 5,
     blurb: 'iPhone and camera videos as MP4',

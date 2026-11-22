@@ -6,8 +6,8 @@ export type Category = 'image' | 'audio' | 'video' | 'document' | 'data';
 
 export type FormatId =
   | 'jpg' | 'png' | 'webp' | 'avif' | 'heic' | 'bmp' | 'gif' | 'tiff' | 'ico' | 'svg'
-  | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg'
-  | 'mp4' | 'webm' | 'mov' | 'mkv'
+  | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg' | 'aiff'
+  | 'mp4' | 'webm' | 'mov' | 'mkv' | 'ts'
   | 'txt' | 'pdf' | 'md' | 'html' | 'docx'
   | 'json' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx';
 
@@ -46,11 +46,13 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   aac: f('aac', 'AAC', 'aac', ['aac', 'adts'], 'audio/aac', 'audio', 'AAC-LC in a raw ADTS stream.'),
   m4a: f('m4a', 'M4A', 'm4a', ['m4a', 'm4b'], 'audio/mp4', 'audio', 'AAC-LC in an MP4 audio file.'),
   ogg: f('ogg', 'OGG', 'ogg', ['ogg', 'oga', 'opus'], 'audio/ogg', 'audio', 'Opus audio in an Ogg file.'),
+  aiff: f('aiff', 'AIFF', 'aiff', ['aiff', 'aif', 'aifc'], 'audio/aiff', 'audio'),
 
   mp4: f('mp4', 'MP4', 'mp4', ['mp4', 'm4v'], 'video/mp4', 'video', 'H.264 video and AAC audio.'),
   webm: f('webm', 'WebM', 'webm', ['webm'], 'video/webm', 'video', 'VP9 video and Opus audio.'),
   mov: f('mov', 'MOV', 'mov', ['mov', 'qt'], 'video/quicktime', 'video', 'H.264 video and AAC audio in QuickTime.'),
   mkv: f('mkv', 'MKV', 'mkv', ['mkv', 'mk3d', 'mka'], 'video/x-matroska', 'video', 'H.264 video and AAC audio in Matroska.'),
+  ts: f('ts', 'MPEG-TS', 'ts', ['ts', 'mts', 'm2ts', 'm2t'], 'video/mp2t', 'video'),
 
   txt: f('txt', 'TXT', 'txt', ['txt', 'text', 'log'], 'text/plain', 'document', 'Plain UTF-8 text.'),
   pdf: f('pdf', 'PDF', 'pdf', ['pdf'], 'application/pdf', 'document'),
@@ -71,8 +73,8 @@ export const AUDIO_OUT: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a
 export const VIDEO_OUT: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv', 'gif'];
 
 export const IMAGE_IN: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'heic', 'bmp', 'gif', 'tiff', 'ico', 'svg'];
-export const AUDIO_IN: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg'];
-export const VIDEO_IN: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv'];
+export const AUDIO_IN: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'aiff'];
+export const VIDEO_IN: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv', 'ts'];
 
 /** Picture formats that can be animated (GIF, WebP, APNG), and the outputs that keep animation. */
 export const ANIMATED_IN: readonly FormatId[] = ['gif', 'webp', 'png'];

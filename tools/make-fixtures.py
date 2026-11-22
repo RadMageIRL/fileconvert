@@ -126,6 +126,16 @@ ffmpeg(*TONE, '-c:a', 'aac', '-b:a', '128k', '-f', 'adts', os.path.join(AUD, 'to
 ffmpeg(*TONE, '-c:a', 'aac', '-b:a', '128k', os.path.join(AUD, 'tone.m4a'))
 ffmpeg(*TONE, '-c:a', 'libvorbis', '-q:a', '4', os.path.join(AUD, 'tone-vorbis.ogg'))
 ffmpeg(*TONE, '-c:a', 'libopus', '-b:a', '96k', os.path.join(AUD, 'tone-opus.ogg'))
+# AIFF and AIFF-C (v0.2.0): big-endian PCM with metadata chunks before the sound, 24-bit, signed 8-bit, and the
+# AIFF-C kinds FileConvert reads (sowt, fl32, ulaw) plus one it refuses (IMA ADPCM).
+SINE = ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1:sample_rate=44100']
+ffmpeg(*SINE, '-ac', '2', '-c:a', 'pcm_s16be', '-metadata', 'title=Tone', '-write_id3v2', '1', os.path.join(AUD, 'tone16.aiff'))
+ffmpeg('-f', 'lavfi', '-i', 'sine=frequency=330:duration=1:sample_rate=48000', '-ac', '1', '-c:a', 'pcm_s24be', os.path.join(AUD, 'tone24-mono.aiff'))
+ffmpeg(*SINE, '-c:a', 'pcm_s8', os.path.join(AUD, 'tone8.aiff'))
+ffmpeg(*SINE, '-c:a', 'pcm_s16le', os.path.join(AUD, 'tone-sowt.aifc'))
+ffmpeg(*SINE, '-c:a', 'pcm_f32be', os.path.join(AUD, 'tone-float.aifc'))
+ffmpeg(*SINE, '-c:a', 'pcm_mulaw', '-ar', '8000', os.path.join(AUD, 'tone-ulaw.aifc'))
+ffmpeg(*SINE, '-c:a', 'adpcm_ima_qt', os.path.join(AUD, 'tone-ima4.aifc'))
 ffmpeg(*TONE, '-c:a', 'alac', os.path.join(AUD, 'tone-alac.m4a'))
 # ID3 tags and cover art, which the converter has to read past.
 ffmpeg(*TONE, '-c:a', 'libmp3lame', '-b:a', '128k', '-metadata', 'title=Fixture Tone',
@@ -549,6 +559,15 @@ base.save(os.path.join(IMG, 'anim-blend.png'), save_all=True, append_images=[ove
 # WebP: transparency and uneven timing, looping forever.
 webp_frames = [square((255, 0, 0, 255), (0, 0, 19, 29)), square((0, 0, 255, 200), (20, 0, 39, 29)), square((0, 160, 0, 255), (5, 5, 34, 24))]
 webp_frames[0].save(os.path.join(IMG, 'anim-alpha.webp'), save_all=True, append_images=webp_frames[1:], duration=[120, 80, 300], loop=0, lossless=True)
+
+
+# ---------------------------------------------------------------- MPEG transport streams (v0.2.0)
+TS_IN = ['-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2']
+H264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '25']
+ffmpeg(*TS_IN, *H264, '-c:a', 'aac', '-b:a', '96k', '-f', 'mpegts', os.path.join(VID, 'clip-h264-aac.ts'))
+ffmpeg(*TS_IN, *H264, '-c:a', 'aac', '-b:a', '96k', '-f', 'mpegts', '-mpegts_m2ts_mode', '1', os.path.join(VID, 'clip.m2ts'))
+ffmpeg(*TS_IN, *H264, '-c:a', 'ac3', '-f', 'mpegts', os.path.join(VID, 'clip-h264-ac3.ts'))
+ffmpeg(*TS_IN, '-c:v', 'mpeg2video', '-c:a', 'mp2', '-ac', '2', '-b:a', '192k', '-f', 'mpegts', os.path.join(VID, 'clip-mpeg2-mp2.ts'))
 
 
 # ---------------------------------------------------------------- hostile inputs

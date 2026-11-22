@@ -226,6 +226,7 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): 
     return { format: 'mkv', label: 'Matroska video' };
   }
   if (ascii(head, 0, 4) === 'fLaC') return { format: 'flac', label: 'FLAC audio' };
+  if (ascii(head, 0, 4) === 'FORM' && (ascii(head, 8, 4) === 'AIFF' || ascii(head, 8, 4) === 'AIFC')) return { format: 'aiff', label: ascii(head, 8, 4) === 'AIFC' ? 'AIFF-C audio' : 'AIFF audio' };
   if (ascii(head, 0, 4) === 'OggS') return sniffOgg(head);
   if (ascii(head, 0, 1024).includes('%PDF-')) return { format: 'pdf', label: 'PDF document' };
   if (starts(head, [0x50, 0x4b, 0x03, 0x04])) return sniffZip(head, tail, ext);
@@ -250,9 +251,9 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): 
   }
   if (starts(head, [0xff, 0x0a]) || starts(head, [0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20])) return unsupported('JPEG XL image', 'JPEG XL is not supported yet.');
   if (starts(head, [0x30, 0x26, 0xb2, 0x75])) return unsupported('Windows Media file', 'WMA and WMV files are not supported.');
-  if (starts(head, [0x47]) && head.length > 376 && head[188] === 0x47 && head[376] === 0x47) {
-    return unsupported('MPEG transport stream', 'MPEG-TS video is not supported yet. MP4, WebM, MOV and MKV are.');
-  }
+  // MPEG transport stream: a sync byte every 188 bytes, or every 192 in the M2TS variant (AVCHD camcorders).
+  if (starts(head, [0x47]) && head.length > 376 && head[188] === 0x47 && head[376] === 0x47) return { format: 'ts', label: 'MPEG transport stream' };
+  if (head.length > 388 && head[4] === 0x47 && head[196] === 0x47 && head[388] === 0x47) return { format: 'ts', label: 'MPEG transport stream (M2TS)' };
   if (looksLikeText(head)) return sniffText(head, ext, size);
   return unsupported('Unknown file', 'FileConvert does not recognize this file type.');
 }

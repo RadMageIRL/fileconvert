@@ -21,8 +21,6 @@ const RAW = 'Camera RAW files are not supported. Export a JPG or TIFF from your 
 export const NOT_SUPPORTED: Readonly<Record<string, string>> = {
   avi: 'AVI video is not supported yet. MP4, WebM, MOV and MKV are.',
   wmv: 'Windows Media files (WMV, WMA) are not supported yet.', wma: 'Windows Media files (WMV, WMA) are not supported yet.', asf: 'Windows Media files (WMV, WMA) are not supported yet.',
-  aiff: 'AIFF audio is not supported yet.', aif: 'AIFF audio is not supported yet.',
-  ts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.', m2ts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.', mts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.',
   doc: 'Older Word documents (DOC) are not supported. Save them as DOCX first.',
   xls: 'Older Excel workbooks (XLS) are not supported. Save them as XLSX first.',
   ppt: 'PowerPoint files are not supported.', pptx: 'PowerPoint files are not supported.',

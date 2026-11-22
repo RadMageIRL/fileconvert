@@ -155,7 +155,7 @@ export class Queue {
           else job.notes.push(`This browser cannot read the frames of an animated ${fmt.label}, so it converts as its first frame.`);
         }
       } else if (fmt.category === 'audio' || fmt.category === 'video') {
-        const info = await this.engines.inspect.run<MediaInfo>('inspect', { file: job.file });
+        const info = await this.engines.inspect.run<MediaInfo>('inspect', { file: job.file, format: s.format });
         job.traits.hasVideo = !!info.video;
         job.traits.hasAudio = !!info.audio;
         if (info.duration) parts.push(fmtDuration(info.duration));
@@ -195,6 +195,18 @@ export class Queue {
           job.notes.push(`The audio is ${codec(info.audio.codec)}, which this browser cannot decode; only the video can be converted, without sound.`);
         }
         if (info.audioTracks > 1) job.notes.push(`${info.audioTracks} audio tracks; the first is converted.`);
+        if (info.unreadableVideo) {
+          // A transport stream whose video Mediabunny cannot read at all, such as MPEG-2 from a TV recording.
+          if (!info.audio?.decodable) {
+            job.status = 'unsupported';
+            job.info = parts.join(', ');
+            job.error = `The video is ${info.unreadableVideo}, which FileConvert cannot decode (TV recordings and DVDs often use it), and there is no sound it can read.`;
+            this.onChange(job);
+            return;
+          }
+          job.notes.push(`The video is ${info.unreadableVideo}, which FileConvert cannot decode (TV recordings and DVDs often use it). Only the sound can be converted.`);
+        }
+        job.notes.push(...(info.notes ?? []));
       } else if (s.format === 'xlsx') {
         job.sheets = await this.engines.data.run<string[]>('sheets', { file: job.file });
         parts.push(`${job.sheets.length} ${job.sheets.length === 1 ? 'sheet' : 'sheets'}`);
@@ -359,7 +371,8 @@ export class Queue {
         outs = r.outputs.map(o => ({ blob: new Blob([o.bytes as Uint8Array<ArrayBuffer>], { type: r.mime }), ext: r.ext, suffix: o.suffix }));
       } else if (engine === 'media' || engine === 'video-to-gif' || engine === 'gif-to-video') {
         const options = {
-          maxHeight: s.video.maxHeight, videoQuality: s.video.quality, removeAudio: s.video.removeAudio,
+          // Sound this browser cannot decode is left out, as the note on the row said when the file was added.
+          maxHeight: s.video.maxHeight, videoQuality: s.video.quality, removeAudio: s.video.removeAudio || job.traits.hasAudio === false,
           audioBitrate: s.audio.bitrate, sampleRate: s.audio.sampleRate, channels: s.audio.channels,
           gifWidth: s.video.gifWidth, gifFps: s.video.gifFps, background: s.image.background,
         };

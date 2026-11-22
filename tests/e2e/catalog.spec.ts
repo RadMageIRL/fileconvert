@@ -33,7 +33,7 @@ test('the category buttons filter the list and show which one is on', async ({ p
   const audio = page.getByRole('group', { name: 'Show category' }).getByRole('button', { name: 'Audio' });
   await audio.click();
   await expect(audio).toHaveAttribute('aria-pressed', 'true');
-  await expect(visible(page)).toHaveText(['MP4 to MP3', 'WAV to MP3', 'M4A to MP3', 'FLAC to MP3']);
+  await expect(visible(page)).toHaveText(['MP4 to MP3', 'WAV to MP3', 'M4A to MP3', 'FLAC to MP3', 'AIFF to MP3']);
   await page.getByRole('searchbox', { name: 'Search conversions' }).fill('flac');
   await expect(visible(page)).toHaveText(['FLAC to MP3']);
   await page.getByRole('button', { name: 'All', exact: true }).click();
