@@ -5,8 +5,10 @@
 
 import { FORMATS, type FormatId } from '../../core/formats';
 import { LIMITS, LimitError } from '../../core/limits';
-import { encodeAvif, encodeBmp, encodeGif, encodeTiff, encodeWebpWasm, type GifFrame } from './encoders';
+import { encodeAvif, encodeBmp, encodeGif, encodeWebpWasm, type GifFrame } from './encoders';
 import { readHeader } from './header';
+import { bestEntry, decodeIcoBitmap, icoSizes, readIcoDirectory, writeIco } from './ico';
+import { TiffWriter, type TiffCompression } from './tiff';
 
 export type ResizeMode =
   | { mode: 'none' }
@@ -19,10 +21,16 @@ export interface ImageOptions {
   resize: ResizeMode;
   /** CSS hex color that replaces transparency in formats without it. */
   background: string;
+  /** ICO output: 'favicon' (16, 32 and 48), 'all' (16 to 256) or one size such as '32'. */
+  ico?: string;
+  tiffCompression?: TiffCompression;
+  /** A multi-page TIFF: convert every page (one file each, or one TIFF), or only the first. */
+  tiffPages?: 'all' | 'first';
 }
 
 export interface ImageResult {
-  bytes: Uint8Array;
+  /** One file, or one per page of a multi-page TIFF (suffix "page 2"). */
+  outputs: Array<{ bytes: Uint8Array; suffix?: string }>;
   mime: string;
   ext: string;
   width: number;
@@ -93,7 +101,8 @@ async function decodeHeic(bytes: Uint8Array, warnings: string[]): Promise<Pictur
 
 interface TiffIfd { width: number; height: number; data?: Uint8Array; t254?: number[]; t256?: number[]; t257?: number[]; t274?: number[]; t34675?: unknown }
 
-async function decodeTiff(bytes: Uint8Array, warnings: string[]): Promise<{ pic: Picture; orientation: number }> {
+/** The pages of a TIFF (thumbnails and other reduced images left out), decoded one at a time. */
+async function openTiff(bytes: Uint8Array, warnings: string[]): Promise<{ count: number; decode(i: number): Promise<{ pic: Picture; orientation: number }> }> {
   const UTIF = (await import('utif')).default as unknown as {
     decode(b: ArrayBuffer | Uint8Array): TiffIfd[];
     decodeImage(b: ArrayBuffer | Uint8Array, ifd: TiffIfd, ifds: TiffIfd[]): void;
@@ -102,17 +111,36 @@ async function decodeTiff(bytes: Uint8Array, warnings: string[]): Promise<{ pic:
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   let ifds: TiffIfd[];
   try { ifds = UTIF.decode(buf); } catch { throw new Error('The TIFF file could not be read. It may be damaged.'); }
-  const pages = ifds.filter(d => !(d.t254 && (d.t254[0] & 1)));
-  const page = pages[0] ?? ifds[0];
-  if (!page) throw new Error('No picture was found in this TIFF file.');
-  const width = page.t256?.[0] ?? 0, height = page.t257?.[0] ?? 0;
-  checkPixels(width, height);
-  if (pages.length > 1) warnings.push(`The TIFF has ${pages.length} pages; the first was converted.`);
-  if (page.t34675) warnings.push('The TIFF has an embedded color profile, which is not applied.');
-  try { UTIF.decodeImage(buf, page, ifds); } catch { throw new Error('This TIFF uses a compression or layout that could not be decoded.'); }
-  const rgba = UTIF.toRGBA8(page);
-  if (!page.width || !page.height || rgba.length < page.width * page.height * 4) throw new Error('This TIFF could not be decoded.');
-  return { pic: imageDataPicture(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, page.width * page.height * 4), page.width, page.height), orientation: page.t274?.[0] ?? 1 };
+  let pages = ifds.filter(d => !(d.t254 && (d.t254[0] & 1)));
+  if (!pages.length && ifds.length) pages = [ifds[0]];
+  if (!pages.length) throw new Error('No picture was found in this TIFF file.');
+  if (pages.length > LIMITS.tiffPages) throw new LimitError(`The TIFF has ${pages.length} pages; the limit is ${LIMITS.tiffPages}.`);
+  if (pages.some(p => p.t34675)) warnings.push('The TIFF has an embedded color profile, which is not applied.');
+  return {
+    count: pages.length,
+    async decode(i: number) {
+      const page = pages[i];
+      checkPixels(page.t256?.[0] ?? 0, page.t257?.[0] ?? 0);
+      try { UTIF.decodeImage(buf, page, ifds); } catch { throw new Error(`Page ${i + 1} of this TIFF uses a compression or layout that could not be decoded.`); }
+      const rgba = UTIF.toRGBA8(page);
+      if (!page.width || !page.height || rgba.length < page.width * page.height * 4) throw new Error(`Page ${i + 1} of this TIFF could not be decoded.`);
+      const pic = imageDataPicture(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, page.width * page.height * 4), page.width, page.height);
+      page.data = undefined;
+      return { pic, orientation: page.t274?.[0] ?? 1 };
+    },
+  };
+}
+
+/** The largest picture in an ICO or CUR file. */
+async function decodeIco(bytes: Uint8Array, warnings: string[]): Promise<Picture> {
+  const entries = readIcoDirectory(bytes);
+  const e = bestEntry(entries);
+  const sizes = [...new Set(entries.map(x => x.width))].sort((a, b) => a - b);
+  if (sizes.length > 1) warnings.push(`The icon holds ${sizes.length} sizes (${sizes.join(', ')} pixels); the largest, ${e.width} x ${e.height}, was converted.`);
+  checkPixels(e.width, e.height);
+  if (e.png) return decodeNative(bytes.subarray(e.offset, e.offset + e.size), 'image/png');
+  const d = decodeIcoBitmap(bytes, e);
+  return imageDataPicture(d.rgba, d.width, d.height);
 }
 
 async function decodeAvifWasm(bytes: Uint8Array): Promise<Picture> {
@@ -135,7 +163,7 @@ async function decodeNative(bytes: Uint8Array, mime: string): Promise<Picture> {
 
 async function decode(bytes: Uint8Array, format: FormatId, warnings: string[]): Promise<{ pic: Picture; orientation: number }> {
   if (format === 'heic') return { pic: await decodeHeic(bytes, warnings), orientation: 1 };
-  if (format === 'tiff') return decodeTiff(bytes, warnings);
+  if (format === 'ico') return { pic: await decodeIco(bytes, warnings), orientation: 1 };
   try {
     return { pic: await decodeNative(bytes, FORMATS[format].mime), orientation: 1 };
   } catch (e) {
@@ -251,7 +279,7 @@ async function gifToGif(bytes: Uint8Array, o: ImageOptions, progress: Progress, 
   progress('Encoding GIF');
   const { bytes: gif, stats } = encodeGif(frames, size.width, size.height);
   if (stats.partialAlpha) warnings.push('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
-  return { bytes: gif, mime: 'image/gif', ext: 'gif', width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}, ${raw.length} frames` };
+  return { outputs: [{ bytes: gif }], mime: 'image/gif', ext: 'gif', width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}, ${raw.length} frames` };
 }
 
 // ------------------------------------------------------------------ main
@@ -271,7 +299,99 @@ export function isTruncated(bytes: Uint8Array, format: FormatId): boolean {
   return false;
 }
 
+/** Squares of the chosen ICO sizes, the picture fitted and centered on transparency, stored as PNGs. */
+async function encodeIco(pic: Picture, orientation: number, setting: string | undefined, warnings: string[]): Promise<{ bytes: Uint8Array; sizes: number[] }> {
+  const swap = orientation >= 5 && orientation <= 8;
+  const w0 = swap ? pic.height : pic.width, h0 = swap ? pic.width : pic.height;
+  const sizes = icoSizes(setting ?? 'favicon');
+  const pngs: Array<{ size: number; png: Uint8Array }> = [];
+  for (const s of sizes) {
+    const k = Math.min(s / w0, s / h0);
+    const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k));
+    const fitted = scaled(pic, w, h, orientation);
+    const square = context(s, s);
+    square.drawImage(fitted.canvas, Math.floor((s - w) / 2), Math.floor((s - h) / 2));
+    fitted.canvas.width = 0;
+    const blob = await square.canvas.convertToBlob({ type: 'image/png' });
+    square.canvas.width = 0;
+    pngs.push({ size: s, png: new Uint8Array(await blob.arrayBuffer()) });
+  }
+  const enlarged = sizes.filter(s => s > Math.max(w0, h0));
+  if (enlarged.length) warnings.push(`The picture is ${w0} x ${h0}, so the ${enlarged.join(', ')} pixel ${enlarged.length === 1 ? 'size was' : 'sizes were'} enlarged and can look soft.`);
+  if (w0 !== h0) warnings.push('The picture is not square, so it was centered on a transparent square.');
+  return { bytes: writeIco(pngs), sizes };
+}
+
 let canvasWebp: boolean | null = null;
+
+/** Converts one decoded picture (or one TIFF page). Returns the encoded bytes, or null when added to a TIFF. */
+async function renderPicture(pic: Picture, orientation: number, from: FormatId, to: FormatId, o: ImageOptions, warnings: string[], progress: Progress, tiff: TiffWriter | null): Promise<{ bytes: Uint8Array | null; width: number; height: number; detail?: string }> {
+  const note = (w: string) => { if (!warnings.includes(w)) warnings.push(w); };
+  checkPixels(pic.width, pic.height);
+  if (to === 'ico') {
+    progress('Making icon sizes');
+    if (o.resize.mode !== 'none') note('ICO sizes come from the ICO setting in Images settings; the Size setting does not apply.');
+    const r = await encodeIco(pic, orientation, o.ico, warnings);
+    return { bytes: r.bytes, width: r.sizes[r.sizes.length - 1], height: r.sizes[r.sizes.length - 1], detail: `${r.sizes.join(', ')} px` };
+  }
+  const swap = orientation >= 5 && orientation <= 8;
+  const baseW = swap ? pic.height : pic.width, baseH = swap ? pic.width : pic.height;
+  const size = outputSize(baseW, baseH, o.resize);
+  checkPixels(size.width, size.height, 'The result');
+  if (to === 'webp' && (size.width > 16383 || size.height > 16383)) throw new LimitError('WebP images can be at most 16,383 pixels on a side. Choose a smaller size.');
+  if ((to === 'jpg' || to === 'gif') && (size.width > 65535 || size.height > 65535)) throw new LimitError(`${FORMATS[to].label} images can be at most 65,535 pixels on a side.`);
+  progress(size.width !== baseW || size.height !== baseH ? 'Resizing' : 'Preparing pixels');
+  const ctx = scaled(pic, size.width, size.height, orientation);
+  const opaqueSource = from === 'jpg' || from === 'bmp';
+  const transparent = !opaqueSource && hasTransparency(ctx.getImageData(0, 0, size.width, size.height).data);
+  const noAlpha = to === 'jpg' || to === 'bmp';
+  if (noAlpha && transparent) {
+    flatten(ctx, o.background);
+    note(`The image has transparent areas. ${FORMATS[to].label} cannot keep them, so they became ${COLOR_NAMES[o.background.toLowerCase()] ?? o.background}.`);
+  }
+  progress(`Encoding ${FORMATS[to].label}`);
+  let out: Uint8Array | null;
+  const q = Math.max(1, Math.min(100, Math.round(o.quality)));
+  switch (to) {
+    case 'png':
+    case 'jpg': {
+      const blob = await ctx.canvas.convertToBlob({ type: FORMATS[to].mime, quality: q / 100 });
+      if (blob.type !== FORMATS[to].mime) throw new Error(`This browser cannot write ${FORMATS[to].label}.`);
+      out = new Uint8Array(await blob.arrayBuffer());
+      break;
+    }
+    case 'webp': {
+      if (canvasWebp !== false) {
+        const blob = await ctx.canvas.convertToBlob({ type: 'image/webp', quality: q / 100 });
+        canvasWebp = blob.type === 'image/webp';
+        if (canvasWebp) { out = new Uint8Array(await blob.arrayBuffer()); break; }
+      }
+      out = await encodeWebpWasm(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
+      break;
+    }
+    case 'avif':
+      out = await encodeAvif(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
+      break;
+    case 'bmp':
+      out = encodeBmp(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height);
+      break;
+    case 'tiff':
+      tiff!.addPage({ rgba: ctx.getImageData(0, 0, size.width, size.height).data, width: size.width, height: size.height });
+      out = null;
+      break;
+    case 'gif': {
+      const { bytes: gif, stats } = encodeGif([{ rgba: ctx.getImageData(0, 0, size.width, size.height).data, delay: 0 }], size.width, size.height, false);
+      out = gif;
+      if (stats.partialAlpha) note('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
+      if (from !== 'gif') note('GIF holds at most 256 colors, so colors were reduced. Photos and gradients can show banding.');
+      break;
+    }
+    default:
+      throw new Error(`Images cannot be converted to ${FORMATS[to].label}.`);
+  }
+  ctx.canvas.width = 0;
+  return { bytes: out, width: size.width, height: size.height };
+}
 
 export async function convertImage(bytes: Uint8Array, from: FormatId, to: FormatId, o: ImageOptions, progress: Progress): Promise<ImageResult> {
   const warnings: string[] = [];
@@ -287,67 +407,31 @@ export async function convertImage(bytes: Uint8Array, from: FormatId, to: Format
     // Some browsers refuse a cut-off file, others decode what is there. Either way the user should know.
     warnings.push(`The ${FORMATS[from].label} file ends early, as if the download or copy was cut off. Part of the picture may be missing.`);
   }
-  progress(`Decoding ${FORMATS[from].label}`);
-  const { pic, orientation } = await decode(bytes, from, warnings);
-  try {
-    checkPixels(pic.width, pic.height);
-    const swap = orientation >= 5 && orientation <= 8;
-    const baseW = swap ? pic.height : pic.width, baseH = swap ? pic.width : pic.height;
-    const size = outputSize(baseW, baseH, o.resize);
-    checkPixels(size.width, size.height, 'The result');
-    if (to === 'webp' && (size.width > 16383 || size.height > 16383)) throw new LimitError('WebP images can be at most 16,383 pixels on a side. Choose a smaller size.');
-    if ((to === 'jpg' || to === 'gif') && (size.width > 65535 || size.height > 65535)) throw new LimitError(`${FORMATS[to].label} images can be at most 65,535 pixels on a side.`);
-    progress(size.width !== baseW || size.height !== baseH ? 'Resizing' : 'Preparing pixels');
-    const ctx = scaled(pic, size.width, size.height, orientation);
-    const opaqueSource = from === 'jpg' || from === 'bmp';
-    const transparent = !opaqueSource && hasTransparency(ctx.getImageData(0, 0, size.width, size.height).data);
-    const noAlpha = to === 'jpg' || to === 'bmp';
-    if (noAlpha && transparent) {
-      flatten(ctx, o.background);
-      warnings.push(`The image has transparent areas. ${FORMATS[to].label} cannot keep them, so they became ${COLOR_NAMES[o.background.toLowerCase()] ?? o.background}.`);
-    }
-    progress(`Encoding ${FORMATS[to].label}`);
-    let out: Uint8Array;
-    const q = Math.max(1, Math.min(100, Math.round(o.quality)));
-    switch (to) {
-      case 'png':
-      case 'jpg': {
-        const blob = await ctx.canvas.convertToBlob({ type: FORMATS[to].mime, quality: q / 100 });
-        if (blob.type !== FORMATS[to].mime) throw new Error(`This browser cannot write ${FORMATS[to].label}.`);
-        out = new Uint8Array(await blob.arrayBuffer());
-        break;
-      }
-      case 'webp': {
-        if (canvasWebp !== false) {
-          const blob = await ctx.canvas.convertToBlob({ type: 'image/webp', quality: q / 100 });
-          canvasWebp = blob.type === 'image/webp';
-          if (canvasWebp) { out = new Uint8Array(await blob.arrayBuffer()); break; }
-        }
-        out = await encodeWebpWasm(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
-        break;
-      }
-      case 'avif':
-        out = await encodeAvif(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
-        break;
-      case 'bmp':
-        out = encodeBmp(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height);
-        break;
-      case 'tiff':
-        out = encodeTiff(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height);
-        break;
-      case 'gif': {
-        const { bytes: gif, stats } = encodeGif([{ rgba: ctx.getImageData(0, 0, size.width, size.height).data, delay: 0 }], size.width, size.height, false);
-        out = gif;
-        if (stats.partialAlpha) warnings.push('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
-        if (from !== 'gif') warnings.push('GIF holds at most 256 colors, so colors were reduced. Photos and gradients can show banding.');
-        break;
-      }
-      default:
-        throw new Error(`Images cannot be converted to ${FORMATS[to].label}.`);
-    }
-    ctx.canvas.width = 0;
-    return { bytes: out, mime: FORMATS[to].mime, ext: FORMATS[to].ext, width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}` };
-  } finally {
-    pic.close();
+  // A multi-page TIFF gives every page (one file each, or one TIFF with them all), or only its first page.
+  const tiffIn = from === 'tiff' ? await openTiff(bytes, warnings) : null;
+  let count = tiffIn ? tiffIn.count : 1;
+  if (tiffIn && count > 1) {
+    if (o.tiffPages === 'first') { warnings.push(`The TIFF has ${count} pages; the first was converted, as set in Images settings.`); count = 1; }
+    else if (to === 'tiff') warnings.push(`All ${count} pages are in the new TIFF, in order.`);
+    else if (to === 'ico') { warnings.push(`The TIFF has ${count} pages; the icon is made from the first.`); count = 1; }
+    else warnings.push(`The TIFF has ${count} pages; each became its own ${FORMATS[to].label} file.`);
   }
+  const tiff = to === 'tiff' ? new TiffWriter(o.tiffCompression === 'lzw' ? 'lzw' : 'none') : null;
+  const outputs: ImageResult['outputs'] = [];
+  let last: { width: number; height: number; detail?: string } = { width: 0, height: 0 };
+  for (let i = 0; i < count; i++) {
+    progress(count > 1 ? `Page ${i + 1} of ${count}` : `Decoding ${FORMATS[from].label}`);
+    const { pic, orientation } = tiffIn ? await tiffIn.decode(i) : await decode(bytes, from, warnings);
+    try {
+      const r = await renderPicture(pic, orientation, from, to, o, warnings, progress, tiff);
+      if (r.bytes) outputs.push({ bytes: r.bytes, suffix: count > 1 ? `page ${i + 1}` : undefined });
+      last = r;
+    } finally {
+      pic.close();
+    }
+  }
+  if (tiff) outputs.push({ bytes: tiff.finish() });
+  const pages = to === 'tiff' && count > 1 ? `, ${count} pages` : count > 1 ? `, ${count} files` : '';
+  const summary = last.detail ? `ICO, ${last.detail}` : `${last.width} x ${last.height}${pages}${to === 'tiff' && o.tiffCompression === 'lzw' ? ', LZW' : ''}`;
+  return { outputs, mime: FORMATS[to].mime, ext: FORMATS[to].ext, width: last.width, height: last.height, warnings, summary };
 }

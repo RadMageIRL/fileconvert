@@ -1,9 +1,8 @@
-// Encoders for the formats a browser canvas cannot write: BMP, TIFF, GIF (static and animated) and AVIF,
-// plus WebP for browsers whose canvas has no WebP encoder. BMP is written here; the others use small,
-// audited libraries (UTIF.js, gifenc, and the libavif and libwebp builds from jSquash).
+// Encoders for the formats a browser canvas cannot write: BMP, GIF (static and animated) and AVIF, plus WebP
+// for browsers whose canvas has no WebP encoder. BMP is written here; the others use small, audited libraries
+// (gifenc, and the libavif and libwebp builds from jSquash). TIFF and ICO are written in ./tiff and ./ico.
 
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
-import UTIF from 'utif';
 
 /** 24-bit BMP, bottom-up rows padded to four bytes. Callers flatten transparency first. */
 export function encodeBmp(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number): Uint8Array {
@@ -34,12 +33,6 @@ export function encodeBmp(rgba: Uint8ClampedArray | Uint8Array, width: number, h
     }
   }
   return out;
-}
-
-/** Uncompressed 8-bit RGBA TIFF with unassociated (straight) alpha. */
-export function encodeTiff(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number): Uint8Array {
-  const buf = UTIF.encodeImage(rgba, width, height, { t338: [2], t305: ['FileConvert'] });
-  return new Uint8Array(buf);
 }
 
 export interface GifFrame {

@@ -5,7 +5,7 @@
 export type Category = 'image' | 'audio' | 'video' | 'document' | 'data';
 
 export type FormatId =
-  | 'jpg' | 'png' | 'webp' | 'avif' | 'heic' | 'bmp' | 'gif' | 'tiff'
+  | 'jpg' | 'png' | 'webp' | 'avif' | 'heic' | 'bmp' | 'gif' | 'tiff' | 'ico'
   | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg'
   | 'mp4' | 'webm' | 'mov' | 'mkv'
   | 'txt' | 'pdf' | 'md' | 'html' | 'docx'
@@ -36,7 +36,8 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   heic: f('heic', 'HEIC', 'heic', ['heic', 'heif', 'hif'], 'image/heic', 'image'),
   bmp: f('bmp', 'BMP', 'bmp', ['bmp', 'dib'], 'image/bmp', 'image', 'Uncompressed 24-bit, no transparency.'),
   gif: f('gif', 'GIF', 'gif', ['gif'], 'image/gif', 'image', '256 colors, on/off transparency.'),
-  tiff: f('tiff', 'TIFF', 'tiff', ['tif', 'tiff'], 'image/tiff', 'image', 'Uncompressed, keeps transparency.'),
+  tiff: f('tiff', 'TIFF', 'tiff', ['tif', 'tiff'], 'image/tiff', 'image', 'Lossless, keeps transparency; uncompressed or LZW, and every page of a multi-page TIFF.'),
+  ico: f('ico', 'ICO', 'ico', ['ico', 'cur'], 'image/x-icon', 'image', 'Windows and website icon; the sizes are set in Images settings.'),
 
   mp3: f('mp3', 'MP3', 'mp3', ['mp3'], 'audio/mpeg', 'audio', 'Plays everywhere.'),
   wav: f('wav', 'WAV', 'wav', ['wav', 'wave'], 'audio/wav', 'audio', 'Uncompressed 16-bit PCM.'),
@@ -64,11 +65,11 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   xlsx: f('xlsx', 'XLSX', 'xlsx', ['xlsx'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'data'),
 };
 
-export const IMAGE_OUT: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff'];
+export const IMAGE_OUT: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff', 'ico'];
 export const AUDIO_OUT: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg'];
 export const VIDEO_OUT: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv', 'gif'];
 
-export const IMAGE_IN: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'heic', 'bmp', 'gif', 'tiff'];
+export const IMAGE_IN: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'heic', 'bmp', 'gif', 'tiff', 'ico'];
 export const AUDIO_IN: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg'];
 export const VIDEO_IN: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv'];
 
@@ -112,7 +113,7 @@ export function targetsFor(input: FormatId, traits: InputTraits = {}): FormatId[
   switch (cat) {
     case 'image': {
       const preferred: Partial<Record<FormatId, FormatId>> = {
-        jpg: 'png', png: 'jpg', webp: 'png', avif: 'jpg', heic: 'jpg', bmp: 'png', gif: 'png', tiff: 'png',
+        jpg: 'png', png: 'jpg', webp: 'png', avif: 'jpg', heic: 'jpg', bmp: 'png', gif: 'png', tiff: 'png', ico: 'png',
       };
       const first = preferred[input] ?? 'png';
       const list = [first, ...IMAGE_OUT.filter(x => x !== first)];

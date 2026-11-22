@@ -415,8 +415,11 @@ export class App {
       panel('image', ' Quality, size, transparency',
         h('label', { class: 'field' }, h('span', {}, 'Quality (JPG, WebP, AVIF)'), h('span', { class: 'row' }, quality, qv)),
         h('div', { class: 'field' }, h('span', {}, 'Size'), h('span', { class: 'row' }, mode, pctRow, boxRow)),
-        h('label', { class: 'field' }, h('span', {}, 'Background for transparent areas (JPG, BMP)'), color));
-      box.lastElementChild!.append(h('p', { class: 'note' }, 'Fit inside a box never enlarges. Metadata such as EXIF and GPS location is not copied. Orientation is applied to the pixels.'));
+        h('label', { class: 'field' }, h('span', {}, 'Background for transparent areas (JPG, BMP)'), color),
+        select('ICO sizes', s.image.ico, [['favicon', 'Favicon: 16, 32 and 48 px'], ['all', 'All: 16 to 256 px'], ['16', '16 x 16'], ['32', '32 x 32'], ['48', '48 x 48'], ['64', '64 x 64'], ['128', '128 x 128'], ['256', '256 x 256']], v => { s.image.ico = v; }),
+        select('TIFF compression', s.image.tiffCompression, [['none', 'None (most compatible)'], ['lzw', 'LZW (smaller, lossless)']], v => { s.image.tiffCompression = v === 'lzw' ? 'lzw' : 'none'; }),
+        select('Multi-page TIFF', s.image.tiffPages, [['all', 'Every page'], ['first', 'First page only']], v => { s.image.tiffPages = v === 'first' ? 'first' : 'all'; }));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'Fit inside a box never enlarges. Metadata such as EXIF and GPS location is not copied. Orientation is applied to the pixels. An ICO holds each chosen size as a square picture; a picture that is not square is centered on transparency. Every page of a multi-page TIFF becomes its own file, or stays together when converting to TIFF.'));
     }
     if (cats.has('audio')) {
       panel('audio', ' Bitrate, sample rate, channels',

@@ -242,7 +242,12 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string): 
   if (starts(head, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {
     return unsupported('Legacy Office or Outlook file', 'Older Office formats (DOC, XLS, PPT) and Outlook MSG files are not supported. Save as DOCX or XLSX first.');
   }
-  if (starts(head, [0x00, 0x00, 0x01, 0x00])) return unsupported('Windows icon', 'ICO files are not supported.');
+  if ((starts(head, [0x00, 0x00, 0x01, 0x00]) || starts(head, [0x00, 0x00, 0x02, 0x00])) && head.length >= 22) {
+    // An icon directory: a sane picture count and a first picture that starts after the directory.
+    const count = head[4] | (head[5] << 8);
+    const first = (head[18] | (head[19] << 8) | (head[20] << 16) | (head[21] << 24)) >>> 0;
+    if (count > 0 && count <= 256 && first >= 6 + count * 16 && first < size) return { format: 'ico', label: head[2] === 2 ? 'Windows cursor' : 'Windows icon' };
+  }
   if (starts(head, [0xff, 0x0a]) || starts(head, [0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20])) return unsupported('JPEG XL image', 'JPEG XL is not supported yet.');
   if (starts(head, [0x30, 0x26, 0xb2, 0x75])) return unsupported('Windows Media file', 'WMA and WMV files are not supported.');
   if (starts(head, [0x47]) && head.length > 376 && head[188] === 0x47 && head[376] === 0x47) {

@@ -186,6 +186,25 @@ export const PAGES: readonly ConversionPage[] = [
     keywords: ['jpeg', 'modern'],
   },
   {
+    slug: 'png-to-ico', from: 'png', to: 'ico', category: 'image', common: 10,
+    blurb: 'Favicons and Windows icons',
+    description: 'Make an ICO icon from a PNG: a favicon with 16, 32 and 48 pixel sizes, every size up to 256, or one size, with transparency kept. In your browser.',
+    intro: 'ICO is the icon format of Windows and the classic website favicon. One ICO file holds the same picture at several sizes, and each place that shows it picks the size that fits.',
+    details: [
+      'The favicon preset holds 16, 32 and 48 pixel pictures. Choose all six sizes up to 256 pixels, or one size, in Images settings.',
+      'Each size is a square picture stored as PNG inside the ICO, which keeps transparency and is read by Windows and every browser.',
+      'A picture that is not square is fitted and centered on a transparent square, never stretched.',
+      'Large pictures are reduced in steps, so the small sizes stay sharp.',
+    ],
+    limits: [
+      'Sizes larger than your picture are enlarged and can look soft; start from at least 256 x 256 pixels for the full set.',
+      'Windows XP and older read only bitmap icons, not PNG pictures inside an ICO.',
+      'An animated PNG becomes its first frame.',
+    ],
+    related: ['png-to-jpg', 'png-to-webp', 'jpg-to-png', 'webp-to-png'],
+    keywords: ['favicon', 'icon', 'windows', 'website', 'browser tab'],
+  },
+  {
     slug: 'gif-to-mp4', from: 'gif', to: 'mp4', category: 'image',
     blurb: 'Animated GIFs as small videos',
     description: 'Turn animated GIFs into MP4 videos that are a fraction of the size and play everywhere. Converted with your browser\'s encoder, never uploaded.',

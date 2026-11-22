@@ -8,6 +8,8 @@ export const LIMITS = {
   imageBytes: 300 * MB,
   imagePixels: 100_000_000,
   imageSide: 30_000,
+  /** Pages read from one multi-page TIFF, and pages in one TIFF written. */
+  tiffPages: 1000,
   /** Audio and video inputs are read in pieces, so they may be large. */
   mediaBytes: 8 * 1024 * MB,
   /** Results kept in memory when the browser has no private file storage for them. */

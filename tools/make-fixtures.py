@@ -372,6 +372,56 @@ ws.append([datetime.date(2026, 11, 22)])
 ws['A2'].number_format = 'yyyy-mm-dd'
 wb.save(os.path.join(DAT, 'dates1904.xlsx'))
 
+# ---------------------------------------------------------------- icons (v0.2.0)
+
+
+def icon_pattern(n):
+    """A square test pattern: four colored quadrants and a fully transparent top-left corner."""
+    im = Image.new('RGBA', (n, n))
+    px = im.load()
+    for y in range(n):
+        for x in range(n):
+            if x < n // 4 and y < n // 4:
+                px[x, y] = (0, 0, 0, 0)
+            else:
+                px[x, y] = (220 if x >= n // 2 else 30, 200 if y >= n // 2 else 40, 90, 255)
+    return im
+
+
+icon_pattern(256).save(os.path.join(IMG, 'icon-png.ico'), sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+icon_pattern(64).save(os.path.join(IMG, 'icon-bmp.ico'), sizes=[(16, 16), (32, 32), (64, 64)], bitmap_format='bmp')
+
+
+def legacy_icon(path, size, bpp):
+    """One bitmap picture with a palette and an AND mask: the left half is transparent through the mask."""
+    colors = 1 << bpp
+    palette = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (255, 255, 255)] + [(0, 0, 0)] * (colors - 4) if colors >= 4 else [(0, 0, 0), (255, 255, 255)]
+    xor_stride = ((size * bpp + 31) // 32) * 4
+    and_stride = ((size + 31) // 32) * 4
+    xor = bytearray(xor_stride * size)
+    mask = bytearray(and_stride * size)
+    for row in range(size):  # bottom-up: row 0 is the bottom line
+        y = size - 1 - row
+        for x in range(size):
+            idx = (x // 4 + y // 4) % min(colors, 4)
+            bit = x * bpp
+            xor[row * xor_stride + bit // 8] |= idx << (8 - bpp - bit % 8)
+            if x < size // 2:
+                mask[row * and_stride + x // 8] |= 0x80 >> (x % 8)
+    header = struct.pack('<IiiHHIIiiII', 40, size, size * 2, 1, bpp, 0, len(xor) + len(mask), 0, 0, colors, 0)
+    pal = b''.join(struct.pack('<BBBB', b, g, r, 0) for (r, g, b) in palette)
+    body = header + pal + bytes(xor) + bytes(mask)
+    directory = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', size, size, colors if colors < 256 else 0, 0, 1, bpp, len(body), 22)
+    with open(path, 'wb') as f:
+        f.write(directory + body)
+
+
+legacy_icon(os.path.join(IMG, 'icon-8bit.ico'), 16, 8)
+legacy_icon(os.path.join(IMG, 'icon-1bit.ico'), 32, 1)
+# A directory that points past the end of the file: refused with a reason, never read out of bounds.
+with open(os.path.join(BAD, 'bad-offsets.ico'), 'wb') as f:
+    f.write(struct.pack('<HHH', 0, 1, 2) + struct.pack('<BBBBHHII', 32, 32, 0, 0, 1, 32, 4096, 38) + struct.pack('<BBBBHHII', 16, 16, 0, 0, 1, 32, 999999, 70000) + bytes(16))
+
 # ---------------------------------------------------------------- hostile inputs
 
 write(os.path.join(BAD, 'xxe.xml'), '<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n<r>&x;</r>\n', 'w')

@@ -21,6 +21,7 @@ describe('format detection reads the bytes, not the name', () => {
   const cases: Array<[string, string | null]> = [
     ['image/alpha.png', 'png'], ['image/photo.jpg', 'jpg'], ['image/alpha.webp', 'webp'], ['image/alpha.avif', 'avif'],
     ['image/alpha.heic', 'heic'], ['image/photo.bmp', 'bmp'], ['image/photo.gif', 'gif'], ['image/alpha.tiff', 'tiff'],
+    ['image/icon-png.ico', 'ico'], ['image/icon-1bit.ico', 'ico'], ['hostile/bad-offsets.ico', 'ico'],
     ['audio/tone.mp3', 'mp3'], ['audio/tagged.mp3', 'mp3'], ['audio/tone.wav', 'wav'], ['audio/tone.flac', 'flac'], ['audio/tone.aac', 'aac'],
     ['audio/tone.m4a', 'm4a'], ['audio/tone-vorbis.ogg', 'ogg'], ['audio/tone-opus.ogg', 'ogg'],
     ['video/clip.mp4', 'mp4'], ['video/clip.webm', 'webm'], ['video/clip.mov', 'mov'], ['video/clip.mkv', 'mkv'], ['video/clip.avi', null],

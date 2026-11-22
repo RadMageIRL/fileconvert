@@ -12,6 +12,8 @@ Work toward v0.2.0.
 - A tab left open while FileConvert is updated, which then asks for a converter the new version no longer has, now says to reload the page instead of blaming memory.
 - **Excel to JSON and JSON to Excel.** JSON from a workbook keeps numbers, true/false and empty cells as JSON values and writes dates as ISO 8601 text; pick one sheet or get all of them in one file. JSON to Excel gives typed cells, one sheet per list, text that can never run as a formula, and every digit of large integers. New pages: Excel to JSON and JSON to Excel.
 - **TSV is its own format**, read and written, to and from CSV, JSON and Excel, with the same formula protection as CSV. Converted files say how many cells protection changed, and it can be turned off.
+- **ICO in and out.** Icons from any picture: a favicon with 16, 32 and 48 pixel sizes, all six sizes up to 256, or one size, each kept transparent. ICO and CUR files are read too, whether their pictures are PNG or 32-bit, 8-bit or 1-bit bitmaps with a transparency mask. New page: PNG to ICO.
+- **Multi-page TIFF.** Every page of a multi-page TIFF converts (one file per page, or one TIFF keeping them all in order), or only the first page if you choose. TIFF can be written with LZW compression, which is lossless and read by Windows, macOS and Office.
 - Emoji and other characters beyond the Basic Multilingual Plane are kept in workbooks written by Python tools such as pandas; they used to become a different character on the way to CSV.
 - Mediabunny and its encoders are updated to 1.66.2.
 

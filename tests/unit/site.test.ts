@@ -20,7 +20,7 @@ describe('the page list', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
       'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'heic-to-jpg', 'heic-to-png', 'jpg-to-png', 'json-to-csv',
       'json-to-xlsx', 'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text',
-      'png-to-jpg', 'png-to-webp', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
+      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
     ]);
   });
 
@@ -72,7 +72,7 @@ describe('rendering', () => {
     expect(out).not.toMatch(/<!--\/?fc:/);
     for (const p of PAGES) expect(out).toContain(`<a href="./${p.slug}/"><span class="cat-name">${pageName(p)}</span>`);
     expect(out).toContain('<h2 id="common-title">Common conversions</h2>');
-    expect(out).toContain('<b>JPG, PNG, WebP, AVIF, HEIC, BMP, GIF, TIFF</b> to JPG, PNG, WebP, AVIF, GIF, BMP, TIFF');
+    expect(out).toContain('<b>JPG, PNG, WebP, AVIF, HEIC, BMP, GIF, TIFF, ICO</b> to JPG, PNG, WebP, AVIF, GIF, BMP, TIFF, ICO');
     expect(out).toMatch(/<li>Size limits: pictures up to 100 megapixels and 300 MB/);
     expect(out).toContain('<p class="promise">Convert files. Upload nothing.</p>');
   });

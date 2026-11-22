@@ -338,7 +338,7 @@ export class Queue {
         const r = await this.engines.image.run<ImageResult>('convert', { file: job.file, from, to, options: s.image }, { onProgress, signal });
         job.warnings = r.warnings;
         job.summary = r.summary;
-        outs = [{ blob: new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: r.mime }), ext: r.ext }];
+        outs = r.outputs.map(o => ({ blob: new Blob([o.bytes as Uint8Array<ArrayBuffer>], { type: r.mime }), ext: r.ext, suffix: o.suffix }));
       } else if (engine === 'media' || engine === 'video-to-gif' || engine === 'gif-to-video') {
         const options = {
           maxHeight: s.video.maxHeight, videoQuality: s.video.quality, removeAudio: s.video.removeAudio,

@@ -138,6 +138,17 @@ function isobmffImage(b: Uint8Array): HeaderInfo {
   return info;
 }
 
+/** An icon's largest picture, from its directory. */
+function ico(b: Uint8Array): HeaderInfo {
+  const count = u16le(b, 4);
+  let width = 0, height = 0;
+  for (let i = 0; i < count && 6 + i * 16 + 16 <= b.length; i++) {
+    const w = b[6 + i * 16] || 256, h = b[7 + i * 16] || 256;
+    if (w * h > width * height) { width = w; height = h; }
+  }
+  return width ? { width, height, animated: false } : {};
+}
+
 export function readHeader(bytes: Uint8Array, format: FormatId): HeaderInfo {
   try {
     switch (format) {
@@ -148,6 +159,7 @@ export function readHeader(bytes: Uint8Array, format: FormatId): HeaderInfo {
       case 'webp': return webp(bytes);
       case 'avif':
       case 'heic': return isobmffImage(bytes);
+      case 'ico': return ico(bytes);
       default: return {};
     }
   } catch {

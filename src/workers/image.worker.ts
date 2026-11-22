@@ -8,6 +8,6 @@ serve({
   async convert(p: Payload, progress) {
     const bytes = new Uint8Array(await p.file.arrayBuffer());
     const r = await convertImage(bytes, p.from, p.to, p.options, stage => progress({ stage }));
-    return { result: r, transfer: buffersOf(r.bytes) };
+    return { result: r, transfer: buffersOf(...r.outputs.map(o => o.bytes)) };
   },
 });
