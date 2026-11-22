@@ -99,6 +99,55 @@ describe('removing pages removes everything of them', () => {
     expect(all.text).toContain('/FileConvertTest null');
   });
 
+  test('a widget or popup with /Contents and /Parent on a kept page is an annotation, not a stray page', async () => {
+    const L = await pdfLib();
+    const { doc } = await openPdf(fx('pdf/markers.pdf'));
+    const ctx = doc.context;
+    const N = (s: string) => L.PDFName.of(s);
+    const page1 = ctx.lookup(pageRefs(doc, L)[0], L.PDFDict);
+    // A field whose widget has a tooltip (/Contents) and a parent, and a note's popup with text of its own.
+    const field = ctx.register(ctx.obj({ FT: 'Tx', T: L.PDFString.of('tipfield'), V: L.PDFString.of('TIP-VALUE') }));
+    const widget = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Widget', Rect: [0, 0, 50, 20], Parent: field, Contents: L.PDFString.of('A tooltip') }));
+    ctx.lookup(field, L.PDFDict).set(N('Kids'), ctx.obj([widget]));
+    const note = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [0, 0, 10, 10], Contents: L.PDFString.of('note') }));
+    const popup = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Popup', Rect: [0, 0, 90, 90], Parent: note, Contents: L.PDFString.of('POPUP-TEXT') }));
+    ctx.lookup(note, L.PDFDict).set(N('Popup'), popup);
+    for (const a of [widget, note, popup]) page1.lookup(N('Annots'), L.PDFArray).push(a);
+    doc.catalog.lookup(N('AcroForm'), L.PDFDict).lookup(N('Fields'), L.PDFArray).push(field);
+    const r = keepPages(doc, L, [0, 2, 3]);
+    expect(r.referencesCleared).toBe(0);
+    const back = await L.PDFDocument.load(await savePdf(doc), { parseSpeed: Infinity });
+    const annots = back.getPage(0).node.Annots()!.asArray().map(a => back.context.lookup(a, L.PDFDict).get(N('Subtype'))?.toString());
+    // The link to page 2 goes with it; everything else stays.
+    expect(annots).toEqual(['/Widget', '/Widget', '/Text', '/Popup']);
+    expect(back.getForm().getTextField('tipfield').getText()).toBe('TIP-VALUE');
+  });
+
+  test('bookmark counts are the entries shown: a closed entry\'s own entries do not count for the level above', async () => {
+    const L = await pdfLib();
+    const N = (s: string) => L.PDFName.of(s);
+    const counts = (doc: Awaited<ReturnType<typeof openPdf>>['doc']) => {
+      const out: Record<string, number> = {};
+      const o = doc.catalog.lookup(N('Outlines'), L.PDFDict);
+      out.root = o.lookup(N('Count'), L.PDFNumber).asNumber();
+      for (let r = o.get(N('First')); r; ) {
+        const it = doc.context.lookup(r, L.PDFDict);
+        const c = it.lookup(N('Count'));
+        if (c) out[(it.lookup(N('Title')) as unknown as { decodeText(): string }).decodeText()] = (c as unknown as { asNumber(): number }).asNumber();
+        r = it.get(N('Next'));
+      }
+      return out;
+    };
+    // merge-a: Chapter A1 open with one entry, Closed A3 closed with one, two more at the top (its own root says 4).
+    const whole = await openPdf(fx('pdf/merge-a.pdf'));
+    keepPages(whole.doc, L, [0, 1, 2]);
+    expect(counts(whole.doc)).toEqual({ root: 5, 'Chapter A1': 1, 'Closed A3': -1 });
+    // Without page 3, Closed A3 and its entry go.
+    const two = await openPdf(fx('pdf/merge-a.pdf'));
+    keepPages(two.doc, L, [0, 1]);
+    expect(counts(two.doc)).toEqual({ root: 4, 'Chapter A1': 1 });
+  });
+
   test('reordering keeps every page and all of its content; only the page labels go', async () => {
     const L = await pdfLib();
     const { doc } = await openPdf(fx('pdf/markers.pdf'));
@@ -133,7 +182,7 @@ describe('removing pages removes everything of them', () => {
 describe('opening a PDF for editing', () => {
   test('the guard runs first: bombs, encrypted files and loops are refused with a reason', async () => {
     await expect(openPdf(fx('pdf/bomb-objstm.pdf'))).rejects.toThrow(/object stream that expands past 256 MB/);
-    await expect(openPdf(fx('pdf/encrypted-owner.pdf'))).rejects.toThrow(/^This PDF is encrypted .* FileConvert never removes a PDF's protection/);
+    await expect(openPdf(fx('pdf/encrypted-owner.pdf'))).rejects.toThrow(/^This PDF is encrypted, .* including ones that open without a password .* FileConvert never removes a PDF's protection/);
     await expect(openPdf(fx('pdf/encrypted-user.pdf'))).rejects.toThrow(/^This PDF is encrypted/);
     const L = await pdfLib();
     const loop = await openPdf(fx('pdf/page-loop.pdf'));

@@ -49,7 +49,7 @@ test('PDF to TXT: every hostile PDF is refused by the guard before pdf.js reads 
     ['predictor-columns.pdf', /rows would be 381 MB each/],
     ['pages-6000.pdf', /This PDF has 6,000 pages; the limit is 5,000/],
     ['brotli.pdf', /Brotli compression/],
-    ['encrypted-owner.pdf', /This PDF is encrypted .* FileConvert never removes a PDF's protection/],
+    ['encrypted-owner.pdf', /This PDF is encrypted, .* including ones that open without a password .* FileConvert never removes a PDF's protection/],
     ['encrypted-user.pdf', /This PDF is encrypted/],
   ];
   await addFiles(page, [...hostile.map(([f]) => fx(`pdf/${f}`)), fx('document/sample.pdf'), fx('pdf/markers.pdf'), fx('pdf/count-lie.pdf')]);

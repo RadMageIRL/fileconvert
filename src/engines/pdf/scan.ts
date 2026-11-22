@@ -360,5 +360,6 @@ export function scanPdf(bytes: Uint8Array, limits: PdfLimits = LIMITS): PdfScan 
   return new Scanner(bytes, limits).run();
 }
 
-/** The message for a PDF FileConvert does not open because it is encrypted (v0.2.0 does not decrypt). */
-export const ENCRYPTED_MESSAGE = 'This PDF is encrypted (protected with a password or with permissions), so FileConvert does not open it. FileConvert never removes a PDF\'s protection; open it in the app that made it, or ask its owner for an unprotected copy.';
+/** The message for a PDF FileConvert does not open because it is encrypted (v0.2.0 does not decrypt). It says that
+ *  this includes PDFs that open without a password, since those converted before v0.2.0. */
+export const ENCRYPTED_MESSAGE = 'This PDF is encrypted, so FileConvert does not open it. Encrypted PDFs are not supported, including ones that open without a password and only restrict printing, copying or editing. FileConvert never removes a PDF\'s protection; open it in the app that made it, or ask its owner for an unprotected copy.';

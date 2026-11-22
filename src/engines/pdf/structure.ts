@@ -141,15 +141,10 @@ export function pageRefs(doc: PDFDocumentT, L: Lib): PDFRefT[] {
   return out;
 }
 
-/** Rewrites the page tree as one flat list in the given order (0-based); pages left out are removed. */
-export function setPages(doc: PDFDocumentT, L: Lib, order: number[]): { kept: PDFRefT[]; removed: number } {
+/** Moves the attributes a page inherits from the page tree (resources, boxes, rotation) onto the page itself, so it
+ *  keeps them when its parents are replaced or it is copied into another document. */
+export function pushDownInherited(doc: PDFDocumentT, L: Lib, refs: PDFRefT[]): void {
   const { PDFName, PDFDict } = L;
-  const refs = pageRefs(doc, L);
-  for (const i of order) if (!Number.isInteger(i) || i < 0 || i >= refs.length) throw new Error(`There is no page ${i + 1}; the PDF has ${refs.length}.`);
-  // A page dictionary belongs to one place in the tree; repeating a page would need a copy of it and its annotations.
-  if (new Set(order).size !== order.length) throw new Error('A page can be kept only once.');
-  if (!order.length) throw new Error('At least one page has to stay.');
-  // Inherited attributes move onto each page, so a page keeps them when its parent goes.
   for (const ref of refs) {
     const page = doc.context.lookup(ref, PDFDict);
     for (const k of INHERITABLE) {
@@ -163,6 +158,17 @@ export function setPages(doc: PDFDocumentT, L: Lib, order: number[]): { kept: PD
       }
     }
   }
+}
+
+/** Rewrites the page tree as one flat list in the given order (0-based); pages left out are removed. */
+export function setPages(doc: PDFDocumentT, L: Lib, order: number[]): { kept: PDFRefT[]; removed: number } {
+  const { PDFName, PDFDict } = L;
+  const refs = pageRefs(doc, L);
+  for (const i of order) if (!Number.isInteger(i) || i < 0 || i >= refs.length) throw new Error(`There is no page ${i + 1}; the PDF has ${refs.length}.`);
+  // A page dictionary belongs to one place in the tree; repeating a page would need a copy of it and its annotations.
+  if (new Set(order).size !== order.length) throw new Error('A page can be kept only once.');
+  if (!order.length) throw new Error('At least one page has to stay.');
+  pushDownInherited(doc, L, refs);
   const rootRef = doc.catalog.get(PDFName.of('Pages'));
   const root = doc.catalog.lookup(PDFName.of('Pages'), PDFDict);
   const kept = order.map(i => refs[i]);
@@ -329,7 +335,9 @@ export function cleanDocument(doc: PDFDocumentT, L: Lib, opts: { pagesRemoved: n
         if (dead && !it.get(N('First'))) { report.outlineItemsRemoved++; continue; }
         if (dead) { it.delete(N('Dest')); it.delete(N('A')); }
         keep.push([r, it]);
-        visible += 1 + Math.max(0, below);
+        // A closed entry's own entries are not shown, so they do not count for the level above (its sign says closed).
+        const shut = Number(String(it.lookup(N('Count')))) < 0;
+        visible += 1 + (shut ? 0 : Math.max(0, below));
       }
       keep.forEach(([, it], i) => {
         it.set(N('Parent'), parentRef as PDFRefT);
@@ -409,7 +417,9 @@ export function cleanDocument(doc: PDFDocumentT, L: Lib, opts: { pagesRemoved: n
   const isDeadPage = (ref: PDFRefT) => {
     if (live.has(String(ref))) return false;
     const o = ctx.lookup(ref);
-    return o instanceof PDFDict && (o.lookup(N('Type')) === N('Page') || (o.has(N('Contents')) && o.has(N('Parent')) && !o.has(N('Kids'))));
+    // A page without /Type is told by its content and parent; an annotation (a widget or a popup can have both) always
+    // has a /Subtype, so it is never taken for one.
+    return o instanceof PDFDict && (o.lookup(N('Type')) === N('Page') || (o.has(N('Contents')) && o.has(N('Parent')) && !o.has(N('Kids')) && o.get(N('Subtype')) === undefined));
   };
   const reach = new Set<string>();
   const stack: unknown[] = [];
