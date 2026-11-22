@@ -51,7 +51,8 @@ export class GifWriter {
   private enc = GIFEncoder();
   private first = true;
   readonly stats: GifStats = { partialAlpha: 0 };
-  constructor(private width: number, private height: number, private loop: boolean) {}
+  /** `plays`: how many times the GIF plays, 0 for forever. */
+  constructor(private width: number, private height: number, private plays: number) {}
 
   add(rgba: Uint8ClampedArray | Uint8Array, delay: number): void {
     const data = rgba instanceof Uint8ClampedArray ? new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength) : rgba;
@@ -63,7 +64,8 @@ export class GifWriter {
         if (a > 0) this.stats.partialAlpha++;
       }
     }
-    const repeat = this.first ? (this.loop ? 0 : -1) : undefined;
+    // gifenc: repeat 0 loops forever, -1 writes no loop extension (plays once), n repeats n more times.
+    const repeat = this.first ? (this.plays === 0 ? 0 : this.plays === 1 ? -1 : this.plays - 1) : undefined;
     if (anyAlpha) {
       const palette = quantize(data, 256, { format: 'rgba4444', oneBitAlpha: true, clearAlpha: true, clearAlphaThreshold: 127 });
       const index = applyPalette(data, palette, 'rgba4444');
@@ -91,8 +93,8 @@ export class GifWriter {
 }
 
 /** GIF from a list of RGBA frames. */
-export function encodeGif(frames: Iterable<GifFrame>, width: number, height: number, loop = true): { bytes: Uint8Array; stats: GifStats } {
-  const w = new GifWriter(width, height, loop);
+export function encodeGif(frames: Iterable<GifFrame>, width: number, height: number, plays = 0): { bytes: Uint8Array; stats: GifStats } {
+  const w = new GifWriter(width, height, plays);
   for (const f of frames) w.add(f.rgba, f.delay);
   return { bytes: w.finish(), stats: w.stats };
 }

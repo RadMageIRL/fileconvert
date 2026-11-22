@@ -74,6 +74,10 @@ export const IMAGE_IN: readonly FormatId[] = ['jpg', 'png', 'webp', 'avif', 'hei
 export const AUDIO_IN: readonly FormatId[] = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg'];
 export const VIDEO_IN: readonly FormatId[] = ['mp4', 'webm', 'mov', 'mkv'];
 
+/** Picture formats that can be animated (GIF, WebP, APNG), and the outputs that keep animation. */
+export const ANIMATED_IN: readonly FormatId[] = ['gif', 'webp', 'png'];
+export const ANIMATED_OUT: readonly FormatId[] = ['gif', 'webp', 'mp4', 'webm'];
+
 /** What the inspection step learned about a media or image file; it changes which outputs make sense. */
 export interface InputTraits {
   animated?: boolean;
@@ -118,7 +122,7 @@ export function targetsFor(input: FormatId, traits: InputTraits = {}): FormatId[
       };
       const first = preferred[input] ?? 'png';
       const list = [first, ...IMAGE_OUT.filter(x => x !== first)];
-      if (input === 'gif' && traits.animated) list.push('mp4', 'webm');
+      if (traits.animated && ANIMATED_IN.includes(input)) list.push('mp4', 'webm');
       return list;
     }
     case 'audio': {

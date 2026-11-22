@@ -148,7 +148,12 @@ export class Queue {
         const head = new Uint8Array(await job.file.slice(0, s.format === 'gif' ? 4 * 1048576 : 256 * 1024).arrayBuffer());
         const h = readHeader(head, s.format);
         if (h.width && h.height) parts.push(`${h.width} x ${h.height}`);
-        if (h.animated) { job.traits.animated = true; parts.push(h.frames ? `animated, ${h.frames} frames` : 'animated'); }
+        if (h.animated) {
+          parts.push(h.frames ? `animated, ${h.frames} frames` : 'animated');
+          // Animated WebP and APNG frames come from ImageDecoder; without it they convert as their first frame.
+          if (s.format === 'gif' || typeof (globalThis as { ImageDecoder?: unknown }).ImageDecoder === 'function') job.traits.animated = true;
+          else job.notes.push(`This browser cannot read the frames of an animated ${fmt.label}, so it converts as its first frame.`);
+        }
       } else if (fmt.category === 'audio' || fmt.category === 'video') {
         const info = await this.engines.inspect.run<MediaInfo>('inspect', { file: job.file });
         job.traits.hasVideo = !!info.video;

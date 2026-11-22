@@ -524,6 +524,33 @@ webp = webp[:4] + struct.pack('<I', len(webp) - 8) + webp[8:]
 open(os.path.join(IMG, 'meta-full.webp'), 'wb').write(webp)
 
 
+# ---------------------------------------------------------------- animations with disposal, blending and timing (v0.2.0)
+from PIL import PngImagePlugin  # noqa: E402
+
+
+def square(color, box, size=(40, 30)):
+    im = Image.new('RGBA', size, (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle(box, fill=color)
+    return im
+
+
+# GIF: squares that move, on a transparent background, with every disposal method and uneven timing.
+gif_frames = [square((0, 0, 255, 255), (2, 2, 14, 27)), square((0, 200, 0, 255), (14, 2, 26, 27)), square((255, 0, 0, 255), (26, 2, 37, 27)), square((255, 255, 0, 255), (0, 0, 39, 29))]
+gif_frames[0].save(os.path.join(IMG, 'anim-dispose.gif'), save_all=True, append_images=gif_frames[1:], duration=[100, 200, 300, 400], loop=0, disposal=[1, 2, 3, 1], optimize=False)
+
+# APNG: half-transparent frames blended over the previous one, a frame restored to the previous state, played twice.
+base = square((0, 0, 255, 255), (0, 0, 39, 29))
+over = square((255, 0, 0, 128), (10, 5, 29, 24))
+spot = square((0, 255, 0, 255), (0, 0, 9, 9))
+base.save(os.path.join(IMG, 'anim-blend.png'), save_all=True, append_images=[over, spot], duration=[100, 250, 500], loop=2,
+          disposal=[PngImagePlugin.Disposal.OP_NONE, PngImagePlugin.Disposal.OP_PREVIOUS, PngImagePlugin.Disposal.OP_NONE],
+          blend=[PngImagePlugin.Blend.OP_SOURCE, PngImagePlugin.Blend.OP_OVER, PngImagePlugin.Blend.OP_OVER])
+
+# WebP: transparency and uneven timing, looping forever.
+webp_frames = [square((255, 0, 0, 255), (0, 0, 19, 29)), square((0, 0, 255, 200), (20, 0, 39, 29)), square((0, 160, 0, 255), (5, 5, 34, 24))]
+webp_frames[0].save(os.path.join(IMG, 'anim-alpha.webp'), save_all=True, append_images=webp_frames[1:], duration=[120, 80, 300], loop=0, lossless=True)
+
+
 # ---------------------------------------------------------------- hostile inputs
 
 write(os.path.join(BAD, 'xxe.xml'), '<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n<r>&x;</r>\n', 'w')

@@ -15,6 +15,6 @@ serve({
     return { result: await videoToGif(p.file, p.options, progress) };
   },
   async gifToVideo(p: Payload, progress) {
-    return { result: await gifToVideo(p.file, p.to, p.options, progress, p.temp) };
+    return { result: await gifToVideo(p.file, p.from, p.to, p.options, progress, p.temp) };
   },
 });

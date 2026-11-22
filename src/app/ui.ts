@@ -1,7 +1,7 @@
 // The interface: the drop zone, the settings panels, the queue rows and the batch actions. Rows are built
 // once and updated in place, so focus and scroll position survive progress updates.
 
-import { AUDIO_OUT, effectiveCategory, FORMATS, type Category, type FormatId } from '../core/formats';
+import { ANIMATED_OUT, AUDIO_OUT, effectiveCategory, FORMATS, type Category, type FormatId } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
 import { listSession } from '../core/tempstore';
 import { $, clear, h } from './dom';
@@ -12,6 +12,9 @@ import type { ToolDefinition } from './tools';
 import type { Workspace } from './workspace';
 
 const CATEGORY_NAMES: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data' };
+/** An output's name in the menu; for an animation, whether the output keeps it moving. */
+const optionLabel = (t: FormatId, animated?: boolean) => !animated || FORMATS[t].category !== 'image' ? FORMATS[t].label
+  : ANIMATED_OUT.includes(t) ? `${FORMATS[t].label} (animated)` : `${FORMATS[t].label} (first frame)`;
 const ICON_TEXT: Record<Category, string> = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC', data: 'DATA' };
 
 export class App {
@@ -228,7 +231,10 @@ export class App {
     const main = h('div', { class: 'job-main' },
       h('div', { class: 'job-name' }, job.name),
       h('div', { class: 'job-info' }, job.status === 'checking' ? `Checking, ${formatBytes(job.file.size)}` : job.info));
-    const notes = [...job.notes, ...(job.status === 'done' ? job.warnings : [])];
+    // An animation converted to a still format: say so before converting, not only after.
+    const still = job.traits.animated && job.target && FORMATS[job.target].category === 'image' && !ANIMATED_OUT.includes(job.target) && job.status !== 'done'
+      ? [`${FORMATS[job.target].label} holds one picture, so only the first frame will be kept. Choose GIF, WebP, MP4 or WebM to keep the animation.`] : [];
+    const notes = [...job.notes, ...still, ...(job.status === 'done' ? job.warnings : [])];
     if (notes.length) main.append(h('ul', { class: 'job-notes' }, ...notes.map(n => h('li', {}, n))));
 
     const status = h('div', { class: 'job-status' });
@@ -256,7 +262,7 @@ export class App {
     const side = h('div', { class: 'job-side' });
     if (job.targets.length) {
       const sel = h('select', { 'aria-label': `Convert ${job.name} to`, 'data-key': 'target', disabled: job.status === 'converting' || job.status === 'queued' }) as HTMLSelectElement;
-      for (const t of job.targets) sel.append(h('option', { value: t, selected: t === job.target }, FORMATS[t].label));
+      for (const t of job.targets) sel.append(h('option', { value: t, selected: t === job.target }, optionLabel(t, job.traits.animated)));
       sel.addEventListener('change', () => this.queue.setTarget(job, sel.value as FormatId));
       const groupLabel = cat === 'video' && job.target && AUDIO_OUT.includes(job.target) ? 'Audio as' : 'To';
       side.append(h('label', { class: 'job-target' }, groupLabel, sel));

@@ -16,6 +16,7 @@ import { LIMITS, LimitError } from '../../core/limits';
 import type { Progress } from '../../core/rpc';
 import { createTempFile } from '../../core/tempstore';
 import { GifWriter } from '../image/encoders';
+import { openFrames } from '../image/frames';
 
 export interface MediaOptions {
   /** Largest output height in pixels, or 0 for the original size. Never upscales. */
@@ -317,7 +318,7 @@ export async function videoToGif(file: Blob, o: MediaOptions, progress: Progress
     }
     const sink = new CanvasSink(v, { width, height, fit: 'fill', poolSize: 2 });
     const ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })!;
-    const writer = new GifWriter(width, height, true);
+    const writer = new GifWriter(width, height, 0);
     const times = Array.from({ length: count }, (_, i) => start + i / fps);
     const delay = Math.round(1000 / fps);
     let i = 0;
@@ -339,31 +340,23 @@ export async function videoToGif(file: Blob, o: MediaOptions, progress: Progress
   }
 }
 
-// ------------------------------------------------------------------ animated GIF to video
+// ------------------------------------------------------------------ animation (GIF, WebP, APNG) to video
 
-interface GifuctFrame {
-  patch: Uint8ClampedArray;
-  dims: { top: number; left: number; width: number; height: number };
-  delay: number;
-  disposalType: number;
-}
-
-export async function gifToVideo(file: Blob, to: FormatId, o: MediaOptions, progress: Progress, temp: TempTarget | null): Promise<MediaResult> {
+export async function gifToVideo(file: Blob, from: FormatId, to: FormatId, o: MediaOptions, progress: Progress, temp: TempTarget | null): Promise<MediaResult> {
   const warnings: string[] = [];
-  const { parseGIF, decompressFrame } = await import('gifuct-js');
-  const buf = await file.arrayBuffer();
-  const parsed = parseGIF(buf) as unknown as { lsd: { width: number; height: number }; gct: unknown; frames: unknown[] };
-  const W = parsed.lsd.width, H = parsed.lsd.height;
-  if (W * H > LIMITS.imagePixels) throw new LimitError('The GIF is too large to convert.');
-  const raw = parsed.frames.filter(f => (f as { image?: unknown }).image);
-  if (raw.length < 2) throw new Error('This GIF is not animated. Convert it to an image format instead.');
-  if (raw.length > LIMITS.gifInputFrames) throw new LimitError(`The GIF has ${raw.length} frames; the limit is ${LIMITS.gifInputFrames}.`);
+  const kind = from === 'webp' || from === 'png' ? from : 'gif';
+  const src = await openFrames(new Uint8Array(await file.arrayBuffer()), kind);
+  const W = src.width, H = src.height;
+  if (W * H > LIMITS.imagePixels) { src.close(); throw new LimitError('The animation is too large to convert.'); }
+  if (src.frames < 2) { src.close(); throw new Error('This picture is not animated. Convert it to an image format instead.'); }
   let outW = W, outH = H;
   if (o.maxHeight > 0 && H > o.maxHeight) { outH = o.maxHeight; outW = Math.round(W * (outH / H)); }
   // 4:2:0 video needs even dimensions; the frame is padded with the background color.
   outW = even(outW); outH = even(outH);
   const codec = await firstVideoCodec(to, outW, outH);
-  if (!codec) throw new Error(`This browser cannot encode video for ${FORMATS[to].label}.`);
+  if (!codec) { src.close(); throw new Error(`This browser cannot encode video for ${FORMATS[to].label}.`); }
+  const preferred = VIDEO_CODECS[to]![0];
+  if (codec !== preferred) warnings.push(`This browser cannot encode ${codecName(preferred)} at this size, so the video is ${codecName(codec)}, which some players cannot open.`);
   const out = await makeTarget(temp);
   try {
     const output = new Output({ format: outputFormat(to, out.streaming, false), target: out.target });
@@ -372,41 +365,30 @@ export async function gifToVideo(file: Blob, to: FormatId, o: MediaOptions, prog
     const source = new CanvasSource(canvas, { codec, bitrate: new Quality(o.videoQuality === 'original' ? 'high' : o.videoQuality) });
     output.addVideoTrack(source);
     await output.start();
-    const screen = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true })!;
-    const patch = new OffscreenCanvas(1, 1).getContext('2d')!;
-    let previous: ImageData | null = null;
-    let lastDisposal = 0;
-    let lastDims: GifuctFrame['dims'] | null = null;
-    let t = 0;
+    let t = 0, n = 0;
     let transparent = false;
-    for (let i = 0; i < raw.length; i++) {
-      const fr = decompressFrame(raw[i] as never, parsed.gct as never, true) as unknown as GifuctFrame;
-      if (lastDims && lastDisposal === 2) screen.clearRect(lastDims.left, lastDims.top, lastDims.width, lastDims.height);
-      if (lastDisposal === 3 && previous) screen.putImageData(previous, 0, 0);
-      previous = fr.disposalType === 3 ? screen.getImageData(0, 0, W, H) : null;
-      patch.canvas.width = fr.dims.width;
-      patch.canvas.height = fr.dims.height;
-      patch.putImageData(new ImageData(fr.patch as Uint8ClampedArray<ArrayBuffer>, fr.dims.width, fr.dims.height), 0, 0);
-      screen.drawImage(patch.canvas, fr.dims.left, fr.dims.top);
-      if (!transparent) { const d = screen.getImageData(0, 0, W, H).data; for (let k = 3; k < d.length; k += 64) if (d[k] < 255) { transparent = true; break; } }
+    for (let f = await src.next(); f; f = await src.next()) {
+      const fctx = f.canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
+      if (!transparent) { const d = fctx.getImageData(0, 0, W, H).data; for (let k = 3; k < d.length; k += 64) if (d[k] < 255) { transparent = true; break; } }
       ctx.fillStyle = o.background;
       ctx.fillRect(0, 0, outW, outH);
-      ctx.drawImage(screen.canvas, 0, 0, Math.round(W * (outH / H)), outH);
-      const delay = Math.max(20, fr.delay || 100) / 1000;
+      ctx.drawImage(f.canvas, 0, 0, Math.round(W * (outH / H)), outH);
+      const delay = f.duration / 1000;
       await source.add(t, delay);
       t += delay;
-      lastDisposal = fr.disposalType;
-      lastDims = fr.dims;
-      progress({ fraction: (i + 1) / raw.length, stage: `Frame ${i + 1} of ${raw.length}` });
+      n++;
+      progress({ fraction: n / src.frames, stage: `Frame ${n} of ${src.frames}` });
     }
     source.close();
     await output.finalize();
     const blob = await out.finish();
     if (transparent) warnings.push('Video has no transparency, so transparent areas became the background color.');
-    warnings.push('Videos do not loop on their own the way GIFs do.');
+    warnings.push('Videos do not loop on their own the way animated pictures do.');
     return { file: blob, ext: FORMATS[to].ext, mime: FORMATS[to].mime, warnings, summary: `${outW} x ${outH}, ${codecName(codec)}, ${t.toFixed(1)} s` };
   } catch (e) {
     await out.abort();
     throw e;
+  } finally {
+    src.close();
   }
 }

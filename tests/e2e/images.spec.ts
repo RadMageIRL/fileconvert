@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import {
-  PERSONAL_EXIF, addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, ffprobe, fx, near, openApp, pillow, row, tempDir, writeTemp,
+  PERSONAL_EXIF, addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, ffprobe, fx, near, openApp, pillow, row, setTarget, tempDir, writeTemp,
 } from './helpers';
 
 // Pixels in the fixtures (see tools/make-fixtures.py):
@@ -131,7 +131,7 @@ test('quality changes the size of lossy output', async ({ page }, info) => {
 test('animated GIF stays animated as GIF and as video, and a still output says only the first frame was kept', async ({ page }, info) => {
   await openApp(page);
   await addFiles(page, [fx('image/animated.gif')]);
-  await convert(page, 'animated.gif', 'GIF');
+  await convert(page, 'animated.gif', 'GIF (animated)');
   await expectDone(page, 'animated.gif');
   const gif = pillow((await download(page, 'animated.gif', info)).path, [[30, 20]]);
   expect(gif.frames).toBe(3);
@@ -147,20 +147,22 @@ test('animated GIF stays animated as GIF and as video, and a still output says o
   const webm = ffprobe((await download(page, 'animated.gif', info)).path);
   expect(webm.streams.find(s => s.codec_type === 'video')!.codec_name).toBe('vp9');
   expect(Number(webm.format.duration)).toBeCloseTo(0.6, 1);
-  await convert(page, 'animated.gif', 'PNG');
-  await expect(row(page, 'animated.gif').locator('.job-notes')).toContainText('Only the first frame');
+  await setTarget(page, 'animated.gif', 'PNG (first frame)');
+  await expect(row(page, 'animated.gif').locator('.job-notes')).toContainText('only the first frame will be kept');
+  await convert(page, 'animated.gif', 'PNG (first frame)');
+  await expect(row(page, 'animated.gif').locator('.job-notes')).toContainText('only the first frame was converted');
   const png = pillow((await download(page, 'animated.gif', info)).path, [[30, 20]]);
   expect(png.frames).toBe(1);
   expect(near(png.px[0], [220, 40, 40, 255], 30)).toBe(true);
 });
 
-test('animated WebP and APNG are converted as their first frame, with a note', async ({ page }) => {
+test('animated WebP and APNG to a still format keep the first frame, and say so', async ({ page }) => {
   await openApp(page);
   await addFiles(page, [fx('image/animated.webp'), fx('image/animated.png')]);
   for (const f of ['animated.webp', 'animated.png']) {
-    await convert(page, f, 'JPG');
+    await convert(page, f, 'JPG (first frame)');
     await expectDone(page, f);
-    await expect(row(page, f).locator('.job-notes')).toContainText('Only the first frame');
+    await expect(row(page, f).locator('.job-notes')).toContainText('only the first frame was converted');
   }
 });
 

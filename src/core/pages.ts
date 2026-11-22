@@ -114,7 +114,7 @@ export const PAGES: readonly Page[] = [
       'Resize by percent or to fit a box in Images settings if you need a smaller picture.',
     ],
     limits: [
-      'An animated WebP becomes its first frame, with a note.',
+      'An animated WebP becomes its first frame, with a note; convert it to GIF, MP4 or WebM to keep the animation.',
       'PNG files are usually larger than the WebP original.',
     ],
     related: ['webp-to-jpg', 'png-to-webp', 'png-to-jpg', 'avif-to-jpg'],
@@ -184,7 +184,7 @@ export const PAGES: readonly Page[] = [
     ],
     limits: [
       'This WebP is lossy, so it is not a byte-exact copy of the PNG.',
-      'Animated PNG (APNG) becomes its first frame, with a note.',
+      'An animated PNG (APNG) stays animated as an animated WebP.',
     ],
     related: ['webp-to-png', 'png-to-jpg', 'jpg-to-png', 'heic-to-png'],
     keywords: ['website', 'web', 'compress', 'smaller', 'transparent'],
@@ -316,6 +316,44 @@ export const PAGES: readonly Page[] = [
     ],
     related: ['png-to-ico', 'remove-image-metadata', 'heic-to-jpg'],
     keywords: ['tiff', 'tif', 'multipage', 'multi-page', 'combine', 'merge', 'scan', 'fax', 'pages'],
+  },
+  {
+    slug: 'gif-to-webp', from: 'gif', to: 'webp', category: 'image',
+    blurb: 'Animated GIFs as animated WebP',
+    description: 'Convert animated GIFs to animated WebP, keeping every frame, its timing and the loop, often in a much smaller file. Converted in your browser.',
+    intro: 'Animated WebP plays everywhere a GIF does in current browsers, with full color and real transparency, and is usually much smaller than the same animation as a GIF.',
+    details: [
+      'Every frame is composited the way GIF viewers show it, with the GIF disposal rules, then encoded as WebP.',
+      'Each frame keeps its own timing, and the loop setting (forever, or a number of plays) is kept.',
+      'Transparency is kept. Quality is 85 out of 100 unless you change it in Images settings; resizing applies to every frame.',
+      'A still GIF becomes a still WebP.',
+    ],
+    limits: [
+      'GIF delays of 10 ms or less are shown as 20 ms, close to how browsers play them.',
+      'Each frame is stored whole, so an animation where little changes can be larger than an optimized WebP.',
+      'GIFs up to 5,000 frames.',
+    ],
+    related: ['webp-to-gif', 'gif-to-mp4', 'mp4-to-gif'],
+    keywords: ['animated', 'animation', 'gif', 'smaller', 'web'],
+  },
+  {
+    slug: 'webp-to-gif', from: 'webp', to: 'gif', category: 'image',
+    blurb: 'Animated WebP for apps that need GIF',
+    description: 'Convert animated WebP to an animated GIF with every frame and its timing, for chat apps and tools that only take GIF. Done in your browser.',
+    intro: 'Some chat apps, editors and older tools still only accept GIF. The WebP animation is read frame by frame and written as an animated GIF.',
+    details: [
+      'Your browser reads every frame (ImageDecoder), composited as the WebP shows it.',
+      'Each frame keeps its timing, and the loop setting is kept.',
+      'Each frame gets its own 256-color palette.',
+      'A still WebP becomes a still GIF.',
+    ],
+    limits: [
+      'GIF holds 256 colors per frame without dithering, so gradients can show banding.',
+      'GIF transparency is on or off: partly transparent pixels become fully opaque or fully transparent, with a note.',
+      'Needs ImageDecoder, which current Chrome, Edge and Firefox have; elsewhere only the first frame converts.',
+    ],
+    related: ['gif-to-webp', 'webp-to-png', 'mp4-to-gif'],
+    keywords: ['animated', 'animation', 'sticker', 'chat'],
   },
   {
     slug: 'gif-to-mp4', from: 'gif', to: 'mp4', category: 'image',

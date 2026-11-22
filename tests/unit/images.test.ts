@@ -131,3 +131,37 @@ describe('SVG helpers', () => {
     expect(targetSize(64, 32, '1024')).toEqual({ width: 1024, height: 512 });
   });
 });
+
+describe('animation', () => {
+  test('the GIF loop setting: forever, a count, or play once without the extension', async () => {
+    const { gifPlays } = await import('../../src/engines/image/frames');
+    expect(gifPlays(fx('image/anim-dispose.gif'))).toBe(0);
+    expect(gifPlays(fx('image/photo.gif'))).toBe(1);
+    const ext = (n: number) => new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x21, 0xff, 0x0b, ...Array.from('NETSCAPE2.0', c => c.charCodeAt(0)), 3, 1, n & 0xff, n >> 8, 0, 0, 0, 0, 0, 0]);
+    expect(gifPlays(ext(3))).toBe(4);
+  });
+
+  test('animated WebP: VP8X flags, ANIM loop count, and one full-canvas ANMF per frame carrying its image chunks', async () => {
+    const { writeAnimatedWebp, imageChunks } = await import('../../src/engines/image/webpanim');
+    const riff = (...chunks: Array<[string, number[]]>) => {
+      const body = chunks.flatMap(([t, d]) => [...Array.from(t, c => c.charCodeAt(0)), d.length & 0xff, d.length >> 8, 0, 0, ...d, ...(d.length & 1 ? [0] : [])]);
+      return new Uint8Array([0x52, 0x49, 0x46, 0x46, (body.length + 4) & 0xff, (body.length + 4) >> 8, 0, 0, 0x57, 0x45, 0x42, 0x50, ...body]);
+    };
+    const lossy = riff(['VP8 ', [1, 2, 3]]);
+    const withAlpha = riff(['VP8X', new Array(10).fill(0)], ['ALPH', [9, 9]], ['VP8 ', [4, 5, 6, 7]], ['EXIF', [1]]);
+    expect([...imageChunks(withAlpha)]).toEqual([0x41, 0x4c, 0x50, 0x48, 2, 0, 0, 0, 9, 9, 0x56, 0x50, 0x38, 0x20, 4, 0, 0, 0, 4, 5, 6, 7]);
+    const out = writeAnimatedWebp([{ webp: lossy, duration: 120 }, { webp: withAlpha, duration: 80 }], 40, 30, 2, true);
+    const dv = new DataView(out.buffer);
+    expect(dv.getUint32(4, true)).toBe(out.length - 8);
+    const chunks: Array<[string, number]> = [];
+    for (let p = 12; p < out.length;) { const n = dv.getUint32(p + 4, true); chunks.push([String.fromCharCode(...out.subarray(p, p + 4)), p]); p += 8 + n + (n & 1); }
+    expect(chunks.map(c => c[0])).toEqual(['VP8X', 'ANIM', 'ANMF', 'ANMF']);
+    expect(out[20]).toBe(0x12);
+    expect([out[24] | out[25] << 8, out[27] | out[28] << 8]).toEqual([39, 29]);
+    expect(dv.getUint16(chunks[1][1] + 8 + 4, true)).toBe(2);
+    const anmf = chunks[3][1] + 8;
+    expect(out[anmf + 12] | out[anmf + 13] << 8).toBe(80);
+    expect(out[anmf + 15]).toBe(0x02);
+    expect(String.fromCharCode(...out.subarray(anmf + 16, anmf + 20))).toBe('ALPH');
+  });
+});

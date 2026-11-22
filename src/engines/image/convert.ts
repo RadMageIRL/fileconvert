@@ -5,7 +5,9 @@
 
 import { FORMATS, type FormatId } from '../../core/formats';
 import { LIMITS, LimitError } from '../../core/limits';
-import { encodeAvif, encodeBmp, encodeGif, encodeWebpWasm, type GifFrame } from './encoders';
+import { encodeAvif, encodeBmp, encodeGif, encodeWebpWasm, GifWriter } from './encoders';
+import { canReadFrames, openFrames, type AnimatedFormat } from './frames';
+import { writeAnimatedWebp, type WebpFrame } from './webpanim';
 import { readHeader } from './header';
 import { bestEntry, decodeIcoBitmap, icoSizes, readIcoDirectory, writeIco } from './ico';
 import { TiffWriter, type TiffCompression } from './tiff';
@@ -232,54 +234,61 @@ function flatten(ctx: OffscreenCanvasRenderingContext2D, color: string): void {
 
 const COLOR_NAMES: Record<string, string> = { '#ffffff': 'white', '#000000': 'black' };
 
-// ------------------------------------------------------------------ animated GIF
+// ------------------------------------------------------------------ animation
 
-interface GifuctFrame {
-  patch: Uint8ClampedArray;
-  dims: { top: number; left: number; width: number; height: number };
-  delay: number;
-  disposalType: number;
+/** Animated GIF output from any animation (GIF, WebP, APNG), frame by frame, at the chosen size. */
+async function animationToGif(bytes: Uint8Array, from: AnimatedFormat, o: ImageOptions, progress: Progress, warnings: string[]): Promise<ImageResult> {
+  const src = await openFrames(bytes, from);
+  try {
+    checkPixels(src.width, src.height);
+    const size = outputSize(src.width, src.height, o.resize);
+    if (size.width > 65535 || size.height > 65535) throw new LimitError('GIF images can be at most 65,535 pixels on a side.');
+    const out = context(size.width, size.height);
+    const gif = new GifWriter(size.width, size.height, src.plays);
+    let n = 0;
+    for (let f = await src.next(); f; f = await src.next()) {
+      if (n % 10 === 0) progress(`Frame ${n + 1} of ${src.frames}`);
+      out.clearRect(0, 0, size.width, size.height);
+      out.drawImage(f.canvas, 0, 0, size.width, size.height);
+      gif.add(out.getImageData(0, 0, size.width, size.height).data, f.duration);
+      n++;
+    }
+    progress('Encoding GIF');
+    const bytesOut = gif.finish();
+    out.canvas.width = 0;
+    if (gif.stats.partialAlpha) warnings.push('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
+    if (from !== 'gif') warnings.push('GIF holds at most 256 colors per frame, so colors were reduced. Gradients can show banding.');
+    return { outputs: [{ bytes: bytesOut }], mime: 'image/gif', ext: 'gif', width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}, ${n} frames, animated` };
+  } finally {
+    src.close();
+  }
 }
 
-/** Re-encodes every frame of an animated GIF at a new size, compositing frames the way viewers do. */
-async function gifToGif(bytes: Uint8Array, o: ImageOptions, progress: Progress, warnings: string[]): Promise<ImageResult> {
-  const { parseGIF, decompressFrame } = await import('gifuct-js');
-  const parsed = parseGIF(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) as unknown as {
-    lsd: { width: number; height: number }; gct: unknown; frames: unknown[];
-  };
-  const W = parsed.lsd.width, H = parsed.lsd.height;
-  checkPixels(W, H);
-  const raw = parsed.frames.filter(f => (f as { image?: unknown }).image);
-  if (raw.length > LIMITS.gifInputFrames) throw new LimitError(`The GIF has ${raw.length} frames; the limit is ${LIMITS.gifInputFrames}.`);
-  if (raw.length * W * H > LIMITS.gifInputPixels) throw new LimitError('The GIF has too many pixels across its frames to convert.');
-  const size = outputSize(W, H, o.resize);
-  const screen = context(W, H);
-  const patchCtx = context(1, 1);
-  const out = context(size.width, size.height);
-  let previous: ImageData | null = null;
-  let lastDisposal = 0;
-  let lastDims: GifuctFrame['dims'] | null = null;
-  const frames: GifFrame[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    if (i % 10 === 0) progress(`Frame ${i + 1} of ${raw.length}`);
-    const fr = decompressFrame(raw[i] as never, parsed.gct as never, true) as unknown as GifuctFrame;
-    if (lastDims && lastDisposal === 2) screen.clearRect(lastDims.left, lastDims.top, lastDims.width, lastDims.height);
-    if (lastDisposal === 3 && previous) screen.putImageData(previous, 0, 0);
-    previous = fr.disposalType === 3 ? screen.getImageData(0, 0, W, H) : null;
-    patchCtx.canvas.width = fr.dims.width;
-    patchCtx.canvas.height = fr.dims.height;
-    patchCtx.putImageData(new ImageData(fr.patch as Uint8ClampedArray<ArrayBuffer>, fr.dims.width, fr.dims.height), 0, 0);
-    screen.drawImage(patchCtx.canvas, fr.dims.left, fr.dims.top);
-    out.clearRect(0, 0, size.width, size.height);
-    out.drawImage(screen.canvas, 0, 0, size.width, size.height);
-    frames.push({ rgba: out.getImageData(0, 0, size.width, size.height).data, delay: Math.max(20, fr.delay || 100) });
-    lastDisposal = fr.disposalType;
-    lastDims = fr.dims;
+/** Animated WebP output from any animation (GIF, WebP, APNG), each frame encoded at the chosen quality. */
+async function animationToWebp(bytes: Uint8Array, from: AnimatedFormat, o: ImageOptions, progress: Progress, warnings: string[]): Promise<ImageResult> {
+  const src = await openFrames(bytes, from);
+  try {
+    checkPixels(src.width, src.height);
+    const size = outputSize(src.width, src.height, o.resize);
+    if (size.width > 16383 || size.height > 16383) throw new LimitError('WebP images can be at most 16,383 pixels on a side. Choose a smaller size.');
+    const out = context(size.width, size.height);
+    const q = Math.max(1, Math.min(100, Math.round(o.quality)));
+    const frames: WebpFrame[] = [];
+    let alpha = false;
+    for (let f = await src.next(); f; f = await src.next()) {
+      if (frames.length % 10 === 0) progress(`Frame ${frames.length + 1} of ${src.frames}`);
+      out.clearRect(0, 0, size.width, size.height);
+      out.drawImage(f.canvas, 0, 0, size.width, size.height);
+      if (!alpha) alpha = hasTransparency(out.getImageData(0, 0, size.width, size.height).data);
+      frames.push({ webp: await encodeWebp(out, size.width, size.height, q), duration: f.duration });
+    }
+    progress('Writing WebP');
+    out.canvas.width = 0;
+    const webp = writeAnimatedWebp(frames, size.width, size.height, src.plays, alpha);
+    return { outputs: [{ bytes: webp }], mime: 'image/webp', ext: 'webp', width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}, ${frames.length} frames, animated` };
+  } finally {
+    src.close();
   }
-  progress('Encoding GIF');
-  const { bytes: gif, stats } = encodeGif(frames, size.width, size.height);
-  if (stats.partialAlpha) warnings.push('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
-  return { outputs: [{ bytes: gif }], mime: 'image/gif', ext: 'gif', width: size.width, height: size.height, warnings, summary: `${size.width} x ${size.height}, ${raw.length} frames` };
 }
 
 // ------------------------------------------------------------------ main
@@ -324,6 +333,16 @@ async function encodeIco(pic: Picture, orientation: number, setting: string | un
 
 let canvasWebp: boolean | null = null;
 
+/** A still WebP from a canvas: the browser's encoder, or libwebp where the canvas cannot write WebP. */
+async function encodeWebp(ctx: OffscreenCanvasRenderingContext2D, width: number, height: number, q: number): Promise<Uint8Array> {
+  if (canvasWebp !== false) {
+    const blob = await ctx.canvas.convertToBlob({ type: 'image/webp', quality: q / 100 });
+    canvasWebp = blob.type === 'image/webp';
+    if (canvasWebp) return new Uint8Array(await blob.arrayBuffer());
+  }
+  return encodeWebpWasm(ctx.getImageData(0, 0, width, height).data, width, height, q);
+}
+
 /** Converts one decoded picture (or one TIFF page). Returns the encoded bytes, or null when added to a TIFF. */
 async function renderPicture(pic: Picture, orientation: number, from: FormatId, to: FormatId, o: ImageOptions, warnings: string[], progress: Progress, tiff: TiffWriter | null): Promise<{ bytes: Uint8Array | null; width: number; height: number; detail?: string }> {
   const note = (w: string) => { if (!warnings.includes(w)) warnings.push(w); };
@@ -360,15 +379,9 @@ async function renderPicture(pic: Picture, orientation: number, from: FormatId, 
       out = new Uint8Array(await blob.arrayBuffer());
       break;
     }
-    case 'webp': {
-      if (canvasWebp !== false) {
-        const blob = await ctx.canvas.convertToBlob({ type: 'image/webp', quality: q / 100 });
-        canvasWebp = blob.type === 'image/webp';
-        if (canvasWebp) { out = new Uint8Array(await blob.arrayBuffer()); break; }
-      }
-      out = await encodeWebpWasm(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
+    case 'webp':
+      out = await encodeWebp(ctx, size.width, size.height, q);
       break;
-    }
     case 'avif':
       out = await encodeAvif(ctx.getImageData(0, 0, size.width, size.height).data, size.width, size.height, q);
       break;
@@ -380,7 +393,7 @@ async function renderPicture(pic: Picture, orientation: number, from: FormatId, 
       out = null;
       break;
     case 'gif': {
-      const { bytes: gif, stats } = encodeGif([{ rgba: ctx.getImageData(0, 0, size.width, size.height).data, delay: 0 }], size.width, size.height, false);
+      const { bytes: gif, stats } = encodeGif([{ rgba: ctx.getImageData(0, 0, size.width, size.height).data, delay: 0 }], size.width, size.height, 1);
       out = gif;
       if (stats.partialAlpha) note('GIF transparency is on or off, so partly transparent pixels became fully opaque or fully transparent.');
       if (from !== 'gif') note('GIF holds at most 256 colors, so colors were reduced. Photos and gradients can show banding.');
@@ -393,15 +406,19 @@ async function renderPicture(pic: Picture, orientation: number, from: FormatId, 
   return { bytes: out, width: size.width, height: size.height };
 }
 
+const isAnimatedFormat = (f: FormatId): f is AnimatedFormat => f === 'gif' || f === 'webp' || f === 'png';
+
 export async function convertImage(bytes: Uint8Array, from: FormatId, to: FormatId, o: ImageOptions, progress: Progress): Promise<ImageResult> {
   const warnings: string[] = [];
   if (bytes.length > LIMITS.imageBytes) throw new LimitError(`The file is larger than ${LIMITS.imageBytes / 1048576} MB, the limit for images.`);
   const header = readHeader(bytes, from);
   if (header.width && header.height) checkPixels(header.width, header.height);
-  if (from === 'gif' && to === 'gif' && header.animated) return gifToGif(bytes, o, progress, warnings);
-  if (header.animated) {
-    const keep = from === 'gif' ? 'GIF, MP4 or WebM' : 'its original format';
-    warnings.push(`This image is animated${header.frames ? ` (${header.frames} frames)` : ''}. Only the first frame was converted; keep ${keep} to keep the animation.`);
+  // Animation is kept wherever the output can hold it: GIF and WebP here, MP4 and WebM in the media worker.
+  if (header.animated && isAnimatedFormat(from) && (to === 'gif' || to === 'webp')) {
+    if (canReadFrames(from)) return to === 'gif' ? animationToGif(bytes, from, o, progress, warnings) : animationToWebp(bytes, from, o, progress, warnings);
+    warnings.push(`This browser cannot read the frames of an animated ${FORMATS[from].label}, so only the first frame was converted.`);
+  } else if (header.animated) {
+    warnings.push(`This image is animated${header.frames ? ` (${header.frames} frames)` : ''}. ${FORMATS[to].label} holds one picture, so only the first frame was converted; choose GIF, WebP, MP4 or WebM to keep the animation.`);
   }
   if (isTruncated(bytes, from)) {
     // Some browsers refuse a cut-off file, others decode what is there. Either way the user should know.

@@ -106,7 +106,7 @@ export function limitsHtml(): string {
     'DOCX to PDF and PDF to DOCX are not offered. Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges your document.',
     'Markdown and HTML to PDF keep the document structure (headings, lists, tables, code, links, embedded PNG and JPEG pictures) in a clean default style. Stylesheets are not applied and remote images are not downloaded.',
     'The PDF font covers Latin, Greek and Cyrillic. Other scripts, such as Chinese, Arabic or Hindi, are reported and do not show.',
-    'Animated WebP, APNG and animated AVIF are converted as their first frame. Animated GIF keeps its animation as GIF, MP4 or WebM.',
+    'Animated GIF, WebP and PNG (APNG) keep their animation as GIF, WebP, MP4 or WebM; formats that hold one picture get the first frame, and the menu says which is which. Animated WebP and APNG need ImageDecoder, which current Chrome, Edge and Firefox have. Animated AVIF is read as its first frame.',
     'Pictures lose their metadata (EXIF, GPS). HEIC and TIFF color profiles are not applied.',
     `Size limits: pictures up to ${LIMITS.imagePixels / 1e6} megapixels and ${formatBytes(LIMITS.imageBytes)}, audio and video up to ${formatBytes(LIMITS.mediaBytes)}, PDFs up to ${formatBytes(LIMITS.pdfBytes)}, text to PDF up to ${formatBytes(LIMITS.textToPdfBytes)}, data files up to ${formatBytes(LIMITS.dataBytes)}.`,
   ];
