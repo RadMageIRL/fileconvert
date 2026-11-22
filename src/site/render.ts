@@ -6,7 +6,8 @@
 
 import { allConversions, AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, targetsFor, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats.ts';
 import { formatBytes, LIMITS } from '../core/limits.ts';
-import { CATEGORY_LABELS, commonPages, pageName, pageTitle, PAGES, type ConversionPage } from '../core/pages.ts';
+import { CATEGORY_LABELS, commonPages, isTool, pageName, pageTitle, PAGES, type ConversionPage, type Page } from '../core/pages.ts';
+import { isToolId, TOOLS } from '../core/tools.ts';
 
 /** The canonical address of the app. Every page's canonical URL is under it. */
 export const SITE = 'https://radmagelabs.com/fileconvert/';
@@ -15,7 +16,7 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 const label = (id: FormatId) => FORMATS[id].label;
 const list = (ids: readonly FormatId[]) => ids.map(label).join(', ');
 
-export const pageUrl = (p: ConversionPage) => `${SITE}${p.slug}/`;
+export const pageUrl = (p: Page) => `${SITE}${p.slug}/`;
 
 // ------------------------------------------------------------------ regions
 
@@ -41,9 +42,10 @@ function replaceOnce(html: string, find: string, replace: string): string {
 // ------------------------------------------------------------------ static content shared by every page
 
 /** Search words for a page: both formats, their extensions, the category and the page's own keywords. */
-export function searchTerms(p: ConversionPage): string {
+export function searchTerms(p: Page): string {
   const words = new Set<string>();
-  for (const id of [p.from, p.to]) {
+  if (isTool(p)) for (const w of p.name.toLowerCase().split(/\s+/)) words.add(w);
+  for (const id of isTool(p) ? TOOLS[p.tool].accepts : [p.from, p.to]) {
     words.add(FORMATS[id].label.toLowerCase());
     for (const e of FORMATS[id].exts) words.add(e);
   }
@@ -52,13 +54,13 @@ export function searchTerms(p: ConversionPage): string {
   return [...words].join(' ');
 }
 
-const pageLink = (p: ConversionPage, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
+const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
 
 export function catalogHtml(): string {
   const cats = (Object.keys(CATEGORY_LABELS) as Category[]).filter(c => PAGES.some(p => p.category === c));
   return cats.map(c => {
     const items = PAGES.filter(p => p.category === c).map(p =>
-      `<li class="cat-item" data-cat="${c}" data-slug="${p.slug}" data-from="${p.from}" data-to="${p.to}" data-terms="${esc(searchTerms(p))}"><a href="./${p.slug}/"><span class="cat-name">${esc(pageName(p))}</span><span class="cat-blurb">${esc(p.blurb)}</span></a></li>`);
+      `<li class="cat-item" data-cat="${c}" data-slug="${p.slug}" ${isTool(p) ? `data-tool="${p.tool}"` : `data-from="${p.from}" data-to="${p.to}"`} data-terms="${esc(searchTerms(p))}"><a href="./${p.slug}/"><span class="cat-name">${esc(pageName(p))}</span><span class="cat-blurb">${esc(p.blurb)}</span></a></li>`);
     return `<section class="cat-group" data-cat="${c}" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${CATEGORY_LABELS[c]}</h3><ul class="cat-list">${items.join('')}</ul></section>`;
   }).join('');
 }
@@ -71,8 +73,10 @@ export function catalogChipsHtml(): string {
 }
 
 export function commonHtml(): string {
-  const items = commonPages().map(p => `<li>${pageLink(p, 'chip')}</li>`).join('');
-  return `<nav class="common" aria-labelledby="common-title"><h2 id="common-title">Common conversions</h2><ul class="chips">${items}</ul></nav>`;
+  const list = (pages: Page[]) => pages.map(p => `<li>${pageLink(p, 'chip')}</li>`).join('');
+  const tools = commonPages().filter(isTool);
+  return `<nav class="common" aria-labelledby="common-title"><h2 id="common-title">Common conversions</h2><ul class="chips">${list(commonPages().filter(p => !isTool(p)))}</ul>`
+    + (tools.length ? `<h2 class="common-sub">Tools</h2><ul class="chips">${list(tools)}</ul>` : '') + '</nav>';
 }
 
 /** "A to B, C or D" for every input of a category, straight from the registry. */
@@ -134,13 +138,13 @@ export function settingsHint(p: ConversionPage): string {
   return '';
 }
 
-function pageJsonLd(p: ConversionPage): string {
+function pageJsonLd(p: Page): string {
   const url = pageUrl(p);
   const data = {
     '@context': 'https://schema.org',
     '@graph': [
       {
-        '@type': 'WebApplication', name: `FileConvert: ${pageName(p)} converter`, url,
+        '@type': 'WebApplication', name: `FileConvert: ${pageName(p)}${isTool(p) ? '' : ' converter'}`, url,
         applicationCategory: 'UtilitiesApplication', operatingSystem: 'Any modern web browser', isAccessibleForFree: true,
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, description: p.description,
         author: { '@type': 'Person', name: 'RadMageIRL' }, publisher: { '@type': 'Organization', name: 'RadMage Labs', url: 'https://radmagelabs.com/' },
@@ -158,57 +162,67 @@ function pageJsonLd(p: ConversionPage): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
-function pageHead(p: ConversionPage): string {
+function pageHead(p: Page): string {
   const url = pageUrl(p);
   return [
     `<title>${esc(pageTitle(p))}</title>`,
     `<meta name="description" content="${esc(p.description)}">`,
     `<link rel="canonical" href="${url}">`,
-    `<meta property="og:title" content="${esc(`${pageName(p)} converter | FileConvert`)}">`,
+    `<meta property="og:title" content="${esc(`${pageName(p)}${isTool(p) ? '' : ' converter'} | FileConvert`)}">`,
     `<meta property="og:description" content="${esc(p.description)}">`,
     `<meta property="og:url" content="${url}">`,
     `<script type="application/ld+json">${pageJsonLd(p)}</script>`,
   ].join('\n  ');
 }
 
-function pageHero(p: ConversionPage): string {
+function pageHero(p: Page): string {
   return `<section class="hero hero-page" aria-labelledby="title">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="./">FileConvert</a></li><li><span aria-current="page">${esc(pageName(p))}</span></li></ol></nav>
-      <h1 id="title">Convert ${esc(label(p.from))} to ${esc(label(p.to))}</h1>
+      <h1 id="title">${isTool(p) ? esc(p.name) : `Convert ${esc(label(p.from))} to ${esc(label(p.to))}`}</h1>
       <p class="promise">Convert files. Upload nothing.</p>
       <p class="lede">${esc(p.intro)}</p>
     </section>`;
 }
 
-function pageGuide(p: ConversionPage): string {
+/** The How to steps: written for a tool, generated for a conversion. */
+function steps(p: Page): string {
+  if (isTool(p)) return p.steps.map(t => `<li>${esc(t).replace(/^([^.]+\.)/, '<strong>$1</strong>')}</li>`).join('\n        ');
   const a = esc(label(p.from)), b = esc(label(p.to));
   const hint = settingsHint(p);
+  return [
+    `<li><strong>Add your ${a} files.</strong> Drop them on this page or press Choose files. Add as many as you like.</li>`,
+    `<li><strong>${b} is already chosen.</strong> ${hint ? `Open ${esc(hint)}.` : 'There is nothing else to set.'}</li>`,
+    '<li><strong>Convert and download.</strong> Press Convert or Convert all, then download each result or all of them as one ZIP.</li>',
+  ].join('\n        ');
+}
+
+const howTo = (p: Page) => isTool(p) ? `How to ${esc(p.name.charAt(0).toLowerCase() + p.name.slice(1))}` : `How to convert ${esc(label(p.from))} to ${esc(label(p.to))}`;
+
+function pageGuide(p: Page): string {
   const related = p.related.map(s => PAGES.find(x => x.slug === s)!).map(r => `<li>${pageLink(r, 'chip')}</li>`).join('');
   return `<section class="guide" aria-labelledby="guide-title">
-      <h2 id="guide-title">How to convert ${a} to ${b}</h2>
+      <h2 id="guide-title">${howTo(p)}</h2>
       <ol class="steps">
-        <li><strong>Add your ${a} files.</strong> Drop them on this page or press Choose files. Add as many as you like.</li>
-        <li><strong>${b} is already chosen.</strong> ${hint ? `Open ${esc(hint)}.` : 'There is nothing else to set.'}</li>
-        <li><strong>Convert and download.</strong> Press Convert or Convert all, then download each result or all of them as one ZIP.</li>
+        ${steps(p)}
       </ol>
       <div class="guide-grid">
         <div class="guide-card"><h3>What happens to your files</h3><ul>${p.details.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
         <div class="guide-card"><h3>Good to know</h3><ul>${p.limits.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
       </div>
-      <p class="guide-note"><strong>Nothing is uploaded.</strong> The conversion runs in this browser tab, and the page's security policy does not allow it to send your files anywhere. Privacy, at the bottom of the page, explains how.</p>
-      <nav class="related" aria-labelledby="related-title"><h3 id="related-title">Related conversions</h3><ul class="chips">${related}</ul></nav>
+      <p class="guide-note"><strong>Nothing is uploaded.</strong> ${isTool(p) ? 'The tool' : 'The conversion'} runs in this browser tab, and the page's security policy does not allow it to send your files anywhere. Privacy, at the bottom of the page, explains how.</p>
+      <nav class="related" aria-labelledby="related-title"><h3 id="related-title">Related</h3><ul class="chips">${related}</ul></nav>
     </section>`;
 }
 
 /** Points a page one folder down at the shared files: "./x" becomes "../x". */
 const oneLevelDown = (html: string) => html.replace(/\b(href|src)="\.\//g, '$1="../');
 
-/** A conversion page, made from the built home page. */
-export function renderPage(home: string, p: ConversionPage): string {
+/** A conversion or tool page, made from the built home page. A tool page opens its tool in place of the converter. */
+export function renderPage(home: string, p: Page): string {
   let html = fillRegion(home, 'head', `\n  ${pageHead(p)}\n`);
-  html = replaceOnce(html, 'data-root="./"', `data-root="../" data-page="${p.slug}" data-from="${p.from}" data-to="${p.to}"`);
+  html = replaceOnce(html, 'data-root="./"', `data-root="../" data-page="${p.slug}" ${isTool(p) ? `data-tool="${p.tool}"` : `data-from="${p.from}" data-to="${p.to}"`}`);
   html = fillRegion(html, 'hero', pageHero(p));
-  html = fillRegion(html, 'drop', `<strong>Drop ${esc(label(p.from))} files here</strong>`);
+  if (!isTool(p)) html = fillRegion(html, 'drop', `<strong>Drop ${esc(label(p.from))} files here</strong>`);
   html = fillRegion(html, 'common', '');
   html = fillRegion(html, 'guide', pageGuide(p));
   html = html.replace(`<li class="cat-item" data-cat="${p.category}" data-slug="${p.slug}" `, `<li class="cat-item current" data-cat="${p.category}" data-slug="${p.slug}" `)
@@ -249,7 +263,8 @@ export function pageProblems(): string[] {
   for (const p of PAGES) {
     const where = `page ${p.slug}`;
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) problems.push(`${where}: the slug must be lowercase words joined by hyphens`);
-    if (!pairs.has(`${p.from}>${p.to}`)) problems.push(`${where}: FileConvert does not convert ${p.from} to ${p.to}`);
+    if (isTool(p)) { if (!isToolId(p.tool)) problems.push(`${where}: there is no tool ${p.tool}`); }
+    else if (!pairs.has(`${p.from}>${p.to}`)) problems.push(`${where}: FileConvert does not convert ${p.from} to ${p.to}`);
     for (const [k, v] of [['slug', p.slug], ['title', pageTitle(p)], ['description', p.description]] as const) {
       if (seen[k].has(v)) problems.push(`${where}: duplicate ${k}`);
       seen[k].add(v);
@@ -260,7 +275,7 @@ export function pageProblems(): string[] {
     for (const r of p.related) {
       if (r === p.slug || !PAGES.some(x => x.slug === r)) problems.push(`${where}: related page ${r} does not exist`);
     }
-    const text = [p.blurb, p.description, p.intro, ...p.details, ...p.limits, ...(p.keywords ?? [])].join(' ');
+    const text = [p.blurb, p.description, p.intro, ...p.details, ...p.limits, ...(p.keywords ?? []), ...(isTool(p) ? [p.name, p.title, ...p.steps] : [])].join(' ');
     if (/[^\x20-\x7e]/.test(text)) problems.push(`${where}: text must be plain ASCII`);
   }
   return problems;

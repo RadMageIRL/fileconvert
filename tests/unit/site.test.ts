@@ -3,13 +3,13 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { answers, NOT_SUPPORTED, parseQuery } from '../../src/app/catalog';
 import { allConversions, FORMATS } from '../../src/core/formats';
-import { commonPages, pageName, pageTitle, PAGES } from '../../src/core/pages';
+import { commonPages, isTool, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
 import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderPage, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
 
 const template = readFileSync(join(__dirname, '..', '..', 'index.html'), 'utf8');
 /** The home page as the build makes it, with its static content filled in. */
 const home = fillStatics(template);
-const byName = (slug: string) => PAGES.find(p => p.slug === slug)!;
+const byName = (slug: string) => PAGES.find(p => p.slug === slug)! as ConversionPage;
 
 describe('the page list', () => {
   test('has no problems: real conversions, unique slugs, titles and descriptions, existing related pages', () => {
@@ -20,13 +20,13 @@ describe('the page list', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
       'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'heic-to-jpg', 'heic-to-png', 'jpg-to-png', 'json-to-csv',
       'json-to-xlsx', 'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text',
-      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
+      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
     ]);
   });
 
   test('every page names a conversion the registry performs', () => {
     const pairs = new Set(allConversions().map(([a, b]) => `${a}>${b}`));
-    for (const p of PAGES) expect(pairs.has(`${p.from}>${p.to}`), p.slug).toBe(true);
+    for (const p of PAGES) if (!isTool(p)) expect(pairs.has(`${p.from}>${p.to}`), p.slug).toBe(true);
   });
 
   test('the checks catch a page for a conversion that does not exist, and duplicates', () => {
@@ -44,9 +44,12 @@ describe('the page list', () => {
 
   test('titles fit in search results and the common list is ordered and unique', () => {
     for (const p of PAGES) expect(pageTitle(p).length, p.slug).toBeLessThanOrEqual(60);
-    const common = commonPages().map(p => p.common);
-    expect(common).toEqual([...common].sort((a, b) => a! - b!));
-    expect(new Set(common).size).toBe(common.length);
+    // Conversions and tools are listed separately on the home page; each list has its own order.
+    for (const group of [commonPages().filter(isTool), commonPages().filter(p => !isTool(p))]) {
+      const common = group.map(p => p.common);
+      expect(common).toEqual([...common].sort((a, b) => a! - b!));
+      expect(new Set(common).size).toBe(common.length);
+    }
   });
 
   test('each page says which settings apply, in words', () => {

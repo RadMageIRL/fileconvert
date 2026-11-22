@@ -2,6 +2,8 @@ import { App } from './app/ui';
 import { setupCatalog } from './app/catalog';
 import { $ } from './app/dom';
 import { FORMATS, type FormatId } from './core/formats';
+import { isToolId } from './core/tools';
+import { loadTool } from './app/toolset';
 import { loadSettings } from './app/settings';
 import { hasTempStore, openSession } from './core/tempstore';
 import { VERSION } from './version';
@@ -93,6 +95,9 @@ async function main(): Promise<void> {
   setupShare(app);
   setupCatalog();
   app.start();
+  // A tool page (data-tool on /remove-image-metadata/) opens its tool in place of the converter.
+  const tool = document.documentElement.dataset.tool;
+  if (tool && isToolId(tool)) await app.openWorkspace(await loadTool(tool));
   Object.defineProperty(window, '__fileconvert', { value: app, enumerable: false });
   document.documentElement.dataset.ready = 'true';
 }

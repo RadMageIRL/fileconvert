@@ -1,6 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page as PwPage } from '@playwright/test';
 import { FORMATS, type FormatId } from '../../src/core/formats';
-import { PAGES, type ConversionPage } from '../../src/core/pages';
+import { isTool, pageTitle, PAGES, type ConversionPage, type Page } from '../../src/core/pages';
 import { MD_SAMPLE, ORIGIN, addFiles, convert, cspViolations, download, expectDone, ffprobe, fx, openApp, pillow, ready, row, type FilePayload } from './helpers';
 
 // The dedicated conversion pages: each one loads directly and on refresh, carries its own head and content
@@ -15,9 +15,14 @@ const SAMPLE: Partial<Record<FormatId, string | FilePayload>> = {
   csv: fx('data/people.csv'), xlsx: fx('data/workbook.xlsx'),
 };
 const sampleName = (s: string | FilePayload) => typeof s === 'string' ? s.split(/[\\/]/).pop()! : s.name;
+const CONVERSIONS = PAGES.filter((p): p is ConversionPage => !isTool(p));
+const bySlug = (slug: string) => CONVERSIONS.find(p => p.slug === slug)!;
+/** The page heading: a tool's name, or Convert A to B. */
+const heading = (p: Page) => isTool(p) ? p.name : `Convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
+const howTo = (p: Page) => isTool(p) ? `How to ${p.name.charAt(0).toLowerCase()}${p.name.slice(1)}` : `How to convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
 
 /** Opens a page and records errors, CSP violations and outside requests, like openApp does for the home page. */
-async function openPage(page: Page, p: ConversionPage) {
+async function openPage(page: PwPage, p: Page) {
   const w = { errors: [] as string[], outside: [] as string[] };
   page.on('pageerror', e => w.errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) w.errors.push(m.text()); });
@@ -31,15 +36,14 @@ async function openPage(page: Page, p: ConversionPage) {
 test('every page loads directly and on refresh, with its own title, heading and canonical address', async ({ page }) => {
   for (const p of PAGES) {
     const w = await openPage(page, p);
-    const name = `${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
-    await expect(page).toHaveTitle(`${name} Converter, Free and Private | FileConvert`);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(`Convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`);
+    await expect(page).toHaveTitle(pageTitle(p));
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading(p));
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `https://radmagelabs.com/fileconvert/${p.slug}/`);
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', p.description);
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'FileConvert' })).toHaveAttribute('href', '../');
     await page.reload();
     await expect(page.locator('html[data-ready="true"]')).toBeAttached();
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(`Convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading(p));
     expect(w.errors, p.slug).toEqual([]);
     expect(w.outside, p.slug).toEqual([]);
     expect(await cspViolations(page), p.slug).toEqual([]);
@@ -51,7 +55,7 @@ test('the content is in the HTML itself, for search engines and for browsers wit
     const res = await request.get(`./${p.slug}/`);
     expect(res.status()).toBe(200);
     const html = await res.text();
-    expect(html).toContain(`<h2 id="guide-title">How to convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}</h2>`);
+    expect(html).toContain(`<h2 id="guide-title">${howTo(p)}</h2>`);
     for (const d of p.details) expect(html).toContain(d.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;'));
     const ld = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/.exec(html)![1]);
     expect(ld['@graph'][1]['@type']).toBe('BreadcrumbList');
@@ -96,7 +100,7 @@ test('the sitemap lists the home page and every page, and each address works her
 });
 
 test('each page chooses its output for the files added, and leaves other files their usual default', async ({ page }) => {
-  for (const p of PAGES) {
+  for (const p of CONVERSIONS) {
     await openPage(page, p);
     const sample = SAMPLE[p.from]!;
     await addFiles(page, [sample]);
@@ -106,14 +110,14 @@ test('each page chooses its output for the files added, and leaves other files t
     await expect(row(page, name).getByRole('combobox', { name: `Convert ${name} to` }), p.slug).toHaveValue(p.to);
   }
   // A file that cannot become JPG keeps its own first choice on the HEIC to JPG page.
-  await openPage(page, PAGES.find(p => p.slug === 'heic-to-jpg')!);
+  await openPage(page, bySlug('heic-to-jpg'));
   await addFiles(page, [fx('data/records.json')]);
   await ready(page, 'records.json');
   await expect(row(page, 'records.json').getByRole('combobox', { name: 'Convert records.json to' })).toHaveValue('csv');
 });
 
 test('converting on a page: HEIC to JPG and MP4 to MP3, checked by Pillow and FFmpeg', async ({ page }, info) => {
-  await openPage(page, PAGES.find(p => p.slug === 'heic-to-jpg')!);
+  await openPage(page, bySlug('heic-to-jpg'));
   await addFiles(page, [fx('image/photo.heic')]);
   await ready(page, 'photo.heic');
   await row(page, 'photo.heic').getByRole('button', { name: 'Convert' }).click();
@@ -122,7 +126,7 @@ test('converting on a page: HEIC to JPG and MP4 to MP3, checked by Pillow and FF
   expect(jpg.filename).toBe('photo.jpg');
   expect(pillow(jpg.path).format).toBe('JPEG');
 
-  await openPage(page, PAGES.find(p => p.slug === 'mp4-to-mp3')!);
+  await openPage(page, bySlug('mp4-to-mp3'));
   await addFiles(page, [fx('video/clip.mp4')]);
   await convert(page, 'clip.mp4', 'MP3');
   await expectDone(page, 'clip.mp4');
@@ -138,7 +142,7 @@ test('Share on a page passes that page\'s public address', async ({ page }) => {
     Object.defineProperty(navigator, 'share', { configurable: true, value: async (d: unknown) => { (window as unknown as { __shared: unknown[] }).__shared.push(d); } });
     Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
   });
-  await openPage(page, PAGES.find(p => p.slug === 'webp-to-png')!);
+  await openPage(page, bySlug('webp-to-png'));
   await page.getByRole('button', { name: 'Share' }).click();
   const shared = await page.evaluate(() => (window as unknown as { __shared: Array<{ url: string }> }).__shared);
   expect(shared.map(s => s.url)).toEqual(['https://radmagelabs.com/fileconvert/webp-to-png/']);

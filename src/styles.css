@@ -323,3 +323,10 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+.ws-file { display: grid; gap: 4px; justify-items: start; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); width: 100%; }
+.ws-details { margin: 0; padding-left: 18px; color: var(--muted); font-size: .88rem; display: grid; gap: 2px; }
+.ws-out .outputs:has(.ws-file) { flex-direction: column; width: 100%; }
+html[data-tool] #drop, html[data-tool] #work { display: none; }
+.common .common-sub { margin-top: 14px; }
+/* On a tool's own page the page heading names the tool, so the workspace does not repeat it. */
+html[data-tool] .ws-head { display: none; }

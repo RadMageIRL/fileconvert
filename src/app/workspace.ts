@@ -42,7 +42,7 @@ export class Workspace {
   private error?: string;
   private warnings: string[] = [];
   private summary?: string;
-  private outputs: Array<{ name: string; blob: Blob }> = [];
+  private outputs: Array<{ name: string; blob: Blob; note?: string; details?: string[] }> = [];
   private controller: AbortController | null = null;
   private names = new NameRegistry();
   private dragId: number | null = null;
@@ -170,7 +170,7 @@ export class Workspace {
       });
       if (!current()) return;
       if (controller.signal.aborted) throw new CanceledError();
-      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob }));
+      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob, note: o.note, details: o.details }));
       this.warnings = r.warnings;
       this.summary = r.summary;
       this.state = 'done';
@@ -390,7 +390,13 @@ export class Workspace {
     box.append(h('p', { class: 'ws-state done' }, [`Done: ${this.outputs.length} ${this.outputs.length === 1 ? 'file' : 'files'}, ${formatBytes(size)}`, this.summary].filter(Boolean).join('. ')));
     if (this.warnings.length) box.append(h('ul', { class: 'job-notes' }, ...this.warnings.map(w => h('li', {}, w))));
     const buttons = h('div', { class: 'outputs' });
-    this.outputs.forEach((o, i) => buttons.append(h('button', { type: 'button', class: 'small primary', 'data-key': `dl-${i}`, title: o.name, onclick: () => this.host.save(o.blob, o.name) }, h('span', {}, `Download ${o.name}`))));
+    this.outputs.forEach((o, i) => {
+      const button = h('button', { type: 'button', class: 'small primary', 'data-key': `dl-${i}`, title: o.name, onclick: () => this.host.save(o.blob, o.name) }, h('span', {}, `Download ${o.name}`));
+      if (!o.note && !o.details?.length) { buttons.append(button); return; }
+      buttons.append(h('div', { class: 'ws-file' }, button,
+        o.note ? h('span', { class: 'job-info' }, o.note) : null,
+        o.details?.length ? h('ul', { class: 'ws-details' }, ...o.details.map(d => h('li', {}, d))) : null));
+    });
     if (this.outputs.length > 1) buttons.append(h('button', { type: 'button', class: 'small', 'data-key': 'zip', onclick: () => void this.downloadZip() }, `Download all (ZIP, ${this.outputs.length})`));
     box.append(buttons);
   }

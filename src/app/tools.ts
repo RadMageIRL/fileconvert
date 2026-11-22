@@ -31,7 +31,8 @@ export interface ToolContext {
 }
 
 export interface ToolResult {
-  outputs: Array<{ blob: Blob; base: string; ext: string }>;
+  /** `note` is one line under the file's download button; `details` a short list below it. */
+  outputs: Array<{ blob: Blob; base: string; ext: string; note?: string; details?: string[] }>;
   warnings: string[];
   summary?: string;
 }

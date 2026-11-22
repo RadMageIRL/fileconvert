@@ -30,7 +30,7 @@ describe('house rules', () => {
   });
 
   test('the app names no outside host except RadMage Labs, its source code, and standard namespaces', () => {
-    const allowed = /^https:\/\/(radmagelabs\.com\/|github\.com\/RadMageIRL\/fileconvert|schema\.org)|^http:\/\/www\.(w3|sitemaps)\.org\//;
+    const allowed = /^https:\/\/(radmagelabs\.com\/|github\.com\/RadMageIRL\/fileconvert|schema\.org)|^http:\/\/(www\.(w3|sitemaps)\.org|ns\.adobe\.com)\//;
     const found: string[] = [];
     for (const f of files.filter(f => /^src\/|^index\.html$/.test(f))) {
       for (const m of read(f).matchAll(/https?:\/\/[^\s'"`)<>]+/g)) if (!allowed.test(m[0])) found.push(`${f}: ${m[0]}`);

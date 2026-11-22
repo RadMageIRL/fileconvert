@@ -422,6 +422,108 @@ legacy_icon(os.path.join(IMG, 'icon-1bit.ico'), 32, 1)
 with open(os.path.join(BAD, 'bad-offsets.ico'), 'wb') as f:
     f.write(struct.pack('<HHH', 0, 1, 2) + struct.pack('<BBBBHHII', 32, 32, 0, 0, 1, 32, 4096, 38) + struct.pack('<BBBBHHII', 16, 16, 0, 0, 1, 32, 999999, 70000) + bytes(16))
 
+# ---------------------------------------------------------------- photos full of metadata (v0.2.0)
+# Every identifying value is a distinctive string, so a test can prove none of them is left anywhere in a result:
+# LeakyCam, LC-1000, Jane Example, SERIAL-123456, SecretProject, Secret comment, MOTIONVIDEO-SECRET.
+from PIL import ImageCms  # noqa: E402
+from PIL.PngImagePlugin import PngInfo  # noqa: E402
+
+
+def tiff_exif(endian, orientation, thumb):
+    """EXIF as a camera writes it: IFD0, an Exif IFD with a maker note, a GPS IFD, and IFD1 with a thumbnail."""
+    E = endian
+
+    def ascii_(s):
+        return s.encode() + b'\0'
+
+    def ifd(entries, start, next_ifd):
+        size = 2 + 12 * len(entries) + 4
+        out, data = struct.pack(E + 'H', len(entries)), b''
+        for tag, typ, count, val in sorted(entries):
+            if len(val) <= 4:
+                out += struct.pack(E + 'HHI', tag, typ, count) + val.ljust(4, b'\0')
+            else:
+                out += struct.pack(E + 'HHII', tag, typ, count, start + size + len(data))
+                data += val + (b'\0' if len(val) % 2 else b'')
+        return out + struct.pack(E + 'I', next_ifd) + data
+
+    def rationals(*pairs):
+        return b''.join(struct.pack(E + 'II', n, d) for n, d in pairs)
+
+    when = '2024:05:06 07:08:09'
+    exif_entries = [(0x9003, 2, len(when) + 1, ascii_(when)), (0x927C, 7, 21, b'SERIAL-123456 private')]
+    gps_entries = [(0x0001, 2, 2, b'N\0'), (0x0002, 5, 3, rationals((51, 1), (30, 1), (0, 1))), (0x0003, 2, 2, b'W\0'), (0x0004, 5, 3, rationals((0, 1), (7, 1), (0, 1)))]
+    ifd0_entries = [(0x010F, 2, 9, ascii_('LeakyCam')), (0x0110, 2, 8, ascii_('LC-1000')), (0x0112, 3, 1, struct.pack(E + 'H', orientation)),
+                    (0x0132, 2, len(when) + 1, ascii_(when)), (0x013B, 2, 13, ascii_('Jane Example')), (0x8769, 4, 1, b'\0\0\0\0'), (0x8825, 4, 1, b'\0\0\0\0')]
+    # Lay the blocks out one after another; sizes do not depend on the pointer values.
+    off0 = 8
+    size0 = len(ifd(ifd0_entries, off0, 0))
+    off_exif = off0 + size0
+    off_gps = off_exif + len(ifd(exif_entries, off_exif, 0))
+    off_ifd1 = off_gps + len(ifd(gps_entries, off_gps, 0))
+    ifd1_entries = [(0x0103, 3, 1, struct.pack(E + 'H', 6)), (0x0201, 4, 1, b'\0\0\0\0'), (0x0202, 4, 1, struct.pack(E + 'I', len(thumb)))]
+    off_thumb = off_ifd1 + len(ifd(ifd1_entries, off_ifd1, 0))
+    ifd0_entries = [e if e[0] not in (0x8769, 0x8825) else (e[0], 4, 1, struct.pack(E + 'I', off_exif if e[0] == 0x8769 else off_gps)) for e in ifd0_entries]
+    ifd1_entries = [e if e[0] != 0x0201 else (0x0201, 4, 1, struct.pack(E + 'I', off_thumb)) for e in ifd1_entries]
+    header = (b'II' if E == '<' else b'MM') + struct.pack(E + 'HI', 42, 8)
+    return header + ifd(ifd0_entries, off0, off_ifd1) + ifd(exif_entries, off_exif, 0) + ifd(gps_entries, off_gps, 0) + ifd(ifd1_entries, off_ifd1, 0) + thumb
+
+
+def picture(w, h, alpha=False):
+    im = Image.new('RGBA' if alpha else 'RGB', (w, h))
+    px = im.load()
+    for y in range(h):
+        for x in range(w):
+            c = (x * 255 // w, y * 255 // h, (x + y) * 4 % 256)
+            px[x, y] = c + ((255 if x > w // 4 else 0),) if alpha else c
+    return im
+
+
+thumb_io = io.BytesIO()
+picture(8, 6).save(thumb_io, 'JPEG', quality=50)
+THUMB = thumb_io.getvalue()
+ICC = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+XMP = b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description dc:creator="Jane Example" xmlns:dc="http://purl.org/dc/elements/1.1/">SecretProject</rdf:Description></rdf:RDF></x:xmpmeta>'
+
+# JPEG: EXIF (little-endian), ICC, XMP and a comment from Pillow; IPTC, MPF and a motion photo trailer added by hand.
+buf = io.BytesIO()
+picture(64, 48).save(buf, 'JPEG', quality=90, exif=b'Exif\0\0' + tiff_exif('<', 6, THUMB), icc_profile=ICC, comment=b'Secret comment from Jane Example', xmp=XMP)
+jpg = buf.getvalue()
+iptc_body = b'Photoshop 3.0\0' + b'8BIM\x04\x04\0\0' + struct.pack('>I', 16) + b'\x1c\x02\x50\x00\x0cJane Example'
+iptc = b'\xff\xed' + struct.pack('>H', len(iptc_body) + 2) + iptc_body
+mpf_body = b'MPF\0' + b'MM\0*\0\0\0\x08' + b'\0' * 8
+mpf = b'\xff\xe2' + struct.pack('>H', len(mpf_body) + 2) + mpf_body
+jpg = jpg[:2] + iptc + mpf + jpg[2:] + b'MOTIONVIDEO-SECRET' * 4
+open(os.path.join(IMG, 'meta-full.jpg'), 'wb').write(jpg)
+
+# PNG: text, compressed text, XMP, EXIF (big-endian) and ICC from Pillow; tIME, a private chunk and a trailer by hand.
+info = PngInfo()
+info.add_text('Author', 'Jane Example')
+info.add_text('Comment', 'SecretProject notes', zip=True)
+info.add_itxt('XML:com.adobe.xmp', XMP.decode())
+buf = io.BytesIO()
+picture(40, 30, alpha=True).save(buf, 'PNG', pnginfo=info, exif=tiff_exif('>', 6, THUMB), icc_profile=ICC)
+png = buf.getvalue()
+
+
+def chunk(kind, data):
+    return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+
+
+iend = png.rindex(b'IEND') - 4
+png = png[:iend] + chunk(b'tIME', struct.pack('>HBBBBB', 2024, 5, 6, 7, 8, 9)) + chunk(b'prVt', b'SERIAL-123456') + png[iend:] + b'MOTIONVIDEO-SECRET'
+open(os.path.join(IMG, 'meta-full.png'), 'wb').write(png)
+
+# WebP: EXIF, ICC and XMP from Pillow (an extended VP8X file), plus a private chunk added by hand.
+buf = io.BytesIO()
+picture(40, 30, alpha=True).save(buf, 'WEBP', quality=90, exif=tiff_exif('<', 6, THUMB), icc_profile=ICC, xmp=XMP)
+webp = buf.getvalue()
+junk = b'prVt' + struct.pack('<I', 13) + b'SERIAL-123456' + b'\0'
+webp = webp + junk
+webp = webp[:4] + struct.pack('<I', len(webp) - 8) + webp[8:]
+open(os.path.join(IMG, 'meta-full.webp'), 'wb').write(webp)
+
+
 # ---------------------------------------------------------------- hostile inputs
 
 write(os.path.join(BAD, 'xxe.xml'), '<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n<r>&x;</r>\n', 'w')

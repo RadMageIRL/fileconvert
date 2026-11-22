@@ -7,11 +7,10 @@
 // changes. It must stay plain ASCII (the house rules check source files).
 
 import { FORMATS, type Category, type FormatId } from './formats.ts';
+import type { ToolId } from './tools.ts';
 
-export interface ConversionPage {
+interface PageText {
   slug: string;
-  from: FormatId;
-  to: FormatId;
   /** Where the page is listed in the catalog. */
   category: Category;
   /** Short line under the name in the catalog. */
@@ -20,27 +19,50 @@ export interface ConversionPage {
   description: string;
   /** The first paragraph under the heading. */
   intro: string;
-  /** What happens to the file, specific to this conversion. */
+  /** What happens to the file, specific to this page. */
   details: string[];
-  /** Limits and things that change, specific to this conversion. */
+  /** Limits and things that change, specific to this page. */
   limits: string[];
   /** Slugs of related pages. */
   related: string[];
   /** Extra search words (synonyms, devices, apps). */
   keywords?: string[];
-  /** Position in the Common conversions list on the home page. */
+  /** Position in the Common conversions (or Tools) list on the home page. */
   common?: number;
 }
 
-/** The page's display name, such as "HEIC to JPG". */
-export const pageName = (p: ConversionPage) => `${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
+/** A page for one conversion pair from the format registry. */
+export interface ConversionPage extends PageText {
+  kind?: 'convert';
+  from: FormatId;
+  to: FormatId;
+}
+
+/** A page for a tool that runs in the workspace. */
+export interface ToolPage extends PageText {
+  kind: 'tool';
+  tool: ToolId;
+  /** The tool's name, which is also the page heading: "Remove photo metadata". */
+  name: string;
+  /** The page title, at most 60 characters. */
+  title: string;
+  /** The three steps of the How to section. */
+  steps: [string, string, string];
+}
+
+export type Page = ConversionPage | ToolPage;
+
+export const isTool = (p: Page): p is ToolPage => p.kind === 'tool';
+
+/** The page's display name, such as "HEIC to JPG" or "Remove photo metadata". */
+export const pageName = (p: Page) => isTool(p) ? p.name : `${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
 
 /** The page title, at most 60 characters. */
-export const pageTitle = (p: ConversionPage) => `${pageName(p)} Converter, Free and Private | FileConvert`;
+export const pageTitle = (p: Page) => isTool(p) ? p.title : `${pageName(p)} Converter, Free and Private | FileConvert`;
 
 const PRIVATE_PHOTO = 'The photo is turned the right way up, and its EXIF details (camera, date, GPS location) are not copied into the result.';
 
-export const PAGES: readonly ConversionPage[] = [
+export const PAGES: readonly Page[] = [
   // ------------------------------------------------------------------ images
   {
     slug: 'heic-to-jpg', from: 'heic', to: 'jpg', category: 'image', common: 1,
@@ -203,6 +225,33 @@ export const PAGES: readonly ConversionPage[] = [
     ],
     related: ['png-to-jpg', 'png-to-webp', 'jpg-to-png', 'webp-to-png'],
     keywords: ['favicon', 'icon', 'windows', 'website', 'browser tab'],
+  },
+  {
+    kind: 'tool', slug: 'remove-image-metadata', tool: 'remove-image-metadata', category: 'image', common: 1,
+    name: 'Remove photo metadata',
+    title: 'Remove Photo Metadata (EXIF, GPS), Private | FileConvert',
+    blurb: 'Camera details and location out, picture untouched',
+    description: 'Remove EXIF, GPS location, XMP and other hidden data from JPG, PNG and WebP photos without recompressing them. Done on your device, nothing uploaded.',
+    intro: 'Photos carry more than the picture: the camera and its serial number, when the photo was taken, often where, and what software edited it. This tool takes that out and leaves the picture exactly as it was.',
+    steps: [
+      'Add your photos. JPG, PNG and WebP, as many as you like; they are checked by their contents, not their names.',
+      'Choose what to keep. Orientation and the color profile are kept unless you turn them off, so photos look the same.',
+      'Remove and download. Each photo says what was removed and its size before and after; download them one by one or as a ZIP.',
+    ],
+    details: [
+      'Removed: EXIF camera details and settings, dates, GPS location, maker notes, embedded thumbnails, XMP, IPTC and Photoshop data, comments, PNG text fields, and extra data after the picture such as a motion photo video.',
+      'The compressed picture is copied byte for byte. Nothing is decoded or re-encoded, so the quality is exactly the same.',
+      'A sideways photo keeps a minimal EXIF block holding only its orientation, so it still shows upright. Turn that off to remove EXIF completely.',
+      'The color profile (ICC) is kept so colors look the same; it describes colors, not you. Turn it off to remove it too.',
+      'Transparency, animation and color settings that a PNG or WebP needs to show correctly are kept.',
+    ],
+    limits: [
+      'The picture itself is not changed: faces, landmarks, documents or screens in the photo can still identify a person or a place.',
+      'HEIC, AVIF and TIFF are not supported by this tool; converting them to JPG or PNG removes their metadata.',
+      'Photos up to 300 MB each, up to 500 at a time.',
+    ],
+    related: ['heic-to-jpg', 'png-to-jpg', 'webp-to-jpg'],
+    keywords: ['exif', 'gps', 'location', 'privacy', 'strip', 'metadata', 'remove', 'clean', 'photo', 'iphone'],
   },
   {
     slug: 'gif-to-mp4', from: 'gif', to: 'mp4', category: 'image',
@@ -501,12 +550,12 @@ export const PAGES: readonly ConversionPage[] = [
   },
 ];
 
-export function pageBySlug(slug: string): ConversionPage | undefined {
+export function pageBySlug(slug: string): Page | undefined {
   return PAGES.find(p => p.slug === slug);
 }
 
 /** Pages in the Common conversions list, in order. */
-export function commonPages(): ConversionPage[] {
+export function commonPages(): Page[] {
   return PAGES.filter(p => p.common !== undefined).sort((a, b) => a.common! - b.common!);
 }
 
