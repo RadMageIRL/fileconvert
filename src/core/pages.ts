@@ -585,11 +585,12 @@ export const PAGES: readonly Page[] = [
     details: [
       'pdf.js reads the PDF on your device and the text is rebuilt line by line from the positions on each page.',
       'Pages that have pictures but no text are reported as scans that need OCR, which FileConvert does not do.',
+      'Every PDF is checked before it is read: compressed data that would expand far beyond the file, oversized pictures and other ways to make a reader use gigabytes of memory are refused within a second or two.',
       'PDFs in Chinese, Japanese or Korean use character maps that download the first time they are needed.',
     ],
     limits: [
       'Columns, tables and page layout are not preserved; text comes out in reading order as well as it can be rebuilt.',
-      'Password-protected PDFs cannot be read.',
+      'Encrypted PDFs are not opened, including ones that open without a password but restrict copying or printing. FileConvert never removes a PDF\'s protection.',
       'PDFs up to 500 MB and 5,000 pages.',
     ],
     related: ['markdown-to-pdf', 'csv-to-json', 'json-to-csv'],

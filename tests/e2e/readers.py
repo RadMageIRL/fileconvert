@@ -5,7 +5,8 @@
 Prints JSON. csv and tsv use Python's csv module; json and jsonl the json module; xlsx openpyxl (formulas and their
 saved results, number formats, merged cells, sheet states); docx python-docx (paragraph styles, list levels, run
 formatting, links, tables and pictures); md mistune (CommonMark with GFM tables); mdzip zipfile, mistune and Pillow
-(a Markdown ZIP, extracted and its picture links followed); media zipfile (a DOCX's pictures). None of them shares
+(a Markdown ZIP, extracted and its picture links followed); media zipfile (a DOCX's pictures); pdf qpdf, pypdf,
+Xpdf pdftotext and PDFium (a PDF's structure, text and rendered pages). None of them shares
 code with the browser engines.
 """
 
@@ -232,6 +233,60 @@ def read_mdzip(path):
             'markdown': mds, 'images': images, 'extracted': out, 'html': html_path}
 
 
+def read_pdf(path):
+    """A PDF as independent programs see it: qpdf checks its structure and writes a fully decompressed copy (for
+    searching every object and stream), pypdf lists pages, text, annotations, form fields, outline titles, named
+    destinations and catalog entries, Xpdf's pdftotext gives the text in reading order, and PDFium renders each page
+    at 72 dpi (the SHA-256 of each bitmap, so pages can be compared with the source's)."""
+    import hashlib
+    import shutil
+    import subprocess
+    import tempfile
+    import pypdf
+    import pypdfium2
+    qpdf = shutil.which('qpdf') or 'C:/msys64/ucrt64/bin/qpdf.exe'
+    check = subprocess.run([qpdf, '--check', path], capture_output=True, text=True)
+    decompressed = os.path.join(tempfile.mkdtemp(prefix='pdf-'), 'qdf.pdf')
+    subprocess.run([qpdf, '--qdf', '--object-streams=disable', '--decode-level=all', path, decompressed], capture_output=True)
+    r = pypdf.PdfReader(path)
+    root = r.trailer['/Root']
+    names = []
+    try:
+        names = sorted(r.named_destinations.keys())
+    except Exception:
+        pass
+
+    def titles(items, depth=0):
+        out = []
+        for it in items:
+            if isinstance(it, list):
+                out += titles(it, depth + 1)
+            else:
+                out.append(it.title)
+        return out
+    fields = sorted((r.get_fields() or {}).keys())
+    pdftotext = shutil.which('pdftotext')
+    text = subprocess.run([pdftotext, '-enc', 'UTF-8', path, '-'], capture_output=True).stdout.decode('utf-8', 'replace') if pdftotext else ''
+    doc = pypdfium2.PdfDocument(path)
+    renders = []
+    for i in range(len(doc)):
+        bitmap = doc[i].render(scale=1).to_numpy()
+        renders.append(hashlib.sha256(bitmap.tobytes()).hexdigest())
+    return {
+        'qpdf': {'ok': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout, 'out': (check.stdout + check.stderr).strip()[-400:]},
+        'pages': len(r.pages),
+        'text': [p.extract_text() for p in r.pages],
+        'annots': [[a.get_object().get('/Subtype') for a in (p.get('/Annots') or [])] for p in r.pages],
+        'fields': fields,
+        'outlines': titles(r.outline),
+        'dests': names,
+        'catalog': sorted(k for k in root.keys()),
+        'pdftotext': text,
+        'renders': renders,
+        'decompressed': decompressed,
+    }
+
+
 def read_media(path):
     """The picture parts of a DOCX (word/media), by SHA-256, as zipfile reads them."""
     import hashlib
@@ -264,6 +319,8 @@ elif kind == 'mdzip':
     result = read_mdzip(path)
 elif kind == 'media':
     result = read_media(path)
+elif kind == 'pdf':
+    result = read_pdf(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

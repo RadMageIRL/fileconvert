@@ -51,9 +51,19 @@ const USE = {
   'fast-xml-builder': 'Part of fast-xml-parser', strnum: 'Part of fast-xml-parser', 'path-expression-matcher': 'Part of fast-xml-parser',
   '@nodable/entities': 'Part of fast-xml-parser', anynum: 'Part of fast-xml-parser', 'is-unsafe': 'Part of fast-xml-parser', 'xml-naming': 'Part of fast-xml-parser',
   xlsx: 'Reading XLSX, XLS and ODS workbooks and writing XLSX (SheetJS Community Edition, data worker)',
-  fflate: 'ZIP reading checks and the batch ZIP',
+  fflate: 'ZIP reading checks, the batch ZIP, and measuring compressed PDF data in the PDF guard',
+  '@cantoo/pdf-lib': 'Editing PDFs: reading, rewriting pages and writing the result (PDF worker, loaded only when a PDF is edited)',
+  culori: 'Part of @cantoo/pdf-lib', 'html-entities': 'Part of @cantoo/pdf-lib', 'node-html-better-parser': 'Part of @cantoo/pdf-lib', tslib: 'Part of @cantoo/pdf-lib',
   '@expo-google-fonts/noto-sans': 'Noto Sans font files embedded in generated PDFs (the fonts are SIL OFL 1.1)',
   '@expo-google-fonts/noto-sans-mono': 'Noto Sans Mono font files embedded in generated PDFs (the fonts are SIL OFL 1.1)',
+};
+
+/** Code inside a package that keeps its own license: [what, license file in the package]. */
+const VENDORED = {
+  '@cantoo/pdf-lib': [
+    ['UPNG, PNG decoding (Photopea), vendored in packages/upng', 'src/packages/upng/LICENSE'],
+    ['@pdf-lib/standard-fonts, the 14 standard font metrics (Andrew Dillon), vendored in packages/standard-fonts', 'src/packages/standard-fonts/LICENSE.md'],
+  ],
 };
 
 const unknown = bundled.filter(n => !USE[n]);
@@ -120,6 +130,8 @@ for (const n of bundled) {
   const files = licenseFiles(n);
   if (!files.length) out.push('\n(The package ships no license file; its package.json declares the license above.)');
   for (const f of files) out.push(`\n${text(f)}`);
+  // Code a package carries inside itself under its own license (@cantoo/pdf-lib: UPNG and the standard font metrics).
+  for (const [what, file] of VENDORED[n] ?? []) out.push(`\n--- ${n}: ${what} (${file}) ---\n\n${text(join(pkgDir(n), file))}`);
   // Native libraries shipped by Mediabunny's encoder packages.
   const extra = join(pkgDir(n), 'licenses');
   if (existsSync(extra)) {

@@ -4,6 +4,9 @@
 
 Work toward v0.2.0.
 
+- **PDFs are checked before they are read.** PDF to TXT now runs every file through a guard first, which measures compressed data and the sizes readers allocate from without trusting what the file declares, and refuses files built to make a reader use gigabytes of memory (decompression bombs in content, fonts, pictures and object streams, through Flate, LZW, RunLength, ASCII85 and ASCIIHex, chained and with predictors; pictures, sampled functions and rows of absurd size; too many objects or pages; Brotli streams). Measured on the previous build, such files used up to 4 GB before failing with a misleading message. Whether a page is a scan is now decided without decoding its pictures.
+- **Encrypted PDFs are not opened**, including ones that open without a password but restrict copying or printing; until now their text could be extracted. FileConvert never removes a PDF's protection.
+
 - **Pages for common conversions.** HEIC to JPG, MP4 to MP3, JSON to CSV and 19 more have their own page, such as `/fileconvert/heic-to-jpg/`, with the converter at the top (it chooses that output for every file you add), what happens to your files, what to expect, and related conversions. The text is in the page itself, so it reads without scripts.
 - **Find a conversion.** Search every page as you type and filter by category. Asking for a conversion without its own page (BMP to TIFF) says whether FileConvert does it; asking for a format it does not support (AVI) says why.
 - **Common conversions** are listed under the drop zone on the home page.

@@ -15,6 +15,7 @@ import { readHeader } from '../engines/image/header';
 import type { ImageResult } from '../engines/image/convert';
 import type { SvgSize } from '../engines/image/svg';
 import type { MediaInfo, MediaResult } from '../engines/media/convert';
+import type { PdfScan } from '../engines/pdf/scan';
 import { CanceledError, Pool } from './pool';
 import type { Settings } from './settings';
 
@@ -77,7 +78,8 @@ export class Engines {
   document = new Pool(() => new Worker(new URL('../workers/document.worker.ts', import.meta.url), { type: 'module' }), 1);
   data = new Pool(() => new Worker(new URL('../workers/data.worker.ts', import.meta.url), { type: 'module' }), 1);
   archive = new Pool(() => new Worker(new URL('../workers/zip.worker.ts', import.meta.url), { type: 'module' }), 1);
-  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data, this.archive]; }
+  pdf = new Pool(() => new Worker(new URL('../workers/pdf.worker.ts', import.meta.url), { type: 'module' }), 1);
+  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data, this.archive, this.pdf]; }
 }
 
 /**
@@ -556,8 +558,12 @@ export class Queue {
       return asBlob(r.bytes, 'txt');
     }
     if (from === 'pdf' && to === 'txt') {
+      // The guard reads the file first, in the PDF worker: pdf.js never sees a file that would make it use far more
+      // memory than its size suggests, or one that is encrypted.
+      const scan = await this.engines.pdf.run<PdfScan>('scan', { file: job.file }, { onProgress, signal });
+      if (signal.aborted) throw new CanceledError();
       const { pdfToText } = await import('../engines/document/pdf-text');
-      const handle = pdfToText(job.file, (fraction, stage) => onProgress({ fraction, stage }));
+      const handle = pdfToText(job.file, (fraction, stage) => onProgress({ fraction, stage }), scan);
       const abort = () => handle.cancel();
       signal.addEventListener('abort', abort);
       try {

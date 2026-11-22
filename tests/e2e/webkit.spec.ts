@@ -102,3 +102,27 @@ test('HTML to DOCX, and Markdown with its pictures in a ZIP, without OffscreenCa
   expect(z.images.every(i => i.exists)).toBe(true);
   expect(w.outside).toEqual([]);
 });
+
+test('PDF guard and page cleanup in WebKit: a bomb is refused, page 2 of markers.pdf is removed cleanly', async ({ page }) => {
+  const w = await openApp(page);
+  await addFiles(page, [fx('pdf/bomb-content.pdf'), fx('pdf/encrypted-owner.pdf')]);
+  for (const name of ['bomb-content.pdf', 'encrypted-owner.pdf']) {
+    await row(page, name).locator('select').first().selectOption({ label: 'TXT' });
+    await row(page, name).getByRole('button', { name: /^Convert/ }).click();
+  }
+  await expect(row(page, 'bomb-content.pdf').locator('.job-error')).toContainText('expands past 256 MB when decompressed');
+  await expect(row(page, 'encrypted-owner.pdf').locator('.job-error')).toContainText('This PDF is encrypted');
+  const b64 = (await import('node:fs')).readFileSync(fx('pdf/markers.pdf')).toString('base64');
+  const r = await page.evaluate(async data => {
+    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    const app = (window as unknown as { __fileconvert: { engines: { pdf: { run<T>(t: string, p: unknown): Promise<T> } } } }).__fileconvert;
+    const out = await app.engines.pdf.run<{ bytes: Uint8Array; report: { pages: number } }>('keepPages', { file: new Blob([bytes]), order: [0, 2, 3] });
+    return { pages: out.report.pages, bytes: [...out.bytes] };
+  }, b64);
+  expect(r.pages).toBe(3);
+  const d = pyRead<{ qpdf: { ok: boolean }; pages: number; decompressed: string }>('pdf', writeTemp(tempDir(), 'markers-webkit.pdf', new Uint8Array(r.bytes)));
+  expect(d.qpdf.ok).toBe(true);
+  expect(d.pages).toBe(3);
+  expect((await import('node:fs')).readFileSync(d.decompressed).includes('PAGE-TWO-SECRET')).toBe(false);
+  expect(w.outside).toEqual([]);
+});

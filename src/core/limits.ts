@@ -27,6 +27,20 @@ export const LIMITS = {
   /** Documents. */
   pdfBytes: 500 * MB,
   pdfPages: 5000,
+  /**
+   * What the PDF guard (src/engines/pdf/scan.ts) allows before any PDF library reads a file, measured by decoding
+   * every compressed stream as a count, never by trusting declared sizes: the decoded size of one stream (at every
+   * filter in a chain), of all streams together, and of the object streams a PDF library keeps in memory; the
+   * number of objects; the pixels of one picture (from its dictionary and from the JPEG or JPEG 2000 header itself);
+   * the samples of one sampled function; and the bytes of one row a predictor or fax decoder works on.
+   */
+  pdfStreamBytes: 256 * MB,
+  pdfDecodedBytes: 4096 * MB,
+  pdfObjectStreamBytes: 256 * MB,
+  pdfObjects: 500_000,
+  pdfImagePixels: 100_000_000,
+  pdfFunctionSamples: 10_000_000,
+  pdfRowBytes: 4 * MB,
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,

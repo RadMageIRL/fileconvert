@@ -1,9 +1,15 @@
 // PDF to TXT with pdf.js, on the page (pdf.js parses in its own worker). Text is rebuilt line by line from
 // the positions pdf.js reports. A page that has pictures but no text is a scan: reading it would need OCR,
 // which is a different job from text extraction, so FileConvert says so instead of returning nothing.
+//
+// The PDF guard (src/engines/pdf/scan.ts) has read the file first and passes its findings here: pdf.js only sees
+// files whose compressed data, pictures and counts are within limits. pdf.js is also told the picture limit, and
+// pictures are never decoded here (whether a page is a scan comes from the guard's picture count), so text
+// extraction decodes only content streams and fonts, which the guard has measured.
 
 import { LIMITS, LimitError } from '../../core/limits';
 import { utf8 } from '../../core/text';
+import type { PdfScan } from '../pdf/scan';
 
 type PdfJs = typeof import('pdfjs-dist');
 let lib: Promise<PdfJs> | null = null;
@@ -25,7 +31,7 @@ export interface PdfTextHandle {
   cancel(): void;
 }
 
-export function pdfToText(file: Blob, onProgress: (fraction: number, stage: string) => void): PdfTextHandle {
+export function pdfToText(file: Blob, onProgress: (fraction: number, stage: string) => void, scan: Pick<PdfScan, 'images'>): PdfTextHandle {
   let canceled = false;
   let destroy: (() => Promise<void>) | null = null;
   const promise = (async () => {
@@ -41,6 +47,7 @@ export function pdfToText(file: Blob, onProgress: (fraction: number, stage: stri
       useSystemFonts: false,
       enableXfa: false,
       stopAtErrors: false,
+      maxImageSize: LIMITS.pdfImagePixels,
     });
     destroy = () => task.destroy();
     let pdf;
@@ -56,7 +63,6 @@ export function pdfToText(file: Blob, onProgress: (fraction: number, stage: stri
       if (pdf.numPages > LIMITS.pdfPages) throw new LimitError(`The PDF has ${pdf.numPages} pages; the limit is ${LIMITS.pdfPages}.`);
       const pages: string[] = [];
       const empty: number[] = [];
-      const IMAGE_OPS = new Set([m.OPS.paintImageXObject, m.OPS.paintInlineImageXObject, m.OPS.paintImageMaskXObject, m.OPS.paintImageXObjectRepeat]);
       for (let n = 1; n <= pdf.numPages; n++) {
         if (canceled) throw new Error('Canceled.');
         onProgress((n - 1) / pdf.numPages, `Page ${n} of ${pdf.numPages}`);
@@ -79,13 +85,8 @@ export function pdfToText(file: Blob, onProgress: (fraction: number, stage: stri
       }
       onProgress(1, 'Finishing');
       if (empty.length === pdf.numPages) {
-        // Look at a few pages to tell a scan from a blank document.
-        let pictures = false;
-        for (const n of empty.slice(0, 3)) {
-          const ops = await (await pdf.getPage(n)).getOperatorList();
-          if (ops.fnArray.some(f => IMAGE_OPS.has(f))) { pictures = true; break; }
-        }
-        throw new Error(pictures
+        // A scan or a blank document: the guard counted the pictures, so none has to be decoded here.
+        throw new Error(scan.images > 0
           ? 'This PDF has no text to extract: its pages are pictures, as in a scanned document. Reading text from pictures needs OCR (optical character recognition), which FileConvert does not do.'
           : 'This PDF has no text to extract. Its pages are empty, or their text is drawn as shapes.');
       }

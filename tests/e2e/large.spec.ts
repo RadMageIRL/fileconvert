@@ -196,3 +196,94 @@ test('a 1.2 GB ZIP is unpacked to private storage, not memory, and its files are
   await expect.poll(() => page.evaluate(async () => (await (window as unknown as { __fileconvert: { tempFiles(): Promise<string[]> } }).__fileconvert.tempFiles()).length), { timeout: 60_000 }).toBe(0);
   await context.close();
 });
+
+// An ordinary large PDF: 2,000 pages of text, 16 pages of incompressible pictures and 20 nearly white 600 dpi A4
+// scans stored losslessly (104 MB each decompressed), 2.3 GB decompressed in all. It must pass the guard, give its
+// text, and have pages removed in the PDF worker, with the browser's memory measured.
+test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard, converts, and has pages removed', async ({ baseURL }) => {
+  test.setTimeout(900_000);
+  const src = make('ordinary-large.pdf', p => execFileSync(PYTHON, ['-I', '-c', [
+    'import sys, zlib, random',
+    'rnd = random.Random(3); objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>", 3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}',
+    'kids = []; n = 10',
+    'def stream(d, extra=b""): return b"<< /Length %d%s >>\\nstream\\n" % (len(d), extra) + d + b"\\nendstream"',
+    'noise = zlib.compress(rnd.randbytes(2500 * 2000 * 3), 1)',
+    'white = zlib.compress(bytes([255]) * (4960 * 7016 * 3), 9)',
+    'for i in range(2036):',
+    '    content = b"BT /F1 12 Tf 72 720 Td (Page %d of an ordinary large PDF, LARGE-MARK-%05d) Tj ET" % (i + 1, i + 1)',
+    '    res = b"<< /Font << /F1 3 0 R >> >>"',
+    '    if i % 125 == 0 and i < 2000:',
+    '        objs[n + 2] = stream(noise, b" /Type /XObject /Subtype /Image /Width 2500 /Height 2000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode")',
+    '        content += b" q 500 0 0 400 50 200 cm /Im0 Do Q"; res = b"<< /Font << /F1 3 0 R >> /XObject << /Im0 %d 0 R >> >>" % (n + 2)',
+    '    if i >= 2016:',
+    '        objs[n + 2] = stream(white, b" /Type /XObject /Subtype /Image /Width 4960 /Height 7016 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode")',
+    '        content += b" q 595 0 0 842 0 0 cm /Im0 Do Q"; res = b"<< /Font << /F1 3 0 R >> /XObject << /Im0 %d 0 R >> >>" % (n + 2)',
+    '    objs[n + 1] = stream(zlib.compress(content), b" /Filter /FlateDecode")',
+    '    objs[n] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources %s /Contents %d 0 R >>" % (res, n + 1)',
+    '    kids.append(n); n += 3',
+    'objs[2] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % k for k in kids), len(kids))',
+    'out = bytearray(b"%PDF-1.7\\n"); offs = {}',
+    'for k in sorted(objs): offs[k] = len(out); out += b"%d 0 obj\\n" % k + objs[k] + b"\\nendobj\\n"',
+    'x = len(out); size = max(objs) + 1',
+    'out += b"xref\\n0 %d\\n0000000000 65535 f \\n" % size + b"".join((b"%010d 00000 n \\n" % offs[k]) if k in offs else b"0000000000 65535 f \\n" for k in range(1, size))',
+    'out += b"trailer\\n<< /Size %d /Root 1 0 R >>\\nstartxref\\n%d\\n%%%%EOF\\n" % (size, x)',
+    'open(sys.argv[1], "wb").write(out)',
+  ].join('\n'), p], { timeout: 900_000 }));
+  const { chromium } = await import('@playwright/test');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  /** Runs a step in a fresh Chrome with its own profile, sampling the memory of all its processes. */
+  async function measured<T, A = undefined>(step: (page: Page) => Promise<T>, after?: (page: Page) => Promise<A>): Promise<{ value: T; secs: number; riseMB: number; lagMs: number; extra?: A }> {
+    const profile = mkdtempSync(join(tmpdir(), 'fc-profile-'));
+    const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', baseURL });
+    const page = context.pages()[0] ?? await context.newPage();
+    await openApp(page);
+    await addFiles(page, [src]);
+    await row(page, 'ordinary-large.pdf').locator('select').first().waitFor();
+    const base = await browserMemory(profile);
+    let peak = base, sampling = true;
+    const sampler = (async () => { while (sampling) { peak = Math.max(peak, await browserMemory(profile)); await new Promise(r => setTimeout(r, 500)); } })();
+    const lag = await watchLag(page);
+    const t = Date.now();
+    const value = await step(page);
+    const secs = (Date.now() - t) / 1000;
+    sampling = false;
+    await sampler;
+    const lagMs = await lag();
+    const extra = after ? await after(page) : undefined;
+    await context.close();
+    return { value, secs, riseMB: peak - base, lagMs, extra };
+  }
+  const text = await measured(async page => {
+    await convert(page, 'ordinary-large.pdf', 'TXT', 600_000);
+    await expectDone(page, 'ordinary-large.pdf');
+  });
+  // Every other page removed, in the PDF worker, as the delete-pages tool will.
+  const edit = await measured(page => page.evaluate(async () => {
+    const app = (window as unknown as { __fileconvert: { queue: { jobs: Array<{ name: string; file: Blob }> }; engines: { pdf: { run<T>(t: string, p: unknown): Promise<T> } } } }).__fileconvert;
+    const file = app.queue.jobs.find(j => j.name === 'ordinary-large.pdf')!.file;
+    const order = Array.from({ length: 1018 }, (_, i) => i * 2);
+    const r = await app.engines.pdf.run<{ bytes: Uint8Array; report: { pages: number; objectsRemoved: number } }>('keepPages', { file, order });
+    (window as unknown as { __out: Uint8Array }).__out = r.bytes;
+    return { pages: r.report.pages, removed: r.report.objectsRemoved };
+  }), page => page.evaluate(() => {
+    // Outside the measured time: the test's own copy of the result, out of the page.
+    const b = (window as unknown as { __out: Uint8Array }).__out;
+    let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+    return btoa(s);
+  }));
+  const result = edit.value;
+  expect(result.pages).toBe(1018);
+  const bytesOut = Buffer.from(edit.extra!, 'base64');
+  record(`Ordinary PDF (${(statSync(src).size / 1048576).toFixed(0)} MB, 2,036 pages, 2.3 GB decompressed): guard and text ${text.secs.toFixed(1)} s, browser memory +${text.riseMB.toFixed(0)} MB, worst main-thread gap ${text.lagMs} ms; every other page removed in ${edit.secs.toFixed(1)} s, +${edit.riseMB.toFixed(0)} MB, ${(bytesOut.length / 1048576).toFixed(0)} MB out, ${result.removed} objects swept, worst main-thread gap ${edit.lagMs} ms`);
+  // The result, read by qpdf: whole and clean, and no removed page's mark left.
+  const out = join(DIR, 'ordinary-large-half.pdf');
+  writeFileSync(out, bytesOut);
+  const qpdf = execFileSync('qpdf', ['--check', out], { encoding: 'utf8', maxBuffer: 64 << 20 });
+  expect(qpdf).toContain('No syntax or stream encoding errors found');
+  expect(execFileSync('qpdf', ['--show-npages', out], { encoding: 'utf8' }).trim()).toBe('1018');
+  const firstPages = execFileSync('pdftotext', ['-f', '1', '-l', '3', out, '-'], { encoding: 'utf8' });
+  expect(firstPages).toContain('LARGE-MARK-00001');
+  expect(firstPages).toContain('LARGE-MARK-00003');
+  expect(firstPages).not.toContain('LARGE-MARK-00002');
+});
