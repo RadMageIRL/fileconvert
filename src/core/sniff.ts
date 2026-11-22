@@ -28,7 +28,7 @@ const starts = (b: Uint8Array, sig: number[], at = 0) => sig.every((v, i) => b[a
 const RAW_EXTS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'dng', 'orf', 'rw2', 'raf', 'pef', 'srw', 'x3f', '3fr', 'erf', 'kdc', 'mrw', 'iiq'];
 
 /** Text formats told apart by the file name, since their bytes can look alike. */
-const TEXT_FORMATS: FormatId[] = ['txt', 'md', 'html', 'json', 'csv', 'tsv', 'yaml', 'xml'];
+const TEXT_FORMATS: FormatId[] = ['txt', 'md', 'html', 'json', 'jsonl', 'csv', 'tsv', 'yaml', 'xml'];
 
 function unsupported(label: string, reason: string): Sniffed {
   return { format: null, label, reason };
@@ -141,13 +141,54 @@ function sniffZip(head: Uint8Array, tail: Uint8Array, ext: string): Sniffed {
   if (names.includes('mimetype') || first === 'mimetype') {
     const mime = ascii(head, 38, 60);
     if (mime.includes('epub')) return unsupported('EPUB book', 'EPUB books are not supported.');
-    if (mime.includes('opendocument')) return unsupported('OpenDocument file', 'OpenDocument files (ODT, ODS, ODP) are not supported yet.');
+    if (mime.startsWith('application/vnd.oasis.opendocument.spreadsheet')) return { format: 'ods', label: 'OpenDocument spreadsheet' };
+    if (mime.includes('opendocument')) return unsupported('OpenDocument file', 'OpenDocument text (ODT) and presentations (ODP) are not supported. ODS spreadsheets are.');
   }
-  if (names.length === 0 && (ext === 'docx' || ext === 'xlsx')) {
+  if (names.length === 0 && (ext === 'docx' || ext === 'xlsx' || ext === 'ods')) {
     // The directory is beyond the bytes read (a very large package). Let the engine check it fully.
+    if (ext === 'ods') return { format: 'ods', label: 'OpenDocument spreadsheet' };
     return ext === 'docx' ? { format: 'docx', label: 'Word document' } : { format: 'xlsx', label: 'Excel workbook' };
   }
   return { format: 'zip', label: 'ZIP archive' };
+}
+
+/** UTF-16LE bytes of a name, as an OLE compound file's directory stores it. */
+const utf16 = (name: string) => [...name].flatMap(c => [c.charCodeAt(0), 0]);
+function hasBytes(b: Uint8Array, sig: number[]): boolean {
+  outer: for (let i = 0; i + sig.length <= b.length; i++) {
+    for (let j = 0; j < sig.length; j++) if (b[i + j] !== sig[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * An OLE compound file: Excel 97-2003 (XLS), or Word, PowerPoint or an Outlook message. The directory names the
+ * streams; when it lies beyond the bytes read (a large file), the extension decides.
+ */
+function sniffCompound(head: Uint8Array, ext: string): Sniffed {
+  if (hasBytes(head, utf16('Workbook')) || hasBytes(head, [0x42, 0, 0x6f, 0, 0x6f, 0, 0x6b, 0, 0, 0]) || ((ext === 'xls' || ext === 'xlt') && !hasBytes(head, utf16('WordDocument')))) {
+    return { format: 'xls', label: 'Excel 97-2003 workbook' };
+  }
+  if (hasBytes(head, utf16('WordDocument')) || ext === 'doc' || ext === 'dot') return unsupported('Word 97-2003 document', 'Word 97-2003 (DOC) documents are not supported. Save it as DOCX first.');
+  if (hasBytes(head, utf16('PowerPoint Document')) || ext === 'ppt' || ext === 'pps') return unsupported('PowerPoint 97-2003 presentation', 'PowerPoint files are not supported.');
+  if (hasBytes(head, utf16('__substg1.0_')) || ext === 'msg') return unsupported('Outlook message', 'Outlook MSG files are not supported.');
+  return unsupported('Legacy Office file', 'This older Office file is not an Excel workbook. Excel 97-2003 (XLS) workbooks are supported; Word, PowerPoint and Outlook files are not.');
+}
+
+/**
+ * JSON Lines: the first line is a complete JSON object or list, and the next one starts another. Pretty-printed JSON
+ * starts with a line that is only a bracket, and minified JSON is a single line, so neither is taken for it.
+ */
+function looksLikeJsonLines(text: string): boolean {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2 || !/^[[{]/.test(lines[0]) || !/^[[{]/.test(lines[1])) return false;
+  try {
+    const v: unknown = JSON.parse(lines[0]);
+    return v !== null && typeof v === 'object';
+  } catch {
+    return false;
+  }
 }
 
 /** True when the bytes look like text: no NUL bytes outside a UTF-16 pattern and no other control bytes in bulk. */
@@ -188,6 +229,10 @@ function sniffText(head: Uint8Array, ext: string, size: number): Sniffed {
   }
   if (ext === 'rtf' || t.startsWith('{\\rtf')) return unsupported('Rich Text document', 'RTF documents are not supported.');
   const byExt = formatByExtension('x.' + ext);
+  // NDJSON is often saved as .json; it is read as JSON Lines when its lines say so.
+  if ((byExt === 'json' || !byExt) && /^[[{]/.test(t) && looksLikeJsonLines(new TextDecoder('utf-8').decode(head).replace(/^\ufeff/, ''))) {
+    return { format: 'jsonl', label: 'JSON Lines file' };
+  }
   if (byExt && TEXT_FORMATS.includes(byExt)) {
     return { format: byExt, label: FORMATS[byExt].label + ' file' };
   }
@@ -243,9 +288,7 @@ function detect(head: Uint8Array, tail: Uint8Array, size: number, ext: string, n
   if (ascii(head, 0, 2) === 'MZ') return unsupported('Windows program', 'Programs are not converted.');
   if (starts(head, [0x7f, 0x45, 0x4c, 0x46])) return unsupported('Linux program', 'Programs are not converted.');
   if (ascii(head, 0, 4) === '8BPS') return unsupported('Photoshop document', 'PSD files are not supported.');
-  if (starts(head, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {
-    return unsupported('Legacy Office or Outlook file', 'Older Office formats (DOC, XLS, PPT) and Outlook MSG files are not supported. Save as DOCX or XLSX first.');
-  }
+  if (starts(head, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return sniffCompound(head, ext);
   if ((starts(head, [0x00, 0x00, 0x01, 0x00]) || starts(head, [0x00, 0x00, 0x02, 0x00])) && head.length >= 22) {
     // An icon directory: a sane picture count and a first picture that starts after the directory.
     const count = head[4] | (head[5] << 8);

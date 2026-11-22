@@ -1,0 +1,4 @@
+{"id":1,"user":{"name":"Ada","city":"London"},"tags":["a","b"],"ok":true,"n":9007199254740993}
+{"id":2,"user":{"name":"Zoë 😀","city":"東京"},"tags":[],"ok":false,"note":"line\nbreak, \"quoted\""}
+
+{"id":3,"user":{"name":"=cmd","city":null},"ok":null,"extra":1.5}

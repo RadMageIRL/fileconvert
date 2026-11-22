@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FileConvert HTML sample</title>
+<style>body { font-family: serif; background: url(https://example.com/bg.png); }</style>
+<link rel="stylesheet" href="https://example.com/site.css">
+<script>document.title = 'changed';</script>
+</head>
+<body>
+<nav><a href="/">Home</a> | <a href="/about">About</a></nav>
+<main>
+<article>
+<h1>Converting a page</h1>
+<p>Text with <strong>strong</strong>, <b>bold</b>, <em>emphasis</em>, <i>italic</i>, <del>deleted</del>, <code>a &lt;code&gt; span</code>,
+a <a href="https://example.com/docs" title="Docs">link with a title</a>, a <a href="relative/page.html">relative link</a> and
+<a href="javascript:alert(1)">a script link</a>. Characters that mean something in Markdown: * _ # [x] 1. stay text.</p>
+<h2>Nested lists</h2>
+<ul>
+<li>Apples
+<ul><li>Green</li><li>Red<ol><li>Gala</li><li>Fuji</li></ol></li></ul>
+</li>
+<li>Pears</li>
+</ul>
+<ol start="3"><li>Third</li><li>Fourth</li></ol>
+<h2>Tables</h2>
+<table>
+<thead><tr><th align="left">Item</th><th align="right">Price</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>Tea</td><td align="right">2.50</td><td>Hot | iced</td></tr>
+<tr><td>Coffee</td><td align="right">3.00</td><td><p>Two</p><p>paragraphs</p></td></tr>
+</tbody>
+</table>
+<table><tr><td>no</td><td>header</td></tr><tr><td>row</td><td>here</td></tr></table>
+<h3>Code</h3>
+<pre><code class="language-python">def greet(name):
+    return f"Hello, {name}"  # *not* emphasis
+</code></pre>
+<blockquote><p>Quoted text.</p><p>Second quoted paragraph.</p></blockquote>
+<p>Zoë, naïve, façade. Ελληνικά. Русский. 日本語のテキスト。 中文。 한국어. العربية. עברית. हिन्दी. Emoji: 😀 👍🏽.</p>
+<p dir="rtl">هذا نص عربي من اليمين إلى اليسار.</p>
+<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAABQCAIAAABd+SbeAAAAyklEQVR4nO3QMQ0AIADAMEAIN/5VIAsV7GoNLNm8+wz+W0EDoztGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmJ0xOiI0RGjI0ZHjI4YHTE6YnTE6IjREaMjRkeMjhgdMTpidMToiNERoyNGR4yOGB0xOmL0aDy0ugGuDecTDwAAAABJRU5ErkJggg==" alt="Embedded red"> <img src="https://example.com/photo.jpg" alt="Remote photo"> <img src="images/local.png" alt="Relative picture"></p>
+<p>Line<br>break, H<sub>2</sub>O and x<sup>2</sup>.</p>
+<hr>
+<form action="https://example.com/steal"><input name="q"><button>Send</button></form>
+<iframe src="https://example.com/frame"></iframe>
+<p onclick="alert(2)">A paragraph with an event handler.</p>
+<!-- a comment that should not appear -->
+</article>
+</main>
+<footer><p>Footer text</p></footer>
+</body>
+</html>

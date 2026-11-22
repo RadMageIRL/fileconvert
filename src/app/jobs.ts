@@ -2,7 +2,7 @@
 // worksheets), offered the outputs that make sense for it, and converted on request by the right engine.
 // Results get unique, safe names. Nothing here talks to the network.
 
-import { engineFor, FORMATS, targetsFor, type FormatId, type InputTraits } from '../core/formats';
+import { engineFor, FORMATS, targetsFor, WORKBOOKS, type FormatId, type InputTraits } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
@@ -228,8 +228,8 @@ export class Queue {
           job.notes.push(`The video is ${info.unreadableVideo}, which FileConvert cannot decode (TV recordings and DVDs often use it). Only the sound can be converted.`);
         }
         job.notes.push(...(info.notes ?? []));
-      } else if (s.format === 'xlsx') {
-        job.sheets = await this.engines.data.run<string[]>('sheets', { file: job.file });
+      } else if (WORKBOOKS.includes(s.format)) {
+        job.sheets = await this.engines.data.run<string[]>('sheets', { file: job.file, kind: s.format });
         parts.push(`${job.sheets.length} ${job.sheets.length === 1 ? 'sheet' : 'sheets'}`);
       }
       job.info = parts.join(', ');

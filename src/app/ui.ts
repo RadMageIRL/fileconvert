@@ -1,7 +1,7 @@
 // The interface: the drop zone, the settings panels, the queue rows and the batch actions. Rows are built
 // once and updated in place, so focus and scroll position survive progress updates.
 
-import { ANIMATED_OUT, AUDIO_OUT, effectiveCategory, FORMATS, type Category, type FormatId } from '../core/formats';
+import { ANIMATED_OUT, AUDIO_OUT, effectiveCategory, FORMATS, WORKBOOKS, type Category, type FormatId } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
 import { listSession } from '../core/tempstore';
 import { $, clear, h } from './dom';
@@ -270,10 +270,11 @@ export class App {
       const groupLabel = cat === 'video' && job.target && AUDIO_OUT.includes(job.target) ? 'Audio as' : 'To';
       side.append(h('label', { class: 'job-target' }, groupLabel, sel));
     }
-    if (job.format === 'xlsx' && job.sheets && job.sheets.length > 1) {
+    // Choosing a sheet: not for XLS or ODS to XLSX, which converts the whole workbook.
+    if (job.format && WORKBOOKS.includes(job.format) && job.target !== 'xlsx' && job.sheets && job.sheets.length > 1) {
       const sel = h('select', { 'aria-label': `Worksheet to convert from ${job.name}`, 'data-key': 'sheet', disabled: job.status === 'converting' }) as HTMLSelectElement;
       sel.append(h('option', { value: 'first', selected: job.sheet === 'first' }, `First sheet (${job.sheets[0]})`));
-      sel.append(h('option', { value: 'all', selected: job.sheet === 'all' }, job.target === 'json' ? 'All sheets, in one JSON file' : `All sheets, one ${FORMATS[job.target ?? 'csv'].label} each`));
+      sel.append(h('option', { value: 'all', selected: job.sheet === 'all' }, job.target === 'json' ? 'All sheets, in one JSON file' : `All sheets, one ${FORMATS[job.target ?? 'csv'].label} file each`));
       for (const s of job.sheets.slice(1)) sel.append(h('option', { value: s, selected: job.sheet === s }, s));
       sel.addEventListener('change', () => { job.sheet = sel.value; if (job.status === 'done') job.status = 'ready'; this.update(job); });
       side.append(h('label', { class: 'job-target' }, 'Sheet', sel));

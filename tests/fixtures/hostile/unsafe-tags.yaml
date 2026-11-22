@@ -1,0 +1,4 @@
+- !!python/object/apply:os.system ["echo owned"]
+- !!js/function "function () { return 1 }"
+- !ruby/object:Gem::Installer {a: 1}
+- plain

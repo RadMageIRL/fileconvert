@@ -162,7 +162,7 @@ describe('catalog search', () => {
     expect(answers(parseQuery('avi to mp4'), none)[0]).toMatch(/^AVI video is not supported yet/);
     expect(answers(parseQuery('webp to mp4'), none)).toEqual(['WebP to MP4 is supported. Add your file to the converter at the top of the page and choose MP4.']);
     const yaml = answers(parseQuery('yaml'), none);
-    expect(yaml).toContain('YAML converts to JSON.');
+    expect(yaml).toContain('YAML converts to JSON, CSV, XLSX, TSV.');
     expect(yaml).toContain('YAML can be made from JSON.');
     // Archives are unpacked, never converted, and that is what is said about them.
     expect(answers(parseQuery('zip'), none)).toEqual(['ZIP archives are unpacked, not converted: add one to the converter at the top of the page and choose Extract files, then download the files inside or convert them.']);

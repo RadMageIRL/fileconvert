@@ -179,3 +179,8 @@ export function writeTemp(dir: string, name: string, data: Uint8Array): string {
   writeFileSync(p, data);
   return p;
 }
+
+/** Reads a document or data result with Python's own readers (tests/e2e/readers.py), never with FileConvert's code. */
+export function pyRead<T = unknown>(kind: 'csv' | 'tsv' | 'json' | 'jsonl' | 'xlsx' | 'docx', path: string): T {
+  return JSON.parse(execFileSync(PYTHON, ['-I', resolve('tests/e2e/readers.py'), kind, path], { encoding: 'utf8', maxBuffer: 64 << 20 }));
+}

@@ -1,0 +1,21 @@
+# Inventory, as YAML
+defaults: &defaults
+  unit: piece
+  taxable: true
+items:
+  - sku: A-001
+    name: Bolt
+    qty: 120
+    price: 0.25
+    <<: *defaults
+    sizes: [M4, M5]
+  - sku: '00042'
+    name: "Nut ✓"
+    qty: 0
+    price: 0.1
+    <<: *defaults
+    dims: {w: 5, h: 2.5}
+  - sku: B-7
+    name: =SUM(1)
+    qty: null
+    released: 2026-11-22

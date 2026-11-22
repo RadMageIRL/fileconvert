@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta http-equiv="refresh" content="0;url=https://example.com/"><base href="https://example.com/">
+<link rel="stylesheet" href="https://example.com/x.css"><script src="https://example.com/x.js"></script></head>
+<body onload="alert(1)">
+<h1>Hostile page</h1>
+<img src="https://example.com/pixel.gif" onerror="alert(2)" alt="pixel">
+<a href="javascript:alert(3)">script link</a> <a href="JaVaScRiPt:alert(4)">mixed case</a> <a href="data:text/html,<script>alert(5)</script>">data link</a>
+<svg><script>alert(6)</script><image href="https://example.com/svg.png"/></svg>
+<iframe srcdoc="<script>alert(7)</script>"></iframe>
+<object data="https://example.com/x.swf"></object><embed src="https://example.com/x.swf">
+<div style="background:url(https://example.com/bg.png)">styled</div>
+<p>Safe <b>text</b> survives.</p>
+<math><mi xlink:href="javascript:alert(8)">x</mi></math>
+<noscript><p title="</noscript><img src=x onerror=alert(9)>">noscript trick</p></noscript>
+<template><img src="https://example.com/t.png"></template>
+</body></html>

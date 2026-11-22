@@ -1,83 +1,52 @@
-// Structured-data conversions: JSON, CSV, YAML, XML and XLSX. Pure functions of bytes and options, run in
-// a worker by the app and directly by the unit tests. Every ambiguous mapping is a documented rule, and
-// anything lost or changed on the way is reported as a warning rather than dropped silently.
+// Structured-data conversions: JSON, JSON Lines, CSV, TSV, YAML, XML and spreadsheets (XLSX, XLS, ODS). Pure
+// functions of bytes and options, run in a worker by the app and directly by the unit tests. Every ambiguous mapping
+// is a documented rule, and anything lost or changed on the way is reported as a warning rather than dropped
+// silently.
+//
+// Tables from JSON, JSON Lines and YAML (CSV, TSV, Excel) follow these rules, also in the README and on the pages:
+//  1. A list: each item is a row. JSON Lines is always such a list, one line per row.
+//  2. An object whose values are all lists: each list is a table (one CSV or TSV file each, one sheet each in Excel).
+//  3. An object holding lists of records (lists of objects) beside other fields: each such list is a table, and the
+//     other fields are repeated on every row as extra columns, so nothing is lost.
+//  4. Any other object: one row. Any other single value: one row, one column.
+//  5. In a row, nested objects become dotted columns (address.city), and lists become JSON text in one cell or
+//     numbered columns (tags.0, tags.1), as chosen in Data settings. Records with different fields share one column
+//     per field; a missing field is an empty cell. A list of lists gives rows without a header.
+// XML has its own rules for finding the records (./xml.ts), then rule 5.
 
-import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
+import { XMLBuilder } from 'fast-xml-parser';
 import { parseAllDocuments, stringify as yamlStringify } from 'yaml';
 import * as XLSX from 'xlsx';
 import { LIMITS, LimitError } from '../../core/limits';
 import { decodeText, utf8 } from '../../core/text';
-import { checkZip } from '../../core/zipcheck';
 import { booleanValue, numericValue, parseCsv, writeCsv, type Cell } from './csv';
-import { keepAstralCharacters } from './xlsxtext';
+import { parseJson, plural, stringifyJson, type Json } from './json';
+import { readJsonLines, writeJsonLines } from './jsonl';
+import { flattenXmlRecord, parseXml, xmlTables } from './xml';
+import { readWorkbook, workbookSheetNames, workbookToXlsx, type WorkbookKind } from './workbook';
 
 import type { DataOptions, DataOutput, DataResult } from './options';
 
 export { DEFAULT_DATA_OPTIONS, type DataOptions, type DataOutput, type DataResult } from './options';
+export { checkDepth, jsonDepth, parseJson, stringifyJson } from './json';
+export { checkXmlSafety, xmlDepth } from './xml';
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const JSON_OUT = { ext: 'json', mime: 'application/json' } as const;
+const JSONL_OUT = { ext: 'jsonl', mime: 'application/jsonl' } as const;
 
-type Json = null | boolean | number | bigint | string | Json[] | { [k: string]: Json };
-
-const plural = (n: number, one: string, many = one + 's') => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-
-// ------------------------------------------------------------------ JSON
-
-/** Parses JSON, keeping integers beyond 2^53 exact as BigInt where the engine gives the source text. */
-export function parseJson(text: string, warnings: string[]): Json {
-  const depth = jsonDepth(text);
-  if (depth > LIMITS.dataDepth) throw new LimitError(`The data is nested ${depth} levels deep; the limit is ${LIMITS.dataDepth}.`);
-  let unsafe = 0;
-  let value: Json;
-  try {
-    value = JSON.parse(text.replace(/^\ufeff/, ''), function (this: unknown, _key: string, v: unknown, ctx?: { source?: string }) {
-      if (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v)) {
-        if (ctx && typeof ctx.source === 'string' && /^-?\d+$/.test(ctx.source)) return BigInt(ctx.source);
-        unsafe++;
-      }
-      return v;
-    }) as Json;
-  } catch (e) {
-    throw new Error(`This is not valid JSON: ${(e as Error).message}`);
-  }
-  if (unsafe) warnings.push(`${plural(unsafe, 'number')} larger than 9007199254740991 may have lost precision; this browser does not expose the original digits.`);
-  checkDepth(value);
-  return value;
-}
-
-/** Bracket nesting of JSON text, measured before parsing (a parser with a reviver recurses per level). */
-export function jsonDepth(text: string): number {
-  let depth = 0, max = 0, inString = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (inString) {
-      if (c === 92) i++; // backslash: skip the escaped character
-      else if (c === 34) inString = false;
-    } else if (c === 34) inString = true;
-    else if (c === 91 || c === 123) { if (++depth > max) max = depth; }
-    else if (c === 93 || c === 125) depth--;
-  }
-  return max;
-}
-
-/** Throws when nesting is deeper than the limit, without recursion. */
-export function checkDepth(value: unknown, limit: number = LIMITS.dataDepth): void {
-  const stack: Array<[unknown, number]> = [[value, 1]];
-  while (stack.length) {
-    const [v, d] = stack.pop()!;
-    if (v === null || typeof v !== 'object') continue;
-    if (d > limit) throw new LimitError(`The data is nested more than ${limit} levels deep, the limit.`);
-    for (const child of Array.isArray(v) ? v : Object.values(v as object)) {
-      if (child !== null && typeof child === 'object') stack.push([child, d + 1]);
-    }
-  }
-}
+const readText = (bytes: Uint8Array, warnings: string[]) => {
+  const dec = decodeText(bytes);
+  if (dec.warning) warnings.push(dec.warning);
+  return dec.text;
+};
 
 const scalarText = (v: Json): Cell => {
   if (v === null) return { text: '', isText: false };
   if (typeof v === 'boolean') return { text: v ? 'true' : 'false', isText: false };
   if (typeof v === 'number' || typeof v === 'bigint') return { text: String(v), isText: false };
   if (typeof v === 'string') return { text: v, isText: true };
-  return { text: JSON.stringify(v, (_k, x) => typeof x === 'bigint' ? Number(x) : x), isText: true };
+  return { text: stringifyJson(v), isText: true };
 };
 
 /**
@@ -104,56 +73,80 @@ function flattenValues(rec: Json, arrays: 'json' | 'columns', out: Map<string, J
   }
 }
 
-/** The rows a JSON document describes, as the CSV, TSV and XLSX writers see it. */
-interface JsonTable {
+/** The rows a document describes, as the CSV, TSV and XLSX writers see them. */
+interface Table {
+  /** Names the CSV file or the sheet when there are several tables. */
+  name?: string;
   /** Column names, or null when the rows are lists and there is no header. */
   header: string[] | null;
   rows: Json[][];
 }
 
-function rowsOf(value: Json, warnings: string[]): Json[] {
-  if (Array.isArray(value)) return value;
-  if (value !== null && typeof value === 'object') {
-    const keys = Object.keys(value);
-    const only = keys.length === 1 ? (value as Record<string, Json>)[keys[0]] : undefined;
-    if (Array.isArray(only) && only.every(r => r !== null && typeof r === 'object' && !Array.isArray(r))) {
-      warnings.push(`Used the "${keys[0]}" list as the rows.`);
-      return only;
-    }
-    warnings.push('The top level is a single object, so it became one row.');
-    return [value];
-  }
-  return [value];
-}
-
-function tableOf(rows: Json[], o: DataOptions, warnings: string[]): JsonTable {
-  if (rows.length > 0 && rows.every(r => Array.isArray(r))) {
-    warnings.push('Each inner list became one row, with no header row.');
-    return { header: null, rows: (rows as Json[][]).map(r => r.map(v => v !== null && typeof v === 'object' ? JSON.stringify(v, (_k, x) => typeof x === 'bigint' ? Number(x) : x) : v)) };
-  }
+/** Rows from flattened records, with one column per field seen, in first-seen order, then the context columns. */
+function mapsToTable(flat: Array<Map<string, Json>>, context: Map<string, Json>, warnings: string[], name?: string): Table {
   const order: string[] = [];
   const seen = new Set<string>();
+  for (const m of flat) for (const k of m.keys()) if (!seen.has(k)) { seen.add(k); order.push(k); }
+  const missing = flat.filter(m => m.size < order.length).length;
+  // Context columns come last; one whose name a record field already uses gets a _2 suffix.
+  const contextCols: Array<[string, Json]> = [];
+  for (const [k, v] of context) {
+    let col = k, n = 2;
+    while (seen.has(col)) col = `${k}_${n++}`;
+    seen.add(col);
+    contextCols.push([col, v]);
+  }
+  const header = [...order, ...contextCols.map(c => c[0])];
+  if (header.length > LIMITS.xlsxColumns) throw new LimitError(`The records produce ${header.length} columns; the limit is ${LIMITS.xlsxColumns}.`);
+  if (missing && flat.length > 1) warnings.push(`The records ${name ? `in "${name}" ` : ''}do not all have the same fields: there is one column for every field seen, and ${plural(missing, 'record')} ${missing === 1 ? 'has' : 'have'} empty cells where a field is missing.`);
+  return { name, header, rows: flat.map(m => [...order.map(k => m.has(k) ? m.get(k)! : null), ...contextCols.map(c => c[1])]) };
+}
+
+function tableOf(rows: Json[], o: DataOptions, warnings: string[], context = new Map<string, Json>(), name?: string): Table {
+  if (rows.length > 0 && rows.every(r => Array.isArray(r))) {
+    warnings.push('Each inner list became one row, with no header row.');
+    return { name, header: null, rows: (rows as Json[][]).map(r => r.map(v => v !== null && typeof v === 'object' ? stringifyJson(v) : v)) };
+  }
   let nested = false;
   const flat = rows.map(r => {
     const m = new Map<string, Json>();
     flattenValues(r, o.arrays, m);
-    for (const k of m.keys()) {
-      if (!seen.has(k)) { seen.add(k); order.push(k); }
-      if (k.includes('.')) nested = true;
-    }
+    for (const k of m.keys()) if (k.includes('.')) nested = true;
     return m;
   });
-  if (order.length > LIMITS.xlsxColumns) throw new LimitError(`The records produce ${order.length} columns; the limit is ${LIMITS.xlsxColumns}.`);
-  const missing = flat.filter(m => m.size < order.length).length;
   if (nested) warnings.push(o.arrays === 'json' ? 'Nested objects became dotted columns (address.city); lists stayed JSON text in one cell.' : 'Nested objects and lists became dotted, numbered columns (address.city, tags.0).');
-  if (missing && rows.length > 1) warnings.push(`The records do not all have the same fields: there is one column for every field seen, and ${plural(missing, 'record')} ${missing === 1 ? 'has' : 'have'} empty cells where a field is missing.`);
-  return { header: order, rows: flat.map(m => order.map(k => m.has(k) ? m.get(k)! : null)) };
+  return mapsToTable(flat, context, warnings, name);
 }
 
-function readJsonTable(bytes: Uint8Array, o: DataOptions, warnings: string[]): JsonTable {
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  return tableOf(rowsOf(parseJson(dec.text, warnings), warnings), o, warnings);
+const isRecordList = (v: Json): v is Json[] => Array.isArray(v) && v.length > 0 && v.every(r => r !== null && typeof r === 'object' && !Array.isArray(r));
+
+/** Finds the tables in a JSON value by the rules at the top of this file. */
+function tablesOf(value: Json, o: DataOptions, warnings: string[], table: 'file' | 'sheet'): Table[] {
+  if (Array.isArray(value)) return [tableOf(value, o, warnings)];
+  if (value === null || typeof value !== 'object') return [tableOf([value], o, warnings)];
+  const keys = Object.keys(value);
+  const obj = value as Record<string, Json>;
+  if (keys.length === 1 && Array.isArray(obj[keys[0]])) {
+    warnings.push(`Used the "${keys[0]}" list as the rows.`);
+    return [tableOf(obj[keys[0]] as Json[], o, warnings)];
+  }
+  if (keys.length > 1 && keys.every(k => Array.isArray(obj[k]))) {
+    warnings.push(`Each of the ${keys.length} lists became its own ${table === 'sheet' ? 'sheet' : 'file'}.`);
+    return keys.map(k => tableOf(obj[k] as Json[], o, warnings, new Map(), k));
+  }
+  const lists = keys.filter(k => isRecordList(obj[k]));
+  if (lists.length) {
+    const context = new Map<string, Json>();
+    for (const k of keys.filter(k => !lists.includes(k))) flattenValues(obj[k], o.arrays, context, k);
+    const listNames = lists.map(k => `"${k}"`).join(' and ');
+    warnings.push(lists.length === 1
+      ? `The rows are the records of the ${listNames} list.`
+      : `Each list of records (${listNames}) became its own ${table === 'sheet' ? 'sheet' : 'file'}.`);
+    if (context.size) warnings.push(`The other top-level ${plural(context.size, 'field')} (${[...context.keys()].slice(0, 4).join(', ')}${context.size > 4 ? ', ...' : ''}) ${context.size === 1 ? 'is' : 'are'} repeated on every row, so nothing is lost.`);
+    return lists.map(k => tableOf(obj[k] as Json[], o, warnings, context, lists.length > 1 ? k : undefined));
+  }
+  warnings.push('The top level is a single object, so it became one row.');
+  return [tableOf([value], o, warnings)];
 }
 
 /** CSV and TSV share one writer; TSV is the same format with tabs. */
@@ -162,41 +155,53 @@ const TEXT_TABLE = { csv: { ext: 'csv', mime: 'text/csv' }, tsv: { ext: 'tsv', m
 const textOptions = (o: DataOptions, as: TextTable): DataOptions => as === 'tsv' ? { ...o, delimiter: '\t' } : o;
 const formulaNote = (n: number) => `${plural(n, 'cell')} starting with = + - or @ got a leading apostrophe so spreadsheets do not run them as formulas. Turn off formula protection in Data settings to keep them exactly as they are.`;
 
-export function jsonToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
-  const warnings: string[] = [];
-  const t = readJsonTable(bytes, o, warnings);
-  const cells: Cell[][] = t.header ? [t.header.map(k => ({ text: k, isText: true }))] : [];
-  for (const r of t.rows) cells.push(r.map(scalarText));
-  const columns = cells.reduce((m, r) => Math.max(m, r.length), 0);
-  const { text, neutralized } = writeCsv(cells, textOptions(o, as));
+function tablesToText(tables: Table[], o: DataOptions, as: TextTable, warnings: string[]): DataResult {
+  const outputs: DataOutput[] = [];
+  let neutralized = 0, rows = 0, columns = 0;
+  for (const t of tables) {
+    const cells: Cell[][] = t.header ? [t.header.map(k => ({ text: k, isText: true }))] : [];
+    for (const r of t.rows) cells.push(r.map(scalarText));
+    const w = writeCsv(cells, textOptions(o, as));
+    neutralized += w.neutralized;
+    rows += t.rows.length;
+    columns = Math.max(columns, cells.reduce((m, r) => Math.max(m, r.length), 0));
+    outputs.push({ suffix: tables.length > 1 ? t.name : undefined, bytes: utf8(w.text), ...TEXT_TABLE[as] });
+  }
   if (neutralized) warnings.push(formulaNote(neutralized));
   return {
-    outputs: [{ bytes: utf8(text), ...TEXT_TABLE[as] }],
+    outputs,
     warnings,
-    summary: `${plural(t.rows.length, 'row')}, ${plural(columns, 'column')}`,
+    summary: tables.length > 1 ? `${plural(tables.length, 'table')}, ${plural(rows, 'row')}` : `${plural(rows, 'row')}, ${plural(columns, 'column')}`,
   };
 }
 
 /** Excel's limit on the text in one cell. */
 const CELL_TEXT = 32767;
 
+const sheetName = (base: string) => {
+  const n = base.replace(/[[\]:*?/\\]/g, '_').replace(/^'+|'+$/g, '').slice(0, 31).trim();
+  return n && n.toLowerCase() !== 'history' ? n : 'Sheet1';
+};
+
 /** Writes one worksheet from rows of JSON values. Returns counts for the notes. */
-function jsonSheet(t: JsonTable): { ws: XLSX.WorkSheet; width: number; exactText: number; truncated: number } {
+function tableSheet(t: Table, textNumbers: boolean): { ws: XLSX.WorkSheet; width: number; exactText: number; truncated: number; numbers: number } {
   const all: Json[][] = t.header ? [t.header, ...t.rows] : t.rows;
   if (all.length > LIMITS.xlsxRows) throw new LimitError(`The data has ${all.length.toLocaleString('en-US')} rows; Excel allows ${LIMITS.xlsxRows.toLocaleString('en-US')}.`);
   const width = all.reduce((m, r) => Math.max(m, r.length), 0);
   const ws: XLSX.WorkSheet = {};
   const colWidth: number[] = new Array(width).fill(6);
-  let exactText = 0, truncated = 0;
+  let exactText = 0, truncated = 0, numbers = 0;
   all.forEach((r, ri) => r.forEach((v, ci) => {
     if (v === null || v === undefined) return;
     const addr = XLSX.utils.encode_cell({ r: ri, c: ci });
     let cell: XLSX.CellObject;
+    const n = textNumbers && typeof v === 'string' && !(t.header && ri === 0) ? numericValue(v) : null;
     if (typeof v === 'number') cell = { t: 'n', v };
+    else if (n !== null) { cell = { t: 'n', v: n }; numbers++; }
     else if (typeof v === 'boolean') cell = { t: 'b', v };
     else if (typeof v === 'bigint') { cell = { t: 's', v: String(v) }; exactText++; }
     else {
-      let s = typeof v === 'string' ? v : JSON.stringify(v, (_k, x) => typeof x === 'bigint' ? Number(x) : x);
+      let s = typeof v === 'string' ? v : stringifyJson(v);
       s = s.replace(/\r\n?/g, '\n');
       if (s.length > CELL_TEXT) { s = s.slice(0, CELL_TEXT); truncated++; }
       cell = { t: 's', v: s };
@@ -207,53 +212,96 @@ function jsonSheet(t: JsonTable): { ws: XLSX.WorkSheet; width: number; exactText
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, all.length - 1), c: Math.max(0, width - 1) } });
   ws['!cols'] = colWidth.map(wch => ({ wch }));
   if (t.header && t.rows.length) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(0, width - 1) } }) };
-  return { ws, width, exactText, truncated };
+  return { ws, width, exactText, truncated, numbers };
 }
 
 /**
- * JSON to XLSX. A list of records becomes one sheet; an object whose values are all lists becomes one sheet per
- * list, named by its key. Numbers and true/false become typed cells; text is always stored as text (never a
- * formula); integers beyond what Excel can hold exactly are stored as text with every digit kept.
+ * Tables to one XLSX workbook, one sheet per table. Numbers and true/false become typed cells; text is always stored
+ * as text (never a formula); integers beyond what Excel can hold exactly are stored as text with every digit kept.
+ * With `textNumbers` (XML, whose values are all text), text that is a plain number becomes a number cell.
  */
-export function jsonToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
-  const warnings: string[] = [];
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const value = parseJson(dec.text, warnings);
-  const sheets: Array<{ name: string; table: JsonTable }> = [];
-  const keys = value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
-  if (keys.length > 1 && keys.every(k => Array.isArray((value as Record<string, Json>)[k]))) {
-    const used = new Set<string>();
-    for (const k of keys) {
-      let name = sheetName(k), n = 2;
-      while (used.has(name.toLowerCase())) name = `${sheetName(k).slice(0, 27)} (${n++})`;
-      used.add(name.toLowerCase());
-      if (name !== k) warnings.push(`The list "${k}" is on the sheet "${name}" (Excel sheet names are limited to 31 characters, without [ ] : * ? / \\).`);
-      sheets.push({ name, table: tableOf((value as Record<string, Json[]>)[k], o, warnings) });
-    }
-    warnings.unshift(`Each of the ${keys.length} lists became its own sheet.`);
-  } else {
-    sheets.push({ name: sheetName(baseName), table: tableOf(rowsOf(value, warnings), o, warnings) });
-  }
+function tablesToXlsx(tables: Table[], baseName: string, warnings: string[], textNumbers = false): DataResult {
   const wb = XLSX.utils.book_new();
-  let rows = 0, width = 0, exactText = 0, truncated = 0;
-  for (const s of sheets) {
-    const r = jsonSheet(s.table);
-    XLSX.utils.book_append_sheet(wb, r.ws, s.name);
-    rows += s.table.rows.length;
+  const used = new Set<string>();
+  let rows = 0, width = 0, exactText = 0, truncated = 0, numbers = 0;
+  for (const t of tables) {
+    const wanted = tables.length > 1 && t.name !== undefined ? t.name : baseName;
+    let name = sheetName(wanted), n = 2;
+    while (used.has(name.toLowerCase())) name = `${sheetName(wanted).slice(0, 27)} (${n++})`;
+    used.add(name.toLowerCase());
+    if (tables.length > 1 && name !== wanted) warnings.push(`The list "${wanted}" is on the sheet "${name}" (Excel sheet names are limited to 31 characters, without [ ] : * ? / \\).`);
+    const r = tableSheet(t, textNumbers);
+    XLSX.utils.book_append_sheet(wb, r.ws, name);
+    rows += t.rows.length;
     width = Math.max(width, r.width);
     exactText += r.exactText;
     truncated += r.truncated;
+    numbers += r.numbers;
   }
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', compression: true }) as ArrayBuffer;
   if (exactText) warnings.push(`${plural(exactText, 'integer')} larger than Excel can hold exactly ${exactText === 1 ? 'is' : 'are'} stored as text, with every digit kept.`);
   if (truncated) warnings.push(`${plural(truncated, 'cell')} longer than 32,767 characters, the Excel limit, were cut.`);
-  warnings.push('Numbers and true/false are typed cells. Text, including dates written as text, stays text; text that starts with = is never stored as a formula.');
+  if (textNumbers) warnings.push(`${plural(numbers, 'cell')} became numbers. Text such as dates, leading zeros (01234) and long digit strings stayed text.`);
+  warnings.push(textNumbers
+    ? 'Text, including dates written as text, stays text; text that starts with = is never stored as a formula.'
+    : 'Numbers and true/false are typed cells. Text, including dates written as text, stays text; text that starts with = is never stored as a formula.');
   return {
-    outputs: [{ bytes: new Uint8Array(out), ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }],
+    outputs: [{ bytes: new Uint8Array(out), ext: 'xlsx', mime: XLSX_MIME }],
     warnings,
-    summary: sheets.length > 1 ? `${plural(sheets.length, 'sheet')}, ${plural(rows, 'row')}` : `${plural(rows, 'row')}, ${plural(width, 'column')}`,
+    summary: tables.length > 1 ? `${plural(tables.length, 'sheet')}, ${plural(rows, 'row')}` : `${plural(rows, 'row')}, ${plural(width, 'column')}`,
   };
+}
+
+// ------------------------------------------------------------------ JSON and JSON Lines
+
+const readJson = (bytes: Uint8Array, warnings: string[]) => parseJson(readText(bytes, warnings), warnings);
+
+export function jsonToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
+  const warnings: string[] = [];
+  return tablesToText(tablesOf(readJson(bytes, warnings), o, warnings, 'file'), o, as, warnings);
+}
+
+export function jsonToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
+  const warnings: string[] = [];
+  return tablesToXlsx(tablesOf(readJson(bytes, warnings), o, warnings, 'sheet'), baseName, warnings);
+}
+
+/** JSON to JSON Lines: a list gives one line per item; an object holding one list, one line per item of it. */
+export function jsonToJsonl(bytes: Uint8Array): DataResult {
+  const warnings: string[] = [];
+  const value = readJson(bytes, warnings);
+  let items: Json[];
+  if (Array.isArray(value)) items = value;
+  else {
+    const keys = value !== null && typeof value === 'object' ? Object.keys(value) : [];
+    const only = keys.length === 1 ? (value as Record<string, Json>)[keys[0]] : undefined;
+    if (Array.isArray(only)) {
+      items = only;
+      warnings.push(`Used the "${keys[0]}" list: one line per item.`);
+    } else {
+      items = [value];
+      warnings.push('The JSON is not a list, so it became a single line.');
+    }
+  }
+  return { outputs: [{ bytes: utf8(writeJsonLines(items)), ...JSONL_OUT }], warnings, summary: plural(items.length, 'line') };
+}
+
+const readJsonl = (bytes: Uint8Array, warnings: string[]) => readJsonLines(readText(bytes, warnings), warnings);
+
+export function jsonlToJson(bytes: Uint8Array): DataResult {
+  const warnings: string[] = [];
+  const values = readJsonl(bytes, warnings);
+  return { outputs: [{ bytes: utf8(stringifyJson(values, 2) + '\n'), ...JSON_OUT }], warnings, summary: `A list of ${plural(values.length, 'value')}` };
+}
+
+export function jsonlToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
+  const warnings: string[] = [];
+  return tablesToText([tableOf(readJsonl(bytes, warnings), o, warnings)], o, as, warnings);
+}
+
+export function jsonlToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
+  const warnings: string[] = [];
+  return tablesToXlsx([tableOf(readJsonl(bytes, warnings), o, warnings)], baseName, warnings);
 }
 
 // ------------------------------------------------------------------ CSV
@@ -308,51 +356,52 @@ function nestRecord(flat: Record<string, Json>): { value: Record<string, Json>; 
 
 /** Reads CSV or TSV. A TSV file is read with tabs whatever the CSV separator setting says. */
 function readCsvInput(bytes: Uint8Array, o: DataOptions, warnings: string[]) {
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const parsed = parseCsv(dec.text, o.inputDelimiter, LIMITS.csvCells);
+  const parsed = parseCsv(readText(bytes, warnings), o.inputDelimiter, LIMITS.csvCells);
   warnings.push(...parsed.warnings);
   return parsed;
 }
 
 const delimiterName = (d: string) => d === ',' ? 'commas' : d === ';' ? 'semicolons' : d === '\t' ? 'tabs' : d === '|' ? 'pipes' : `"${d}"`;
 
-export function csvToJson(bytes: Uint8Array, o: DataOptions): DataResult {
-  const warnings: string[] = [];
+/** CSV or TSV rows as JSON values: records named by the header row, or lists without one. */
+function csvRecords(bytes: Uint8Array, o: DataOptions, warnings: string[]): Json[] {
   const { rows, delimiter } = readCsvInput(bytes, o, warnings);
   if (rows.length === 0) throw new Error('The CSV file is empty.');
   if (o.inputDelimiter === 'auto' && rows.some(r => r.length > 1)) warnings.push(`Fields are separated by ${delimiterName(delimiter)}.`);
-  let out: Json[];
-  if (o.header) {
-    const { names, renamed } = headerNames(rows[0]);
-    if (renamed) warnings.push(`${plural(renamed, 'column')} with an empty or repeated name got a new name, like column_3 or name_2.`);
-    let ragged = 0;
-    out = rows.slice(1).map(r => {
-      if (r.length !== names.length) ragged++;
-      const rec: Record<string, Json> = {};
-      names.forEach((n, i) => { rec[n] = i < r.length ? typed(r[i], o.detectTypes) : null; });
-      for (let i = names.length; i < r.length; i++) rec[`column_${i + 1}`] = typed(r[i], o.detectTypes);
-      return rec;
+  if (!o.header) return rows.map(r => r.map(s => typed(s, o.detectTypes)));
+  const { names, renamed } = headerNames(rows[0]);
+  if (renamed) warnings.push(`${plural(renamed, 'column')} with an empty or repeated name got a new name, like column_3 or name_2.`);
+  let ragged = 0;
+  let out: Json[] = rows.slice(1).map(r => {
+    if (r.length !== names.length) ragged++;
+    const rec: Record<string, Json> = {};
+    names.forEach((n, i) => { rec[n] = i < r.length ? typed(r[i], o.detectTypes) : null; });
+    for (let i = names.length; i < r.length; i++) rec[`column_${i + 1}`] = typed(r[i], o.detectTypes);
+    return rec;
+  });
+  if (ragged) warnings.push(`${plural(ragged, 'row')} had a different number of fields than the header. Missing fields are null; extra fields got column_N names.`);
+  if (o.nest) {
+    let failed = 0;
+    out = out.map(r => {
+      const n = nestRecord(r as Record<string, Json>);
+      if (!n.ok) failed++;
+      return n.value;
     });
-    if (ragged) warnings.push(`${plural(ragged, 'row')} had a different number of fields than the header. Missing fields are null; extra fields got column_N names.`);
-    if (o.nest) {
-      let failed = 0;
-      out = out.map(r => {
-        const n = nestRecord(r as Record<string, Json>);
-        if (!n.ok) failed++;
-        return n.value;
-      });
-      if (failed) warnings.push(`${plural(failed, 'row')} kept flat names because their dotted column names conflict (like "a" and "a.b").`);
-    }
-  } else {
-    out = rows.map(r => r.map(s => typed(s, o.detectTypes)));
+    if (failed) warnings.push(`${plural(failed, 'row')} kept flat names because their dotted column names conflict (like "a" and "a.b").`);
   }
-  const text = JSON.stringify(out, (_k, v) => typeof v === 'bigint' ? Number(v) : v, 2) + '\n';
-  return {
-    outputs: [{ bytes: utf8(text), ext: 'json', mime: 'application/json' }],
-    warnings,
-    summary: `${plural(out.length, o.header ? 'record' : 'row')}`,
-  };
+  return out;
+}
+
+export function csvToJson(bytes: Uint8Array, o: DataOptions): DataResult {
+  const warnings: string[] = [];
+  const out = csvRecords(bytes, o, warnings);
+  return { outputs: [{ bytes: utf8(stringifyJson(out, 2) + '\n'), ...JSON_OUT }], warnings, summary: plural(out.length, o.header ? 'record' : 'row') };
+}
+
+export function csvToJsonl(bytes: Uint8Array, o: DataOptions): DataResult {
+  const warnings: string[] = [];
+  const out = csvRecords(bytes, o, warnings);
+  return { outputs: [{ bytes: utf8(writeJsonLines(out)), ...JSONL_OUT }], warnings, summary: plural(out.length, 'line') };
 }
 
 /** CSV to TSV and back: the same table with the other separator. Every field is text, as it was. */
@@ -366,11 +415,6 @@ export function retabulate(bytes: Uint8Array, o: DataOptions, as: TextTable): Da
   const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
   return { outputs: [{ bytes: utf8(text), ...TEXT_TABLE[as] }], warnings, summary: `${plural(rows.length, 'row')}, ${plural(width, 'column')}` };
 }
-
-const sheetName = (base: string) => {
-  const n = base.replace(/[[\]:*?/\\]/g, '_').replace(/^'+|'+$/g, '').slice(0, 31).trim();
-  return n && n.toLowerCase() !== 'history' ? n : 'Sheet1';
-};
 
 export function csvToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
   const warnings: string[] = [];
@@ -398,7 +442,7 @@ export function csvToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): 
       } else {
         // Excel stores line breaks inside a cell as LF; a CR would be dropped by any XML reader anyway.
         let v = raw.replace(/\r\n?/g, '\n');
-        if (v.length > 32767) { v = v.slice(0, 32767); truncated++; }
+        if (v.length > CELL_TEXT) { v = v.slice(0, CELL_TEXT); truncated++; }
         ws[addr] = { t: 's', v };
       }
       colWidth[ci] = Math.min(60, Math.max(colWidth[ci], raw.length + 1));
@@ -415,30 +459,19 @@ export function csvToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): 
   else warnings.push('Every cell is text, as chosen.');
   warnings.push('Cells that start with = are stored as text, never as formulas.');
   return {
-    outputs: [{ bytes: new Uint8Array(out), ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }],
+    outputs: [{ bytes: new Uint8Array(out), ext: 'xlsx', mime: XLSX_MIME }],
     warnings,
     summary: `${plural(rows.length, 'row')}, ${plural(width, 'column')}`,
   };
 }
 
-// ------------------------------------------------------------------ XLSX
+// ------------------------------------------------------------------ spreadsheets (XLSX, XLS, ODS)
 
-export function xlsxSheetNames(bytes: Uint8Array): string[] {
-  checkZip(bytes, 'workbook');
-  const wb = XLSX.read(keepAstralCharacters(bytes), { type: 'array', bookSheets: true });
-  return wb.SheetNames;
+export function xlsxSheetNames(bytes: Uint8Array, kind: WorkbookKind = 'xlsx'): string[] {
+  return workbookSheetNames(bytes, kind);
 }
 
-export function xlsxToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
-  const warnings: string[] = [];
-  if (bytes.length > LIMITS.xlsxBytes) throw new LimitError(`The workbook is larger than ${LIMITS.xlsxBytes / 1048576} MB, the limit.`);
-  checkZip(bytes, 'workbook');
-  let wb: XLSX.WorkBook;
-  try {
-    wb = XLSX.read(keepAstralCharacters(bytes), { type: 'array', dense: true, cellFormula: true, cellHTML: false, cellText: true, cellDates: false, cellStyles: false, sheetStubs: true, bookVBA: false });
-  } catch (e) {
-    throw new Error(`The workbook could not be read: ${(e as Error).message}`);
-  }
+function chooseSheets(wb: XLSX.WorkBook, o: DataOptions, warnings: string[]): string[] {
   let names: string[];
   if (o.sheet === 'all') names = wb.SheetNames;
   else if (o.sheet === 'first') names = wb.SheetNames.slice(0, 1);
@@ -449,6 +482,38 @@ export function xlsxToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'cs
   }
   if (names.length === 0) throw new Error('The workbook has no worksheets.');
   if (o.sheet === 'first' && wb.SheetNames.length > 1) warnings.push(`Converted the first sheet, "${names[0]}". The workbook has ${wb.SheetNames.length} sheets; choose another sheet, or All sheets, next to the file.`);
+  return names;
+}
+
+/** A number in the General format, as text: up to 15 significant digits, Excel's precision, never cut to fit a column. */
+export function generalNumber(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
+  // Past 15 digits Excel shows E notation, so a rounded value never passes for an exact one.
+  if (Math.abs(n) >= 1e15) return n.toExponential(14).replace(/\.?0+e/, 'e').replace('e', 'E');
+  return String(Number(n.toPrecision(15))).replace('e', 'E');
+}
+
+/** One spreadsheet cell as CSV text: as shown (with General numbers in full), or the value the workbook stores. */
+function csvCell(c: XLSX.CellObject | undefined, values: DataOptions['values']): Cell {
+  if (!c || c.t === 'z' || c.v === undefined || c.v === null) return { text: '', isText: false };
+  if (c.t === 'e') return { text: c.w ?? '#ERROR', isText: false };
+  if (c.t === 'b') return { text: c.v ? 'TRUE' : 'FALSE', isText: false };
+  if (values === 'raw') {
+    if (c.t === 'n') return { text: String(c.v), isText: false };
+    if (c.v instanceof Date) return { text: c.v.toISOString(), isText: false };
+    return { text: String(c.v), isText: true };
+  }
+  if (c.t === 'n') return { text: c.w ?? XLSX.utils.format_cell(c), isText: false };
+  return { text: c.w ?? String(c.v), isText: true };
+}
+
+const isGeneral = (z: unknown) => z === undefined || z === null || (typeof z === 'string' && /^general$/i.test(z));
+
+export function xlsxToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv', kind: WorkbookKind = 'xlsx'): DataResult {
+  const warnings: string[] = [];
+  const { wb, macros } = readWorkbook(bytes, kind, { dense: true, cellFormula: true, cellNF: true, cellHTML: false, cellText: true, cellDates: false, cellStyles: false, sheetStubs: true });
+  const names = chooseSheets(wb, o, warnings);
   const outputs: DataOutput[] = [];
   let totalRows = 0, neutralizedTotal = 0;
   for (const name of names) {
@@ -458,20 +523,26 @@ export function xlsxToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'cs
     let missing = 0;
     const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null;
     const dense = (ws as unknown as { '!data'?: XLSX.CellObject[][] })['!data'];
-    if (dense) for (const row of dense) for (const c of row ?? []) if (c && c.f && (c.t === 'z' || c.v === undefined)) missing++;
+    if (dense) for (const row of dense) for (const c of row ?? []) {
+      if (!c) continue;
+      if (c.f && (c.t === 'z' || c.v === undefined)) missing++;
+      // A number in the General format is written with every digit Excel keeps, not cut short to an 11-character
+      // column the way Excel's display (and its own CSV export) can show 123456789012345 as 1.23457E+14.
+      else if (c.t === 'n' && typeof c.v === 'number' && isGeneral(c.z)) c.w = generalNumber(c.v);
+    }
     if (missing) warnings.push(`${plural(missing, 'formula cell')} in "${name}" ${missing === 1 ? 'has' : 'have'} no saved result and ${missing === 1 ? 'is' : 'are'} empty. Open and save the workbook in Excel to store the results.`);
     if (ws['!merges']?.length) warnings.push(`"${name}" has merged cells; their value is in the first cell only.`);
-    const aoa = range ? XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: o.values === 'raw', defval: '', blankrows: true }) : [];
-    while (aoa.length && aoa[aoa.length - 1].every(v => v === '' || v === null || v === undefined)) aoa.pop();
-    // Every row gets the sheet's full width, so the CSV is rectangular even where cells are missing.
-    const width = range ? range.e.c - range.s.c + 1 : 0;
-    for (const row of aoa) while (row.length < width) row.push('');
-    const table: Cell[][] = aoa.map(r => r.map(v => {
-      if (v === null || v === undefined) return { text: '', isText: false };
-      if (typeof v === 'boolean') return { text: v ? 'TRUE' : 'FALSE', isText: false };
-      if (typeof v === 'number') return { text: String(v), isText: false };
-      return { text: String(v), isText: true };
-    }));
+    // Every row gets the sheet's full width, so the CSV is rectangular even where cells are missing. Cells are read
+    // directly: for XLS files SheetJS's sheet_to_json gives raw date cells as JavaScript dates in the local time zone.
+    const table: Cell[][] = [];
+    if (range) {
+      for (let r = range.s.r; r <= range.e.r; r++) {
+        const row: Cell[] = [];
+        for (let c = range.s.c; c <= range.e.c; c++) row.push(csvCell(dense?.[r]?.[c], o.values));
+        table.push(row);
+      }
+    }
+    while (table.length && table[table.length - 1].every(c => c.text === '')) table.pop();
     const { text, neutralized } = writeCsv(table, textOptions(o, as));
     neutralizedTotal += neutralized;
     totalRows += table.length;
@@ -479,7 +550,8 @@ export function xlsxToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'cs
   }
   if (outputs.length === 1 && o.sheet !== 'all') outputs[0].suffix = undefined;
   if (neutralizedTotal) warnings.push(formulaNote(neutralizedTotal));
-  if (o.values === 'formatted') warnings.push('Values are written as Excel displays them (dates and number formats applied).');
+  if (o.values === 'formatted') warnings.push('Values are written as Excel displays them (dates and number formats applied); numbers in the General format keep their 15 significant digits rather than being cut to fit a column.');
+  if (macros) warnings.push('The workbook contains macros. They were not read or run.');
   return { outputs, warnings, summary: outputs.length > 1 ? `${plural(outputs.length, 'sheet')}, ${plural(totalRows, 'row')}` : plural(totalRows, 'row') };
 }
 
@@ -499,31 +571,14 @@ export function excelDateToIso(serial: number, date1904: boolean): string | null
 }
 
 /**
- * XLSX to JSON. JSON keeps types: numbers stay numbers (exactly as Excel stores them), TRUE and FALSE become
- * true and false, empty cells become null, and cells with a date format become ISO 8601 text. With a header row
- * each row is an object; without one, a list. "All sheets" gives one JSON object keyed by sheet name.
+ * A workbook's sheets as JSON values. JSON keeps types: numbers stay numbers (exactly as the workbook stores them),
+ * TRUE and FALSE become true and false, empty cells become null, and cells with a date format become ISO 8601 text.
+ * With a header row each row is an object; without one, a list.
  */
-export function xlsxToJson(bytes: Uint8Array, o: DataOptions): DataResult {
-  const warnings: string[] = [];
-  if (bytes.length > LIMITS.xlsxBytes) throw new LimitError(`The workbook is larger than ${LIMITS.xlsxBytes / 1048576} MB, the limit.`);
-  checkZip(bytes, 'workbook');
-  let wb: XLSX.WorkBook;
-  try {
-    wb = XLSX.read(keepAstralCharacters(bytes), { type: 'array', dense: true, cellFormula: true, cellNF: true, cellHTML: false, cellText: true, cellDates: false, cellStyles: false, sheetStubs: true, bookVBA: false });
-  } catch (e) {
-    throw new Error(`The workbook could not be read: ${(e as Error).message}`);
-  }
+function workbookRecords(bytes: Uint8Array, o: DataOptions, kind: WorkbookKind, warnings: string[]): { names: string[]; sheets: Record<string, Json[]>; total: number } {
+  const { wb, macros } = readWorkbook(bytes, kind, { dense: true, cellFormula: true, cellNF: true, cellHTML: false, cellText: true, cellDates: false, cellStyles: false, sheetStubs: true });
   const date1904 = !!(wb.Workbook as { WBProps?: { date1904?: boolean } } | undefined)?.WBProps?.date1904;
-  let names: string[];
-  if (o.sheet === 'all') names = wb.SheetNames;
-  else if (o.sheet === 'first') names = wb.SheetNames.slice(0, 1);
-  else {
-    const want = o.sheet.name;
-    if (!wb.SheetNames.includes(want)) throw new Error(`The workbook has no sheet named "${want}".`);
-    names = [want];
-  }
-  if (names.length === 0) throw new Error('The workbook has no worksheets.');
-  if (o.sheet === 'first' && wb.SheetNames.length > 1) warnings.push(`Converted the first sheet, "${names[0]}". The workbook has ${wb.SheetNames.length} sheets; choose another sheet, or All sheets, next to the file.`);
+  const names = chooseSheets(wb, o, warnings);
   let dates = 0, errors = 0, missing = 0, skipped = 0, total = 0;
   const value = (c: XLSX.CellObject | undefined): Json => {
     if (!c) return null;
@@ -583,22 +638,86 @@ export function xlsxToJson(bytes: Uint8Array, o: DataOptions): DataResult {
   if (missing) warnings.push(`${plural(missing, 'formula cell')} had no saved result and became null. Open and save the workbook in Excel to store the results.`);
   if (skipped) warnings.push(`${plural(skipped, 'empty row')} left out.`);
   warnings.push('Numbers, true/false and empty cells (null) keep their JSON types. The "Spreadsheet values" setting applies to CSV and TSV only.');
+  if (macros) warnings.push('The workbook contains macros. They were not read or run.');
+  return { names, sheets, total };
+}
+
+export function xlsxToJson(bytes: Uint8Array, o: DataOptions, kind: WorkbookKind = 'xlsx'): DataResult {
+  const warnings: string[] = [];
+  const { names, sheets, total } = workbookRecords(bytes, o, kind, warnings);
   const doc: Json = o.sheet === 'all' ? sheets : sheets[names[0]];
-  const text = JSON.stringify(doc, null, 2) + '\n';
   return {
-    outputs: [{ bytes: utf8(text), ext: 'json', mime: 'application/json' }],
+    outputs: [{ bytes: utf8(JSON.stringify(doc, null, 2) + '\n'), ...JSON_OUT }],
     warnings,
     summary: names.length > 1 ? `${plural(names.length, 'sheet')}, ${plural(total, o.header ? 'record' : 'row')}` : plural(total, o.header ? 'record' : 'row'),
   };
 }
 
+/** A workbook to JSON Lines: one line per row, and one file per sheet when there are several. */
+export function xlsxToJsonl(bytes: Uint8Array, o: DataOptions, kind: WorkbookKind = 'xlsx'): DataResult {
+  const warnings: string[] = [];
+  const { names, sheets, total } = workbookRecords(bytes, o, kind, warnings);
+  const outputs: DataOutput[] = names.map(n => ({ suffix: names.length > 1 || o.sheet === 'all' ? n : undefined, bytes: utf8(writeJsonLines(sheets[n])), ...JSONL_OUT }));
+  if (outputs.length === 1 && o.sheet !== 'all') outputs[0].suffix = undefined;
+  return { outputs, warnings, summary: names.length > 1 ? `${plural(names.length, 'sheet')}, ${plural(total, 'line')}` : plural(total, 'line') };
+}
+
 // ------------------------------------------------------------------ YAML
+
+/**
+ * Parses YAML with the core schema: no custom tags are resolved or run (an unknown tag such as !!python/object is a
+ * warning and its value stays plain data), keys must be unique, merge keys (<<) work, aliases may not expand far
+ * beyond the file's size (billion laughs), and nesting is limited. Several documents become a list of them.
+ */
+function parseYaml(text: string, warnings: string[]): { value: Json; documents: number } {
+  let list;
+  try {
+    list = parseAllDocuments(text, { prettyErrors: true, uniqueKeys: true, merge: true, schema: 'core' });
+  } catch (e) {
+    if (e instanceof RangeError) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+    throw e;
+  }
+  const docs = Array.isArray(list) ? list : [list];
+  const values: unknown[] = [];
+  for (const doc of docs) {
+    if (doc.errors.length) {
+      if (/call stack/i.test(doc.errors[0].message)) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+      throw new Error(`This is not valid YAML: ${doc.errors[0].message.split('\n')[0]}`);
+    }
+    for (const w of doc.warnings) warnings.push(w.message.split('\n')[0]);
+    try {
+      values.push(doc.toJS({ maxAliasCount: 100 }));
+    } catch (e) {
+      if (/alias/i.test((e as Error).message)) throw new LimitError('The YAML uses aliases to expand far beyond its size (a "billion laughs" pattern), so it was not converted.');
+      if (e instanceof RangeError) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+      throw e;
+    }
+  }
+  if (values.length === 0) throw new Error('The YAML file has no documents.');
+  if (values.length > 1) warnings.push(`The file has ${values.length} YAML documents; together they are a list of them.`);
+  let nonFinite = 0, other = 0;
+  const clean = (v: unknown, depth: number): Json => {
+    if (depth > LIMITS.dataDepth) throw new LimitError(`The data is nested more than ${LIMITS.dataDepth} levels deep, the limit.`);
+    if (typeof v === 'number' && !Number.isFinite(v)) { nonFinite++; return null; }
+    if (v === undefined) { other++; return null; }
+    if (Array.isArray(v)) return v.map(x => clean(x, depth + 1));
+    if (v instanceof Uint8Array || v instanceof Date || v instanceof Map || v instanceof Set) { other++; return String(v); }
+    if (v !== null && typeof v === 'object') {
+      const o: Record<string, Json> = {};
+      for (const [k, x] of Object.entries(v)) o[k] = clean(x, depth + 1);
+      return o;
+    }
+    return v as Json;
+  };
+  const value = clean(values.length === 1 ? values[0] : values, 0);
+  if (nonFinite) warnings.push(`${plural(nonFinite, 'value')} (.inf or .nan) cannot exist in JSON and became null.`);
+  if (other) warnings.push(`${plural(other, 'value')} with no JSON equivalent became text or null.`);
+  return { value, documents: values.length };
+}
 
 export function jsonToYaml(bytes: Uint8Array): DataResult {
   const warnings: string[] = [];
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const value = parseJson(dec.text, warnings);
+  const value = readJson(bytes, warnings);
   // YAML 1.1 quoting rules: strings such as yes, no, on, 2026-11-15 or 1:20 are quoted, so YAML 1.1 readers
   // (PyYAML, older tools) do not turn them into booleans, dates or numbers. The result is valid YAML 1.2 too.
   const text = yamlStringify(value, { version: '1.1', indent: 2, lineWidth: 0, minContentWidth: 0, aliasDuplicateObjects: false });
@@ -607,139 +726,58 @@ export function jsonToYaml(bytes: Uint8Array): DataResult {
 
 export function yamlToJson(bytes: Uint8Array): DataResult {
   const warnings: string[] = [];
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const docs = parseAllDocuments(dec.text, { prettyErrors: true, uniqueKeys: true, merge: true, schema: 'core' });
-  const list = Array.isArray(docs) ? docs : [docs];
-  const values: unknown[] = [];
-  for (const doc of list) {
-    if (doc.errors.length) throw new Error(`This is not valid YAML: ${doc.errors[0].message.split('\n')[0]}`);
-    for (const w of doc.warnings) warnings.push(w.message.split('\n')[0]);
-    try {
-      values.push(doc.toJS({ maxAliasCount: 100 }));
-    } catch (e) {
-      if (/alias/i.test((e as Error).message)) throw new LimitError('The YAML uses aliases to expand far beyond its size (a "billion laughs" pattern), so it was not converted.');
-      throw e;
-    }
+  const { value, documents } = parseYaml(readText(bytes, warnings), warnings);
+  return { outputs: [{ bytes: utf8(stringifyJson(value, 2) + '\n'), ...JSON_OUT }], warnings, summary: documents > 1 ? plural(documents, 'document') : 'JSON document' };
+}
+
+/** YAML tables: several documents that are all lists are one table of all their items; otherwise the JSON rules. */
+function yamlTables(bytes: Uint8Array, o: DataOptions, warnings: string[], table: 'file' | 'sheet'): Table[] {
+  const { value, documents } = parseYaml(readText(bytes, warnings), warnings);
+  if (documents > 1 && Array.isArray(value) && value.every(d => Array.isArray(d))) {
+    warnings.push(`The items of the ${documents} documents' lists are one table.`);
+    return [tableOf((value as Json[][]).flat(), o, warnings)];
   }
-  if (values.length === 0) throw new Error('The YAML file has no documents.');
-  let value: unknown = values.length === 1 ? values[0] : values;
-  if (values.length > 1) warnings.push(`The file has ${values.length} YAML documents; the JSON is a list of them.`);
-  let nonFinite = 0, other = 0;
-  const clean = (v: unknown, depth: number): unknown => {
-    if (depth > LIMITS.dataDepth) throw new LimitError(`The data is nested more than ${LIMITS.dataDepth} levels deep, the limit.`);
-    if (typeof v === 'number' && !Number.isFinite(v)) { nonFinite++; return null; }
-    if (v === undefined) { other++; return null; }
-    if (Array.isArray(v)) return v.map(x => clean(x, depth + 1));
-    if (v instanceof Uint8Array || v instanceof Date || v instanceof Map || v instanceof Set) { other++; return String(v); }
-    if (v !== null && typeof v === 'object') {
-      const o: Record<string, unknown> = {};
-      for (const [k, x] of Object.entries(v)) o[k] = clean(x, depth + 1);
-      return o;
-    }
-    return v;
-  };
-  value = clean(value, 0);
-  if (nonFinite) warnings.push(`${plural(nonFinite, 'value')} (.inf or .nan) cannot exist in JSON and became null.`);
-  if (other) warnings.push(`${plural(other, 'value')} with no JSON equivalent became text or null.`);
-  const text = JSON.stringify(value, (_k, v) => typeof v === 'bigint' ? Number(v) : v, 2) + '\n';
-  return { outputs: [{ bytes: utf8(text), ext: 'json', mime: 'application/json' }], warnings, summary: values.length > 1 ? plural(values.length, 'document') : 'JSON document' };
+  return tablesOf(value, o, warnings, table);
+}
+
+export function yamlToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
+  const warnings: string[] = [];
+  return tablesToText(yamlTables(bytes, o, warnings, 'file'), o, as, warnings);
+}
+
+export function yamlToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
+  const warnings: string[] = [];
+  return tablesToXlsx(yamlTables(bytes, o, warnings, 'sheet'), baseName, warnings);
 }
 
 // ------------------------------------------------------------------ XML
 
-/** Rejects DOCTYPE entity declarations before any parser sees them (XXE, billion laughs). */
-export function checkXmlSafety(text: string, warnings: string[]): void {
-  const m = /<!DOCTYPE/i.exec(text);
-  if (!m) return;
-  const rest = text.slice(m.index, m.index + 200000);
-  if (/<!ENTITY/i.test(rest)) {
-    throw new Error('This XML declares entities in its DOCTYPE. Entity expansion is a common attack (XXE, billion laughs), so FileConvert does not convert such files. Remove the DOCTYPE block and try again.');
-  }
-  warnings.push('The DOCTYPE declaration was ignored; nothing it refers to is loaded.');
-}
-
-/** Measures element nesting without recursion, skipping comments, CDATA, declarations and quoted attribute values. */
-export function xmlDepth(text: string): number {
-  let depth = 0, max = 0;
-  let i = text.indexOf('<');
-  while (i !== -1 && i < text.length) {
-    if (text.startsWith('<!--', i)) { const e = text.indexOf('-->', i + 4); i = e < 0 ? -1 : text.indexOf('<', e + 3); continue; }
-    if (text.startsWith('<![CDATA[', i)) { const e = text.indexOf(']]>', i + 9); i = e < 0 ? -1 : text.indexOf('<', e + 3); continue; }
-    if (text[i + 1] === '?' || text[i + 1] === '!') { const e = text.indexOf('>', i); i = e < 0 ? -1 : text.indexOf('<', e + 1); continue; }
-    let j = i + 1;
-    let quote = '';
-    for (; j < text.length; j++) {
-      const c = text[j];
-      if (quote) { if (c === quote) quote = ''; continue; }
-      if (c === '"' || c === "'") quote = c;
-      else if (c === '>') break;
-    }
-    if (text[i + 1] === '/') depth--;
-    else if (text[j - 1] === '/') { if (depth + 1 > max) max = depth + 1; }
-    else { depth++; if (depth > max) max = depth; }
-    i = text.indexOf('<', j + 1);
-  }
-  return max;
-}
-
-const ENTITY = /&(lt|gt|amp|apos|quot|#\d+|#x[0-9a-fA-F]+);/g;
-function decodeEntities(s: string): string {
-  return s.replace(ENTITY, (m, e: string) => {
-    switch (e) {
-      case 'lt': return '<';
-      case 'gt': return '>';
-      case 'amp': return '&';
-      case 'apos': return "'";
-      case 'quot': return '"';
-    }
-    const cp = e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-    return cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : m;
-  });
-}
-
-function decodeTree(v: unknown): unknown {
-  if (typeof v === 'string') return decodeEntities(v);
-  if (Array.isArray(v)) return v.map(decodeTree);
-  if (v !== null && typeof v === 'object') {
-    const o: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v)) o[k] = decodeTree(x);
-    return o;
-  }
-  return v;
-}
-
 export function xmlToJson(bytes: Uint8Array): DataResult {
   const warnings: string[] = [];
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const text = dec.text.replace(/^\ufeff/, '');
-  checkXmlSafety(text, warnings);
-  const depth = xmlDepth(text);
-  if (depth > LIMITS.dataDepth) throw new LimitError(`The XML is nested ${depth} levels deep; the limit is ${LIMITS.dataDepth}.`);
-  const valid = XMLValidator.validate(text, { allowBooleanAttributes: true });
-  if (valid !== true) throw new Error(`This is not well-formed XML: ${valid.err.msg} (line ${valid.err.line}, column ${valid.err.col}).`);
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@',
-    textNodeName: '#text',
-    parseTagValue: false,
-    parseAttributeValue: false,
-    trimValues: true,
-    processEntities: false,
-    htmlEntities: false,
-    ignoreDeclaration: true,
-    ignorePiTags: true,
-    allowBooleanAttributes: true,
-    removeNSPrefix: false,
-    // The depth is already checked above with a clear message; the parser's own cap (100 by default) sits past it.
-    maxNestedTags: LIMITS.dataDepth + 1,
-  });
-  const value = decodeTree(parser.parse(text));
-  if (/<!\[CDATA\[/.test(text)) warnings.push('CDATA sections were merged into the element text.');
+  const value = parseXml(readText(bytes, warnings), warnings);
   warnings.push('Attributes are keys starting with @, element text is #text, and repeated elements became lists. All values are kept as text.');
-  const out = JSON.stringify(value, null, 2) + '\n';
-  return { outputs: [{ bytes: utf8(out), ext: 'json', mime: 'application/json' }], warnings, summary: 'JSON document' };
+  return { outputs: [{ bytes: utf8(JSON.stringify(value, null, 2) + '\n'), ...JSON_OUT }], warnings, summary: 'JSON document' };
+}
+
+/** XML tables by the rules in ./xml.ts: one table per repeated element, with what sits beside the records repeated. */
+function xmlTablesOf(bytes: Uint8Array, o: DataOptions, warnings: string[]): Table[] {
+  const tree = parseXml(readText(bytes, warnings), warnings);
+  const { tables, context } = xmlTables(tree, o.arrays, warnings);
+  if (tables.length > 1) warnings.push(`Each repeated element (${tables.map(t => `<${t.name}>`).join(', ')}) became its own table.`);
+  else if (tables[0].records.length > 1) warnings.push(`Each <${tables[0].name}> element is one row.`);
+  if (context.size) warnings.push(`What sits beside the records (${[...context.keys()].slice(0, 4).join(', ')}${context.size > 4 ? ', ...' : ''}) is repeated on every row, so nothing is lost.`);
+  warnings.push('Attributes and child elements are columns by name, nested elements are dotted columns, and an element repeated inside a record is ' + (o.arrays === 'json' ? 'a JSON list in one cell.' : 'numbered columns (tag.0, tag.1).'));
+  return tables.map(t => mapsToTable(t.records.map(r => flattenXmlRecord(r, o.arrays, t.name)), context, warnings, tables.length > 1 ? t.name : undefined));
+}
+
+export function xmlToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
+  const warnings: string[] = [];
+  return tablesToText(xmlTablesOf(bytes, o, warnings), o, as, warnings);
+}
+
+export function xmlToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
+  const warnings: string[] = [];
+  return tablesToXlsx(xmlTablesOf(bytes, o, warnings), baseName, warnings, o.detectTypes);
 }
 
 const XML_NAME = /^[\p{L}_][\p{L}\p{N}_.-]*$/u;
@@ -756,9 +794,7 @@ function xmlName(key: string, renamed: Map<string, string>): string {
 
 export function jsonToXml(bytes: Uint8Array): DataResult {
   const warnings: string[] = [];
-  const dec = decodeText(bytes);
-  if (dec.warning) warnings.push(dec.warning);
-  const value = parseJson(dec.text, warnings);
+  const value = readJson(bytes, warnings);
   const renamed = new Map<string, string>();
   let badChars = 0;
   const fix = (v: Json, parentKey: string | null): unknown => {
@@ -825,17 +861,36 @@ export function convertData(from: string, to: string, bytes: Uint8Array, o: Data
     case 'json>xlsx': return jsonToXlsx(bytes, o, baseName);
     case 'json>yaml': return jsonToYaml(bytes);
     case 'json>xml': return jsonToXml(bytes);
+    case 'json>jsonl': return jsonToJsonl(bytes);
+    case 'jsonl>json': return jsonlToJson(bytes);
+    case 'jsonl>csv': return jsonlToCsv(bytes, o);
+    case 'jsonl>tsv': return jsonlToCsv(bytes, o, 'tsv');
+    case 'jsonl>xlsx': return jsonlToXlsx(bytes, o, baseName);
     case 'csv>json': return csvToJson(bytes, o);
+    case 'csv>jsonl': return csvToJsonl(bytes, o);
     case 'csv>xlsx': return csvToXlsx(bytes, o, baseName);
     case 'csv>tsv': return retabulate(bytes, o, 'tsv');
     case 'tsv>json': return csvToJson(bytes, tsvInput(o));
+    case 'tsv>jsonl': return csvToJsonl(bytes, tsvInput(o));
     case 'tsv>xlsx': return csvToXlsx(bytes, tsvInput(o), baseName);
     case 'tsv>csv': return retabulate(bytes, tsvInput(o), 'csv');
     case 'yaml>json': return yamlToJson(bytes);
+    case 'yaml>csv': return yamlToCsv(bytes, o);
+    case 'yaml>tsv': return yamlToCsv(bytes, o, 'tsv');
+    case 'yaml>xlsx': return yamlToXlsx(bytes, o, baseName);
     case 'xml>json': return xmlToJson(bytes);
-    case 'xlsx>csv': return xlsxToCsv(bytes, o);
-    case 'xlsx>tsv': return xlsxToCsv(bytes, o, 'tsv');
-    case 'xlsx>json': return xlsxToJson(bytes, o);
+    case 'xml>csv': return xmlToCsv(bytes, o);
+    case 'xml>tsv': return xmlToCsv(bytes, o, 'tsv');
+    case 'xml>xlsx': return xmlToXlsx(bytes, o, baseName);
+  }
+  if (from === 'xlsx' || from === 'xls' || from === 'ods') {
+    switch (to) {
+      case 'csv': return xlsxToCsv(bytes, o, 'csv', from);
+      case 'tsv': return xlsxToCsv(bytes, o, 'tsv', from);
+      case 'json': return xlsxToJson(bytes, o, from);
+      case 'jsonl': return xlsxToJsonl(bytes, o, from);
+      case 'xlsx': if (from !== 'xlsx') return workbookToXlsx(bytes, from); break;
+    }
   }
   throw new Error(`No data conversion from ${from} to ${to}.`);
 }

@@ -9,7 +9,7 @@ export type FormatId =
   | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg' | 'aiff'
   | 'mp4' | 'webm' | 'mov' | 'mkv' | 'ts'
   | 'txt' | 'pdf' | 'md' | 'html' | 'docx'
-  | 'json' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx'
+  | 'json' | 'jsonl' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx' | 'xls' | 'ods'
   | 'zip' | 'tar' | 'gz';
 
 export interface Format {
@@ -62,11 +62,14 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   docx: f('docx', 'DOCX', 'docx', ['docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document'),
 
   json: f('json', 'JSON', 'json', ['json', 'geojson'], 'application/json', 'data'),
+  jsonl: f('jsonl', 'JSON Lines', 'jsonl', ['jsonl', 'ndjson', 'jsonlines'], 'application/jsonl', 'data', 'One JSON value per line (also called NDJSON).'),
   csv: f('csv', 'CSV', 'csv', ['csv'], 'text/csv', 'data'),
   tsv: f('tsv', 'TSV', 'tsv', ['tsv', 'tab'], 'text/tab-separated-values', 'data', 'Tab-separated values.'),
   yaml: f('yaml', 'YAML', 'yaml', ['yaml', 'yml'], 'application/yaml', 'data'),
   xml: f('xml', 'XML', 'xml', ['xml'], 'application/xml', 'data'),
   xlsx: f('xlsx', 'XLSX', 'xlsx', ['xlsx'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'data'),
+  xls: f('xls', 'XLS', 'xls', ['xls', 'xlt'], 'application/vnd.ms-excel', 'data'),
+  ods: f('ods', 'ODS', 'ods', ['ods', 'ots'], 'application/vnd.oasis.opendocument.spreadsheet', 'data'),
 
   // Archives are unpacked, never converted into other archive formats; they have no outputs.
   zip: f('zip', 'ZIP', 'zip', ['zip'], 'application/zip', 'archive'),
@@ -104,13 +107,20 @@ const DOCUMENT_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   docx: ['txt'],
 };
 const DATA_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
-  json: ['csv', 'xlsx', 'tsv', 'yaml', 'xml'],
-  csv: ['json', 'xlsx', 'tsv'],
-  tsv: ['json', 'xlsx', 'csv'],
-  yaml: ['json'],
-  xml: ['json'],
-  xlsx: ['csv', 'json', 'tsv'],
+  json: ['csv', 'xlsx', 'tsv', 'jsonl', 'yaml', 'xml'],
+  jsonl: ['json', 'csv', 'xlsx', 'tsv'],
+  csv: ['json', 'xlsx', 'tsv', 'jsonl'],
+  tsv: ['json', 'xlsx', 'csv', 'jsonl'],
+  yaml: ['json', 'csv', 'xlsx', 'tsv'],
+  xml: ['json', 'csv', 'xlsx', 'tsv'],
+  xlsx: ['csv', 'json', 'tsv', 'jsonl'],
+  // Older and OpenDocument workbooks are most often wanted as XLSX, so it comes first.
+  xls: ['xlsx', 'csv', 'json', 'tsv', 'jsonl'],
+  ods: ['xlsx', 'csv', 'json', 'tsv', 'jsonl'],
 };
+
+/** Spreadsheet workbooks: they have worksheets to choose from. */
+export const WORKBOOKS: readonly FormatId[] = ['xlsx', 'xls', 'ods'];
 
 /** The category a file is converted as, after inspection (an MP4 with no video track is audio). */
 export function effectiveCategory(input: FormatId, traits: InputTraits = {}): Category {

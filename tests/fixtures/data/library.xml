@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library xmlns:x="urn:example" owner="Town">
+  <meta><updated>2026-11-22</updated></meta>
+  <book id="b1" lang="en">
+    <title>Converting Files</title>
+    <author>Ada</author>
+    <price currency="USD">12.50</price>
+    <isbn>0123456789</isbn>
+    <tag>data</tag>
+    <tag>privacy</tag>
+    <x:shelf>A1</x:shelf>
+  </book>
+  <book id="b2">
+    <title>Privacy &amp; You ✓</title>
+    <author>Zoë</author>
+    <summary><![CDATA[Contains <markup> that is text.]]></summary>
+    <tag>privacy</tag>
+  </book>
+  <book id="b3">
+    <title>=HYPERLINK("x")</title>
+    <author/>
+    <price currency="EUR">9</price>
+  </book>
+  <magazine id="m1"><title>Monthly</title><issue>11</issue></magazine>
+  <magazine id="m2"><title>Weekly</title><issue>47</issue></magazine>
+</library>

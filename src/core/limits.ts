@@ -34,6 +34,8 @@ export const LIMITS = {
   dataBytes: 200 * MB,
   dataDepth: 500,
   csvCells: 50_000_000,
+  /** JSON Lines: values read from one file. */
+  jsonlLines: 10_000_000,
   xlsxBytes: 200 * MB,
   xlsxRows: 1_048_576,
   xlsxColumns: 16_384,

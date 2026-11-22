@@ -94,12 +94,15 @@ describe('format registry', () => {
     expect(targetsFor('md')).toEqual(['html', 'pdf']);
     expect(targetsFor('html')).toEqual(['pdf']);
     expect(targetsFor('docx')).toEqual(['txt']);
-    expect(targetsFor('json')).toEqual(['csv', 'xlsx', 'tsv', 'yaml', 'xml']);
-    expect(targetsFor('csv')).toEqual(['json', 'xlsx', 'tsv']);
-    expect(targetsFor('tsv')).toEqual(['json', 'xlsx', 'csv']);
-    expect(targetsFor('yaml')).toEqual(['json']);
-    expect(targetsFor('xml')).toEqual(['json']);
-    expect(targetsFor('xlsx')).toEqual(['csv', 'json', 'tsv']);
+    expect(targetsFor('json')).toEqual(['csv', 'xlsx', 'tsv', 'jsonl', 'yaml', 'xml']);
+    expect(targetsFor('jsonl')).toEqual(['json', 'csv', 'xlsx', 'tsv']);
+    expect(targetsFor('csv')).toEqual(['json', 'xlsx', 'tsv', 'jsonl']);
+    expect(targetsFor('tsv')).toEqual(['json', 'xlsx', 'csv', 'jsonl']);
+    expect(targetsFor('yaml')).toEqual(['json', 'csv', 'xlsx', 'tsv']);
+    expect(targetsFor('xml')).toEqual(['json', 'csv', 'xlsx', 'tsv']);
+    expect(targetsFor('xlsx')).toEqual(['csv', 'json', 'tsv', 'jsonl']);
+    expect(targetsFor('xls')).toEqual(['xlsx', 'csv', 'json', 'tsv', 'jsonl']);
+    expect(targetsFor('ods')).toEqual(['xlsx', 'csv', 'json', 'tsv', 'jsonl']);
   });
 
   test('inspection changes what is offered', () => {
