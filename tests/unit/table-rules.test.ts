@@ -168,8 +168,9 @@ describe('table rules: nothing is left out', () => {
     // The same key written with an escape is the same key.
     const escaped = '{"a":1,"' + String.fromCharCode(92) + 'u0061":2}';
     expect(run('json', 'jsonl', enc(escaped)).warnings[0]).toMatch(/^1 repeated key in the same object \(first: "a"\)/);
-    // A key inside a string, or the same key in two different objects, is not a repeat.
+    // A key inside a string, the same key in two different objects, or the same text twice in a list is not a repeat.
     expect(run('json', 'csv', enc('[{"a":"{\\"a\\":1,\\"a\\":2}"},{"a":2}]')).warnings.join(' ')).not.toMatch(/repeated key/);
+    expect(run('json', 'csv', enc('{"tags":["x","x","x",{"b":["y","y","y"]}],"rows":[{"x":["z","z","z"]}]}')).warnings.join(' ')).not.toMatch(/repeated key/);
   });
 
   test('JSON Lines names repeated keys once, with the number of lines', () => {
