@@ -1,14 +1,19 @@
 import { App } from './app/ui';
+import { setupCatalog } from './app/catalog';
 import { $ } from './app/dom';
+import { FORMATS, type FormatId } from './core/formats';
 import { loadSettings } from './app/settings';
 import { hasTempStore, openSession } from './core/tempstore';
 import { VERSION } from './version';
 
-/** The address Share passes on: always the public one, whichever copy of the page is open. */
+/**
+ * The address Share passes on: always the public one, whichever copy of the page is open. It is the page's
+ * canonical address, so a conversion page shares itself.
+ */
 const SHARE = Object.freeze({
   title: 'FileConvert',
   text: 'A free, private file converter: images, audio, video, documents and data, converted in your browser.',
-  url: 'https://radmagelabs.com/fileconvert/',
+  url: document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href || 'https://radmagelabs.com/fileconvert/',
 });
 
 function setupTheme(): void {
@@ -82,7 +87,11 @@ async function main(): Promise<void> {
   setupPrivacy();
   const session = hasTempStore() ? await openSession().catch(() => null) : null;
   const app = new App(loadSettings(), session);
+  // A conversion page (data-to="jpg" on /heic-to-jpg/) chooses its output for every file that offers it.
+  const to = document.documentElement.dataset.to;
+  if (to && to in FORMATS) app.queue.preferredTarget = to as FormatId;
   setupShare(app);
+  setupCatalog();
   app.start();
   Object.defineProperty(window, '__fileconvert', { value: app, enumerable: false });
   document.documentElement.dataset.ready = 'true';

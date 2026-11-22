@@ -47,3 +47,16 @@ test('TXT to PDF works without OffscreenCanvas', async ({ page }) => {
   });
   expect(head).toBe('%PDF-');
 });
+
+test('a conversion page loads with its content, and the catalog search works', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('./json-to-csv/');
+  await expect(page.locator('html[data-ready="true"]')).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Convert JSON to CSV');
+  await page.getByRole('searchbox', { name: 'Search conversions' }).fill('heic');
+  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG']);
+  await addFiles(page, [fx('data/records.json')]);
+  await expect(row(page, 'records.json').getByRole('combobox', { name: 'Convert records.json to' })).toHaveValue('csv');
+  expect(errors).toEqual([]);
+});

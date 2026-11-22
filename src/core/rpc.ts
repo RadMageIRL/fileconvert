@@ -9,6 +9,8 @@ export interface RunMessage<T = unknown> {
 }
 
 export type WorkerReply =
+  /** Sent once when the worker's code has loaded, so the page can tell a failed download from a crash. */
+  | { type: 'ready'; id?: undefined }
   | { type: 'progress'; id: number; fraction?: number; stage?: string }
   | { type: 'done'; id: number; result: unknown }
   | { type: 'error'; id: number; name: string; message: string };
@@ -31,6 +33,7 @@ export function serve(handlers: Record<string, (payload: never, progress: Progre
       scope.postMessage({ type: 'error', id, name: err.name, message: err.message || String(e) } satisfies WorkerReply);
     }
   };
+  scope.postMessage({ type: 'ready' } satisfies WorkerReply);
 }
 
 /** Pulls every ArrayBuffer out of a result so it is moved, not copied, back to the page. */

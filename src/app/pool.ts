@@ -2,6 +2,7 @@
 // which stops the work at once and returns all of its memory to the system. Idle workers are closed after
 // a short while so a page left open does not keep codecs in memory.
 
+import { OFFLINE_MESSAGE, UPDATED_MESSAGE } from '../core/loading';
 import type { RunMessage, WorkerReply } from '../core/rpc';
 
 export class CanceledError extends Error {
@@ -16,7 +17,8 @@ export interface RunOptions {
   signal?: AbortSignal;
 }
 
-interface Slot { worker: Worker; busy: boolean; idleTimer?: ReturnType<typeof setTimeout> }
+/** `loaded` turns true when the worker reports that its code has loaded. */
+interface Slot { worker: Worker; busy: boolean; loaded: boolean; idleTimer?: ReturnType<typeof setTimeout> }
 
 const IDLE_MS = 45_000;
 let nextId = 1;
@@ -40,7 +42,7 @@ export class Pool {
         return idle;
       }
       if (this.slots.length < this.max) {
-        const slot: Slot = { worker: this.make(), busy: true };
+        const slot: Slot = { worker: this.make(), busy: true, loaded: false };
         this.created++;
         this.slots.push(slot);
         return slot;
@@ -87,6 +89,7 @@ export class Pool {
       opts.signal?.addEventListener('abort', onAbort);
       slot.worker.onmessage = (ev: MessageEvent<WorkerReply>) => {
         const m = ev.data;
+        if (m.type === 'ready') { slot.loaded = true; return; }
         if (m.id !== id || settled) return;
         if (m.type === 'progress') opts.onProgress?.({ fraction: m.fraction, stage: m.stage });
         else if (m.type === 'done') { finish(false); resolve(m.result as T); }
@@ -102,8 +105,10 @@ export class Pool {
         if (settled) return;
         ev.preventDefault();
         finish(true);
-        reject(new Error(navigator.onLine === false
-          ? 'This converter has not been downloaded yet, and the device is offline. Reconnect and try again; once loaded, it keeps working offline while the tab stays open.'
+        // A worker whose code never loaded was not downloaded: the device is offline, or this tab is older
+        // than the files on the server. One that loaded and then failed most likely ran out of memory.
+        reject(new Error(navigator.onLine === false ? OFFLINE_MESSAGE
+          : !slot.loaded ? UPDATED_MESSAGE
           : 'The converter stopped unexpectedly. The browser may have run out of memory; try a smaller file or close other tabs.'));
       };
       slot.worker.postMessage({ type: 'run', id, task, payload } satisfies RunMessage, transfer);

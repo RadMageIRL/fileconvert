@@ -4,6 +4,7 @@
 
 import { engineFor, FORMATS, targetsFor, type FormatId, type InputTraits } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
+import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
 import { sniffBlob, type Sniffed } from '../core/sniff';
 import { deleteTempFile } from '../core/tempstore';
@@ -88,6 +89,8 @@ const fmtDuration = (s: number) => {
 
 export class Queue {
   jobs: Job[] = [];
+  /** The output a dedicated page is about (JPG on the HEIC to JPG page): chosen first for every file that offers it. */
+  preferredTarget: FormatId | null = null;
   private names = new NameRegistry();
   private nextId = 1;
   /** Limits on conversions running at once, per engine family. */
@@ -198,12 +201,12 @@ export class Queue {
         job.status = 'unsupported';
         job.error = 'There is nothing FileConvert can convert this file to.';
       } else {
-        job.target = job.targets[0];
+        job.target = this.preferredTarget && job.targets.includes(this.preferredTarget) ? this.preferredTarget : job.targets[0];
         job.status = 'ready';
       }
     } catch (e) {
       job.status = 'unsupported';
-      job.error = (e as Error).message || 'The file could not be read.';
+      job.error = isLoadFailure(e) ? loadFailureMessage() : (e as Error).message || 'The file could not be read.';
     }
     this.onChange(job);
   }
@@ -384,7 +387,7 @@ export class Queue {
         job.error = undefined;
       } else {
         job.status = 'failed';
-        job.error = (e as Error).message || 'The conversion failed.';
+        job.error = isLoadFailure(e) ? loadFailureMessage() : (e as Error).message || 'The conversion failed.';
       }
     }
     job.controller = undefined;

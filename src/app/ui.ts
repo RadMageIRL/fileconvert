@@ -1,17 +1,18 @@
 // The interface: the drop zone, the settings panels, the queue rows and the batch actions. Rows are built
 // once and updated in place, so focus and scroll position survive progress updates.
 
-import { AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats';
+import { AUDIO_OUT, effectiveCategory, FORMATS, type Category, type FormatId } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
 import { listSession } from '../core/tempstore';
 import { $, clear, h } from './dom';
 import { Engines, Queue, type Job } from './jobs';
 import { Pool } from './pool';
 import { saveSettings, type Settings } from './settings';
+import type { ToolDefinition } from './tools';
+import type { Workspace } from './workspace';
 
 const CATEGORY_NAMES: Record<Category, string> = { image: 'Images', audio: 'Audio', video: 'Video', document: 'Documents', data: 'Data' };
 const ICON_TEXT: Record<Category, string> = { image: 'IMG', audio: 'AUD', video: 'VID', document: 'DOC', data: 'DATA' };
-const list = (ids: readonly FormatId[]) => ids.map(i => FORMATS[i].label).join(', ');
 
 export class App {
   queue: Queue;
@@ -21,6 +22,8 @@ export class App {
   private zipUrl: string | null = null;
   private downloadsInFlight = new Set<string>();
   private announced = new Set<string>();
+  /** The open tool, if any. Tools replace the converter on their page. */
+  workspace: Workspace | null = null;
 
   constructor(private settings: Settings, private session: string | null, readonly engines = new Engines()) {
     this.queue = new Queue(engines, () => this.settings, session, job => this.update(job), () => this.relist());
@@ -47,7 +50,7 @@ export class App {
       const files = [...(e.dataTransfer?.files ?? [])].filter(f => f.size > 0 || f.type !== '' || /\.[a-z0-9]+$/i.test(f.name));
       const skipped = (e.dataTransfer?.files.length ?? 0) - files.length;
       if (skipped) this.toast(`${skipped} ${skipped === 1 ? 'item was' : 'items were'} skipped: folders cannot be added, only files.`);
-      if (files.length) this.queue.add(files);
+      if (files.length) (this.workspace ?? this.queue).add(files);
     });
     $('convert-all').addEventListener('click', () => this.queue.convertAll());
     $('cancel-all').addEventListener('click', () => this.queue.cancelAll());
@@ -60,9 +63,26 @@ export class App {
       (e.target as HTMLSelectElement).value = '';
     });
     window.addEventListener('beforeunload', e => {
-      if (this.queue.jobs.some(j => j.status === 'converting' || j.status === 'queued')) e.preventDefault();
+      if (this.queue.jobs.some(j => j.status === 'converting' || j.status === 'queued') || this.workspace?.running) e.preventDefault();
     });
-    this.renderFormats();
+  }
+
+  /** Opens a tool in the workspace, in place of the converter. The workspace code loads on first use. */
+  async openWorkspace(def: ToolDefinition): Promise<Workspace> {
+    const { Workspace } = await import('./workspace');
+    this.workspace?.dispose();
+    const ws = new Workspace($('workspace'), def, {
+      engines: this.engines,
+      zip: files => this.zipBlob(files),
+      save: (blob, name) => this.saveDownload(blob, name),
+      announce: msg => this.announce(msg),
+    });
+    this.workspace = ws;
+    $('drop').hidden = true;
+    $('work').hidden = true;
+    $('workspace').hidden = false;
+    ws.mount();
+    return ws;
   }
 
   // ------------------------------------------------------------ helpers
@@ -81,7 +101,7 @@ export class App {
     window.setTimeout(() => { a.textContent = msg; }, 50);
   }
 
-  private saveDownload(blob: Blob, name: string): void {
+  saveDownload(blob: Blob, name: string): void {
     const url = URL.createObjectURL(blob);
     this.downloadsInFlight.add(url);
     const a = h('a', { href: url, download: name, hidden: true });
@@ -314,8 +334,7 @@ export class App {
     btn.textContent = 'Packing ZIP...';
     try {
       const stamp = new Date().toISOString().slice(0, 10);
-      const temp = this.session ? { session: this.session, name: `batch-${Date.now()}.zip` } : null;
-      const blob = await this.zipPool.run<Blob>('zip', { files, temp }, { onProgress: p => { if (p.fraction !== undefined) btn.textContent = `Packing ZIP ${Math.floor(p.fraction * 100)}%`; } });
+      const blob = await this.zipBlob(files, p => { if (p.fraction !== undefined) btn.textContent = `Packing ZIP ${Math.floor(p.fraction * 100)}%`; });
       this.saveDownload(blob, `FileConvert ${stamp}.zip`);
     } catch (e) {
       this.toast(`The ZIP could not be made: ${(e as Error).message}`);
@@ -323,6 +342,12 @@ export class App {
       btn.textContent = label;
       this.refreshChrome();
     }
+  }
+
+  /** Packs files into a ZIP in the ZIP worker, streaming into private storage when the browser has it. */
+  private zipBlob(files: Array<{ name: string; blob: Blob }>, onProgress?: (p: { fraction?: number }) => void): Promise<Blob> {
+    const temp = this.session ? { session: this.session, name: `batch-${Date.now()}.zip` } : null;
+    return this.zipPool.run<Blob>('zip', { files, temp }, { onProgress });
   }
 
   // ------------------------------------------------------------ settings
@@ -429,35 +454,4 @@ export class App {
       box.lastElementChild!.append(h('p', { class: 'note' }, 'Formula protection puts an apostrophe before text cells that start with = + - or @, so opening the CSV in a spreadsheet cannot run them. Numbers with leading zeros, such as ZIP codes, always stay text.'));
     }
   }
-
-  // ------------------------------------------------------------ formats section
-
-  private renderFormats(): void {
-    const box = $('formats');
-    const card = (title: string, pairs: Array<[string, string]>, note: string) => h('div', { class: 'fmt' },
-      h('h3', {}, title),
-      h('ul', { class: 'pairs' }, ...pairs.map(([a, b]) => h('li', {}, h('b', {}, a), ` to ${b}`))),
-      h('p', {}, note));
-    box.append(
-      card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF', 'MP4, WebM or GIF']], 'Resize, set quality, keep transparency where the format allows it. HEIC and TIFF are read; HEIC is not written.'),
-      card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
-      card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
-      card('Documents', [['TXT', 'PDF'], ['PDF', 'TXT'], ['Markdown', 'HTML or PDF'], ['HTML', 'PDF'], ['DOCX', 'TXT']], 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
-      card('Data', [['JSON', 'CSV, YAML or XML'], ['CSV', 'JSON or XLSX'], ['YAML', 'JSON'], ['XML', 'JSON'], ['XLSX', 'CSV']], 'Nested data, encodings, worksheets and spreadsheet formulas are handled explicitly.'),
-    );
-    const limits = $('limits-list');
-    const items = [
-      'HEIC is read but not written: the open HEVC encoders are GPL-licensed and patent-encumbered, and none is practical in a browser.',
-      'AVI is not supported yet, for reading or writing. MP4, WebM, MOV and MKV are.',
-      'Audio and video use your browser\'s WebCodecs. Current Chrome, Edge and Firefox have them. Which codecs work depends on the browser and the computer: Firefox cannot decode HEVC video, for example, and AAC encoding falls back to a built-in encoder where the browser has none.',
-      'DOCX to PDF and PDF to DOCX are not offered. Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges your document.',
-      'Markdown and HTML to PDF keep the document structure (headings, lists, tables, code, links, embedded PNG and JPEG pictures) in a clean default style. Stylesheets are not applied and remote images are not downloaded.',
-      'The PDF font covers Latin, Greek and Cyrillic. Other scripts, such as Chinese, Arabic or Hindi, are reported and do not show.',
-      'Animated WebP, APNG and animated AVIF are converted as their first frame. Animated GIF keeps its animation as GIF, MP4 or WebM.',
-      'Pictures lose their metadata (EXIF, GPS). HEIC and TIFF color profiles are not applied.',
-      `Size limits: pictures up to ${LIMITS.imagePixels / 1e6} megapixels and ${formatBytes(LIMITS.imageBytes)}, audio and video up to ${formatBytes(LIMITS.mediaBytes)}, PDFs up to ${formatBytes(LIMITS.pdfBytes)}, text to PDF up to ${formatBytes(LIMITS.textToPdfBytes)}, data files up to ${formatBytes(LIMITS.dataBytes)}.`,
-    ];
-    for (const i of items) limits.append(h('li', {}, i));
-  }
 }
-

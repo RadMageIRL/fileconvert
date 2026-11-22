@@ -1,6 +1,6 @@
 # FileConvert
 
-**Convert your files. Keep your privacy. No accounts, no ads, no nonsense.**
+**Convert files. Upload nothing. No accounts, no ads, no nonsense.**
 
 FileConvert is a free file converter for images, audio, video, documents and data that runs entirely in your browser. Your files are never uploaded, to me or to anyone else: every conversion happens on your own device.
 
@@ -49,7 +49,9 @@ Anything that is lost or changed on the way (transparency, animation frames, a c
 4. Press **Convert** on a file, or **Convert all**. Conversions run in the background with real progress where it can be measured, and each can be canceled.
 5. Download each result, or **Download all (ZIP)**. Results with the same name are numbered (`photo.png`, `photo (2).png`) so nothing overwrites anything.
 
-Share copies the page's address, `https://radmagelabs.com/fileconvert/`, or opens your device's share sheet. **Back to RadMage Labs** goes to the rest of my tools.
+Common conversions also have their own page, such as `/fileconvert/heic-to-jpg/`: the same converter with that output chosen for every file you add, and a short guide to what happens to your files. **Find a conversion** searches all of them, and answers for conversions that have no page of their own.
+
+Share copies the page's public address (for example `https://radmagelabs.com/fileconvert/`), or opens your device's share sheet. **Back to RadMage Labs** goes to the rest of my tools.
 
 ## Privacy and security
 
@@ -108,16 +110,17 @@ npm run release        # build twice, check the builds match, and pack release/ 
 npm run fixtures       # regenerate the test files in tests/fixtures/
 ```
 
-`node tools/serve.mjs` serves `dist/` at `http://127.0.0.1:4175/fileconvert/` with the same security headers radmagelabs.com sends; `--pages` serves it without headers, like GitHub Pages. Setting `FILECONVERT_BASE` (for example to `https://radmagelabs.com/fileconvert/`) runs the browser tests against a live copy instead. The test files in `tests/fixtures/` are synthetic (gradients, test patterns, sine tones and placeholder text) and are made by `tools/make-fixtures.py` and `tools/make-pdf-fixtures.mjs`.
+`node tools/serve.mjs` serves `dist/` at `http://127.0.0.1:4175/fileconvert/` with the same security headers radmagelabs.com sends; `--pages` serves it without headers, like GitHub Pages. Like both hosts, it redirects a page address without its trailing slash and answers unknown addresses with `404.html`. Setting `FILECONVERT_BASE` (for example to `https://radmagelabs.com/fileconvert/`) runs the browser tests against a live copy instead. The test files in `tests/fixtures/` are synthetic (gradients, test patterns, sine tones and placeholder text) and are made by `tools/make-fixtures.py` and `tools/make-pdf-fixtures.mjs`.
 
 The release download is the built site. Serve it from any web server (for example `python -m http.server` in its folder); browsers do not run module workers from pages opened as local files.
 
 Layout:
 
-- `src/core/`: the format registry, content sniffing, safe names, limits, text decoding, the ZIP check and temporary storage.
+- `src/core/`: the format registry, the list of dedicated pages (`pages.ts`), content sniffing, safe names, limits, text decoding, the ZIP check and temporary storage.
+- `src/site/`: the build step that renders the pages. Every page comes from the built `index.html`, so all of them share its scripts, styles and security policy; the build also writes `sitemap.xml` and `404.html`, and fails if a page names a conversion FileConvert does not perform.
 - `src/engines/`: one folder per kind of conversion (image, media, document, data).
 - `src/workers/`: the Web Workers that run the engines.
-- `src/app/`: the queue, the worker pools and the interface.
+- `src/app/`: the queue, the worker pools, the interface, the catalog search, and the workspace that multi-file tools run in.
 - `tests/unit/` and `tests/e2e/`: Vitest and Playwright tests.
 
 ## License

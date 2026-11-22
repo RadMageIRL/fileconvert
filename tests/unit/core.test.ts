@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { describe, expect, test } from 'vitest';
 import { allConversions, effectiveCategory, engineFor, FORMATS, formatByExtension, targetsFor } from '../../src/core/formats';
+import { isLoadFailure } from '../../src/core/loading';
 import { NameRegistry, safeBase } from '../../src/core/naming';
+import { serve } from '../../src/core/rpc';
 import { looksLikeText, sniff } from '../../src/core/sniff';
 import { decodeText } from '../../src/core/text';
 import { checkZip } from '../../src/core/zipcheck';
@@ -259,5 +261,31 @@ describe('mutation-found gaps', () => {
     const seg = (m: number, body: number[]) => [0xff, m, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
     const bytes = new Uint8Array([0xff, 0xd8, ...seg(0xc4, new Array(20).fill(7)), ...seg(0xc0, [8, 0x01, 0x2c, 0x02, 0x58, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1])]);
     expect(readHeader(bytes, 'jpg')).toMatchObject({ width: 600, height: 300 });
+  });
+});
+
+describe('loading', () => {
+  test('a worker announces that its code has loaded, before any task', () => {
+    const sent: unknown[] = [];
+    const g = globalThis as unknown as { self?: unknown };
+    const before = g.self;
+    g.self = { onmessage: null, postMessage: (m: unknown) => sent.push(m) };
+    try {
+      serve({});
+      expect(sent).toEqual([{ type: 'ready' }]);
+    } finally {
+      g.self = before;
+    }
+  });
+
+  test('failed module downloads are recognized in the wording of each browser', () => {
+    for (const m of [
+      'Failed to fetch dynamically imported module: https://x/assets/a.js',
+      'error loading dynamically imported module: https://x/assets/a.js',
+      'Importing a module script failed.',
+      'Unable to preload CSS for /assets/a.css',
+    ]) expect(isLoadFailure(new TypeError(m)), m).toBe(true);
+    expect(isLoadFailure(new Error('The PDF could not be opened'))).toBe(false);
+    expect(isLoadFailure('text')).toBe(false);
   });
 });

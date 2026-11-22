@@ -1,18 +1,21 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-root="./">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--fc:head-->
   <title>FileConvert | Free Private File Converter | RadMage Labs</title>
   <meta name="description" content="Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.">
   <link rel="canonical" href="https://radmagelabs.com/fileconvert/">
+  <meta property="og:title" content="FileConvert: convert files, upload nothing">
+  <meta property="og:description" content="Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.">
+  <meta property="og:url" content="https://radmagelabs.com/fileconvert/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"FileConvert","url":"https://radmagelabs.com/fileconvert/","applicationCategory":"UtilitiesApplication","operatingSystem":"Any modern web browser","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.","author":{"@type":"Person","name":"RadMageIRL"},"publisher":{"@type":"Organization","name":"RadMage Labs","url":"https://radmagelabs.com/"}}</script>
+  <!--/fc:head-->
   <meta name="theme-color" content="#10151f">
   <meta name="color-scheme" content="dark light">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="RadMage Labs">
-  <meta property="og:title" content="FileConvert: convert your files, keep your privacy">
-  <meta property="og:description" content="Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.">
-  <meta property="og:url" content="https://radmagelabs.com/fileconvert/">
   <meta property="og:image" content="https://radmagelabs.com/assets/og/fileconvert.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -21,7 +24,6 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <script src="./theme.js"></script>
   <link rel="stylesheet" href="./src/styles.css">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"FileConvert","url":"https://radmagelabs.com/fileconvert/","applicationCategory":"UtilitiesApplication","operatingSystem":"Any modern web browser","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Convert images, audio, video, documents and data in your browser. Free, with no ads and no accounts, and your files never leave your device.","author":{"@type":"Person","name":"RadMageIRL"},"publisher":{"@type":"Organization","name":"RadMage Labs","url":"https://radmagelabs.com/"}}</script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -45,19 +47,22 @@
   </header>
 
   <main id="main" class="wrap">
+    <!--fc:hero-->
     <section class="hero" aria-labelledby="title">
       <div class="brand">
         <svg aria-hidden="true" class="logo" viewBox="0 0 48 48" width="44" height="44"><rect x="3" y="3" width="42" height="42" rx="11" fill="var(--accent)"/><path d="M15 19h14l-4-4M33 29H19l4 4" fill="none" stroke="var(--accent-ink)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <h1 id="title">FileConvert</h1>
       </div>
-      <p class="promise">Convert your files. Keep your privacy. <span>No accounts, no ads, no nonsense.</span></p>
-      <p class="lede">Images, audio, video, documents and data are converted right here in your browser. Your files are never uploaded, to me or to anyone else.</p>
+      <p class="promise">Convert files. Upload nothing.</p>
+      <p class="lede">Images, audio, video, documents and data are converted right here in your browser. Supported conversions run entirely on your device, so your files are never uploaded, to me or to anyone else.</p>
     </section>
+    <!--/fc:hero-->
 
+    <!--fc:app-->
     <section id="drop" class="drop" aria-label="Add files">
       <input type="file" id="picker" multiple hidden>
       <svg aria-hidden="true" viewBox="0 0 48 48" width="48" height="48"><path d="M24 31V11m0 0-7 7m7-7 7 7M10 29v8h28v-8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <p class="drop-main"><strong>Drop files here</strong> or</p>
+      <p class="drop-main"><!--fc:drop--><strong>Drop files here</strong><!--/fc:drop--> or</p>
       <button type="button" id="choose" class="primary">Choose files</button>
       <p class="drop-sub">Add as many as you like. They stay on your device.</p>
     </section>
@@ -79,12 +84,35 @@
       <ul id="queue" class="queue" aria-label="Files to convert"></ul>
     </section>
 
+    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title"></section>
+    <!--/fc:app-->
+
+    <!--fc:common--><!--/fc:common-->
+
+    <!--fc:guide--><!--/fc:guide-->
+
+    <section id="catalog" class="catalog" aria-labelledby="catalog-title">
+      <h2 id="catalog-title">Find a conversion</h2>
+      <div id="catalog-tools" class="catalog-tools" hidden>
+        <label class="search">
+          <span class="sr-only">Search conversions</span>
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m10.4 10.4 3.4 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input type="search" id="catalog-search" placeholder="Search, for example heic to jpg" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="chips" role="group" aria-label="Show category"><!--fc:chips--><!--/fc:chips--></div>
+      </div>
+      <p id="catalog-status" class="catalog-status" role="status" aria-live="polite"></p>
+      <div id="catalog-more" class="catalog-more" hidden></div>
+      <div id="catalog-groups" class="catalog-groups"><!--fc:catalog--><!--/fc:catalog--></div>
+    </section>
+
+    <!--fc:info-->
     <section class="info" aria-labelledby="formats-title">
       <h2 id="formats-title">What it converts</h2>
-      <div id="formats" class="formats"></div>
+      <div id="formats" class="formats"><!--fc:formats--><!--/fc:formats--></div>
       <details class="limits">
         <summary>Limits and what is not supported yet</summary>
-        <ul id="limits-list"></ul>
+        <ul id="limits-list"><!--fc:limits--><!--/fc:limits--></ul>
       </details>
     </section>
 
@@ -105,6 +133,7 @@
       </ul>
       <p class="settings-note">The only thing remembered between visits is your theme and conversion settings, in this browser's local storage.</p>
     </section>
+    <!--/fc:info-->
   </main>
 
   <footer class="foot">
@@ -113,11 +142,13 @@
       <a href="https://github.com/RadMageIRL/fileconvert">Source on GitHub</a>
       <a href="./THIRD-PARTY-NOTICES.txt">Licenses</a>
       <a href="https://radmagelabs.com/">More tools at RadMage Labs</a>
+      <!--fc:pill-->
       <button type="button" id="privacy-pill" class="pill" aria-expanded="false" aria-controls="privacy" title="How your privacy is kept">
         <svg class="pill-shut" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
         <svg class="pill-open" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         Privacy
       </button>
+      <!--/fc:pill-->
     </div>
   </footer>
 

@@ -34,7 +34,8 @@ export function pdfToText(file: Blob, onProgress: (fraction: number, stage: stri
     const data = new Uint8Array(await file.arrayBuffer());
     const task = m.getDocument({
       data,
-      cMapUrl: new URL('pdfjs/cmaps/', document.baseURI).href,
+      // The character maps live at the app's root, which is one folder up on a page such as /pdf-to-text/.
+      cMapUrl: new URL(`${document.documentElement.dataset.root ?? './'}pdfjs/cmaps/`, document.baseURI).href,
       cMapPacked: true,
       disableFontFace: true,
       useSystemFonts: false,

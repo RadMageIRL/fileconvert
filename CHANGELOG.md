@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Work toward v0.2.0.
+
+- **Pages for common conversions.** HEIC to JPG, MP4 to MP3, JSON to CSV and 19 more have their own page, such as `/fileconvert/heic-to-jpg/`, with the converter at the top (it chooses that output for every file you add), what happens to your files, what to expect, and related conversions. The text is in the page itself, so it reads without scripts.
+- **Find a conversion.** Search every page as you type and filter by category. Asking for a conversion without its own page (BMP to TIFF) says whether FileConvert does it; asking for a format it does not support (AVI) says why.
+- **Common conversions** are listed under the drop zone on the home page.
+- The promise is now "Convert files. Upload nothing."
+- The layout works on screens 320 pixels wide.
+- A tab left open while FileConvert is updated, which then asks for a converter the new version no longer has, now says to reload the page instead of blaming memory.
+- Mediabunny and its encoders are updated to 1.66.2.
+
 ## v0.1.2 - 2026-11-16
 
 - The link preview image now has a text description (og:image:alt), for screen readers and link previews that show it.
