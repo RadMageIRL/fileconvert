@@ -107,3 +107,27 @@ describe('TIFF writing', () => {
     expect(pages.map(p => [p[256][0], p[257][0], p[277][0], p[259][0], ...p[297]])).toEqual([[3, 2, 3, 5, 0, 3], [5, 7, 4, 5, 1, 3], [1, 1, 3, 5, 2, 3]]);
   });
 });
+
+describe('SVG helpers', () => {
+  const fresh = () => ({ scripts: 0, handlers: 0, external: 0, html: 0, animation: 0, styles: 0, other: 0 });
+
+  test('CSS keeps references inside the file and loses everything that could reach outside it', async () => {
+    const { cleanCss } = await import('../../src/engines/image/svg');
+    const r = fresh();
+    expect(cleanCss('@import url(https://x/a.css); @import "b.css"; .a{fill:url(#g)} .b{fill:url( "https://x/p" )} @font-face{src:url(f.woff)}', r))
+      .toBe('  .a{fill:url(#g)} .b{fill:none} ');
+    expect(r.external).toBe(4);
+    const e = fresh();
+    expect(cleanCss('.a{background:u\\72l(https://x/e)}', e)).toBe('');
+    expect(e.styles).toBe(1);
+  });
+
+  test('lengths in every SVG unit, and the target size for each setting', async () => {
+    const { svgLength, targetSize } = await import('../../src/engines/image/svg');
+    expect([svgLength('10'), svgLength('10px'), svgLength('1in'), svgLength('25.4mm'), svgLength('72pt'), svgLength('1e2')]).toEqual([10, 10, 96, 96, 96, 100]);
+    expect([svgLength('50%'), svgLength('auto'), svgLength('-5'), svgLength(null)]).toEqual([null, null, null, null]);
+    expect(targetSize(64, 32, 'original')).toEqual({ width: 64, height: 32 });
+    expect(targetSize(64, 32, '2x')).toEqual({ width: 128, height: 64 });
+    expect(targetSize(64, 32, '1024')).toEqual({ width: 1024, height: 512 });
+  });
+});

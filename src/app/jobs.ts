@@ -12,6 +12,7 @@ import type { DataResult } from '../engines/data/options';
 import type { FontFile } from '../engines/document/fonts';
 import { readHeader } from '../engines/image/header';
 import type { ImageResult } from '../engines/image/convert';
+import type { SvgSize } from '../engines/image/svg';
 import type { MediaInfo, MediaResult } from '../engines/media/convert';
 import { CanceledError, Pool } from './pool';
 import type { Settings } from './settings';
@@ -335,8 +336,20 @@ export class Queue {
       const tempName = `job-${job.id}-${tempStamp}.${FORMATS[to].ext}`;
       const temp = this.session ? { session: this.session, name: tempName } : null;
       if (engine === 'image') {
-        const r = await this.engines.image.run<ImageResult>('convert', { file: job.file, from, to, options: s.image }, { onProgress, signal });
-        job.warnings = r.warnings;
+        // An SVG is drawn into pixels on the page first (browsers cannot draw SVG in a worker), as a lossless PNG.
+        let file: Blob = job.file, source = from;
+        const drawn: string[] = [];
+        if (from === 'svg') {
+          onProgress({ stage: 'Drawing the SVG' });
+          const { rasterizeSvg } = await import('../engines/image/svg');
+          const svg = await rasterizeSvg(job.file, s.image.svgSize as SvgSize);
+          if (signal.aborted) throw new CanceledError();
+          file = svg.png;
+          source = 'png';
+          drawn.push(...svg.warnings);
+        }
+        const r = await this.engines.image.run<ImageResult>('convert', { file, from: source, to, options: s.image }, { onProgress, signal });
+        job.warnings = [...drawn, ...r.warnings];
         job.summary = r.summary;
         outs = r.outputs.map(o => ({ blob: new Blob([o.bytes as Uint8Array<ArrayBuffer>], { type: r.mime }), ext: r.ext, suffix: o.suffix }));
       } else if (engine === 'media' || engine === 'video-to-gif' || engine === 'gif-to-video') {

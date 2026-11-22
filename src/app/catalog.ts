@@ -21,7 +21,6 @@ const RAW = 'Camera RAW files are not supported. Export a JPG or TIFF from your 
 export const NOT_SUPPORTED: Readonly<Record<string, string>> = {
   avi: 'AVI video is not supported yet. MP4, WebM, MOV and MKV are.',
   wmv: 'Windows Media files (WMV, WMA) are not supported yet.', wma: 'Windows Media files (WMV, WMA) are not supported yet.', asf: 'Windows Media files (WMV, WMA) are not supported yet.',
-  svg: 'SVG images are not supported yet. FileConvert converts pixel images.',
   aiff: 'AIFF audio is not supported yet.', aif: 'AIFF audio is not supported yet.',
   ts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.', m2ts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.', mts: 'MPEG-TS video (.ts, .m2ts, .mts) is not supported yet.',
   doc: 'Older Word documents (DOC) are not supported. Save them as DOCX first.',
@@ -100,7 +99,8 @@ export function setupCatalog(): void {
     const q = parseQuery(input.value);
     let shown = 0;
     for (const item of items) {
-      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens);
+      // A query naming two formats asks for a conversion, so tool pages are left out of its results.
+      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens) && !(item.dataset.tool && q.formats.length >= 2);
       item.hidden = !ok;
       if (ok) shown++;
     }

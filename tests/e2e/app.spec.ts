@@ -235,10 +235,10 @@ test('archives and other unsupported files are explained, not converted', async 
   const { zipSync } = await import('fflate');
   await page.locator('#picker').setInputFiles([
     { name: 'photos.zip', mimeType: 'application/zip', buffer: Buffer.from(zipSync({ 'a.txt': new Uint8Array([65]) })) },
-    { name: 'drawing.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') },
+    { name: 'layers.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: Buffer.concat([Buffer.from('8BPS'), Buffer.alloc(64)]) },
   ]);
   await expect(row(page, 'photos.zip').locator('.job-error')).toContainText('Extract the files');
-  await expect(row(page, 'drawing.svg').locator('.job-error')).toContainText('SVG images are not supported yet');
+  await expect(row(page, 'layers.psd').locator('.job-error')).toContainText('PSD files are not supported');
   await expect(page.locator('#convert-all')).toBeDisabled();
 });
 

@@ -12,7 +12,8 @@ const SAMPLE: Partial<Record<FormatId, string | FilePayload>> = {
   avif: fx('image/alpha.avif'), gif: fx('image/animated.gif'), mp4: fx('video/clip.mp4'), mov: fx('video/clip.mov'),
   mkv: fx('video/clip.mkv'), webm: fx('video/clip.webm'), wav: fx('audio/tone.wav'), m4a: fx('audio/tone.m4a'),
   flac: fx('audio/tone.flac'), pdf: fx('document/sample.pdf'), md: MD_SAMPLE, json: fx('data/records.json'),
-  csv: fx('data/people.csv'), xlsx: fx('data/workbook.xlsx'),
+  csv: fx('data/people.csv'), xlsx: fx('data/workbook.xlsx'), ico: fx('image/icon-png.ico'), tsv: fx('data/people.csv'),
+  svg: { name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#08f"/></svg>') },
 };
 const sampleName = (s: string | FilePayload) => typeof s === 'string' ? s.split(/[\\/]/).pop()! : s.name;
 const CONVERSIONS = PAGES.filter((p): p is ConversionPage => !isTool(p));

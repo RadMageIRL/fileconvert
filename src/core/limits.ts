@@ -8,6 +8,8 @@ export const LIMITS = {
   imageBytes: 300 * MB,
   imagePixels: 100_000_000,
   imageSide: 30_000,
+  /** SVG source text. */
+  svgBytes: 20 * MB,
   /** Pages read from one multi-page TIFF, and pages in one TIFF written. */
   tiffPages: 1000,
   /** All the pages of one TIFF written together: about 1.6 GB of pixels at most while it is built. */

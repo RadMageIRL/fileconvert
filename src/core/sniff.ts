@@ -183,7 +183,7 @@ function sniffText(head: Uint8Array, ext: string, size: number): Sniffed {
   } catch { /* undecodable: treated as plain text below */ }
   const t = text.replace(/^\ufeff/, '').trimStart().toLowerCase();
   if (ext === 'svg' || /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!doctype svg[^>]*>\s*)?<svg[\s>]/.test(t)) {
-    return unsupported('SVG image', 'SVG images are not supported yet. They are vector drawings; FileConvert converts pixel images.');
+    return { format: 'svg', label: 'SVG image' };
   }
   if (ext === 'rtf' || t.startsWith('{\\rtf')) return unsupported('Rich Text document', 'RTF documents are not supported.');
   const byExt = formatByExtension('x.' + ext);

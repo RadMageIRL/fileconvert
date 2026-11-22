@@ -416,10 +416,11 @@ export class App {
         h('label', { class: 'field' }, h('span', {}, 'Quality (JPG, WebP, AVIF)'), h('span', { class: 'row' }, quality, qv)),
         h('div', { class: 'field' }, h('span', {}, 'Size'), h('span', { class: 'row' }, mode, pctRow, boxRow)),
         h('label', { class: 'field' }, h('span', {}, 'Background for transparent areas (JPG, BMP)'), color),
+        select('SVG size', s.image.svgSize, [['original', 'Its own size'], ['2x', 'Twice its size'], ['4x', 'Four times its size'], ['512', '512 px wide'], ['1024', '1024 px wide'], ['2048', '2048 px wide'], ['4096', '4096 px wide']], v => { s.image.svgSize = v; }),
         select('ICO sizes', s.image.ico, [['favicon', 'Favicon: 16, 32 and 48 px'], ['all', 'All: 16 to 256 px'], ['16', '16 x 16'], ['32', '32 x 32'], ['48', '48 x 48'], ['64', '64 x 64'], ['128', '128 x 128'], ['256', '256 x 256']], v => { s.image.ico = v; }),
         select('TIFF compression', s.image.tiffCompression, [['none', 'None (most compatible)'], ['lzw', 'LZW (smaller, lossless)']], v => { s.image.tiffCompression = v === 'lzw' ? 'lzw' : 'none'; }),
         select('Multi-page TIFF', s.image.tiffPages, [['all', 'Every page'], ['first', 'First page only']], v => { s.image.tiffPages = v === 'first' ? 'first' : 'all'; }));
-      box.lastElementChild!.append(h('p', { class: 'note' }, 'Fit inside a box never enlarges. Metadata such as EXIF and GPS location is not copied. Orientation is applied to the pixels. An ICO holds each chosen size as a square picture; a picture that is not square is centered on transparency. Every page of a multi-page TIFF becomes its own file, or stays together when converting to TIFF.'));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'Fit inside a box never enlarges. Metadata such as EXIF and GPS location is not copied. Orientation is applied to the pixels. An SVG is a drawing, so it is drawn at the size you choose, sharp at any size. An ICO holds each chosen size as a square picture; a picture that is not square is centered on transparency. Every page of a multi-page TIFF becomes its own file, or stays together when converting to TIFF.'));
     }
     if (cats.has('audio')) {
       panel('audio', ' Bitrate, sample rate, channels',

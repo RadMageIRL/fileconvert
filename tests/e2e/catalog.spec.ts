@@ -12,8 +12,9 @@ test('the catalog lists every page, and the search narrows it as you type', asyn
   await expect(page.locator('.cat-item')).toHaveCount(PAGES.length);
   const search = page.getByRole('searchbox', { name: 'Search conversions' });
   await search.fill('heic');
-  await expect(visible(page)).toHaveText(['HEIC to JPG', 'HEIC to PNG']);
-  await expect(page.locator('#catalog-status')).toHaveText('2 pages match.');
+  // The TIFF tool takes HEIC pictures too.
+  await expect(visible(page)).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF']);
+  await expect(page.locator('#catalog-status')).toHaveText('3 pages match.');
   await expect(page.locator('.cat-group:not([hidden]) h3')).toHaveText(['Images']);
   await search.fill('iphone video');
   await expect(visible(page)).toHaveText(['MOV to MP4']);
@@ -46,6 +47,7 @@ test('conversions without a page, and formats that are not supported, are answer
   const more = page.locator('#catalog-more');
   await search.fill('bmp to tiff');
   await expect(more).toContainText('BMP to TIFF is supported. Add your file to the converter at the top of the page and choose TIFF.');
+  // A conversion request leaves tool pages out, even one that takes BMP pictures.
   await expect(page.locator('#catalog-status')).toHaveText('No page matches.');
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), more.getByRole('button', { name: 'Choose files' }).click()]);
   expect(chooser.isMultiple()).toBe(true);
