@@ -94,7 +94,8 @@ describe('JSON to XLSX', () => {
   test('an object of lists becomes one sheet per list, with Excel-safe names', () => {
     const r = run('json', 'xlsx', enc(JSON.stringify({ people: [{ a: 1 }], 'orders/2026: [Q4]': [{ b: 2 }], people2: [] })));
     expect(first(r.outputs[0].bytes).wb.SheetNames).toEqual(['people', 'orders_2026_ _Q4_', 'people2']);
-    expect(r.warnings[0]).toBe('Each of the 3 lists became its own sheet.');
+    expect(r.warnings[0]).toBe('Each of the 3 lists became its own sheet; their rows are not combined with each other.');
+    expect(r.warnings[1]).toBe('"people2" is an empty list, so its sheet has no rows.');
     expect(r.summary).toBe('3 sheets, 2 rows');
   });
 

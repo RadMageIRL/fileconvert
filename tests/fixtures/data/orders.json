@@ -1,0 +1,18 @@
+{
+  "store": "Northwind",
+  "exported": "2026-11-22",
+  "currency": "EUR",
+  "meta": { "version": 2, "source": null, "tags": [] },
+  "orders": [
+    { "id": 1, "customer": { "name": "Ada", "city": "London" }, "total": 12.5, "lines": [{ "sku": "A-1", "qty": 2 }, { "sku": "B-2", "qty": 1 }], "note": null },
+    { "id": 2, "customer": { "name": "Zoë 😀", "city": "東京" }, "total": 0, "lines": [], "note": "=cmd", "gift": true },
+    { "id": 3, "customer": {}, "total": 7, "lines": [{ "sku": "C-3", "qty": 5 }], "store": "Outlet" }
+  ],
+  "refunds": [
+    { "order": 2, "amount": 3.25 },
+    { "order": 3, "amount": 7, "reason": "damaged" }
+  ],
+  "a.b": "a key with a dot",
+  "a": { "b": "a nested field" },
+  "mixed": [{ "x": 1 }, "loose", 3]
+}

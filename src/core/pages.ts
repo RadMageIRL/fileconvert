@@ -702,12 +702,14 @@ export const PAGES: readonly Page[] = [
     intro: 'A JSON list of records, such as an API response or an export, becomes a table: one row per record and one column per field.',
     details: [
       'Nested objects become dotted columns (address.city), and lists are kept as JSON text in one cell or spread into numbered columns.',
+      'An object holding a list of records beside other fields gives one row per record, with those fields repeated on every row. Two lists of records give two CSV files, never a mix of both.',
       'Choose comma, semicolon or tab as the separator, and add a byte order mark so Excel reads UTF-8 correctly.',
       'Text cells starting with = + - or @ get a leading apostrophe, so a spreadsheet cannot run them as formulas (you can turn this off).',
       'Large integers stay exact, even beyond what JavaScript numbers can hold.',
     ],
     limits: [
-      'The top level should be an array of objects, or an object holding one.',
+      'Rows come from the top level: a list of records inside a record, such as an order\'s lines, stays in its row as JSON text or numbered columns, and the notes say so.',
+      'null and a missing field are both empty cells. A key repeated inside one object keeps its last value, as in every JSON reader, with a note.',
       'Files up to 200 MB, nested up to 500 levels.',
     ],
     related: ['csv-to-json', 'json-to-xlsx', 'xlsx-to-csv'],
@@ -778,12 +780,12 @@ export const PAGES: readonly Page[] = [
     details: [
       'Numbers and true/false become typed cells. Text, including dates written as text, stays text.',
       'Nested objects become dotted columns (address.city); lists stay JSON text in one cell or spread into numbered columns, set in Data settings.',
-      'An object whose values are all lists becomes one sheet per list, named after its key.',
+      'An object whose values are all lists becomes one sheet per list, named after its key. A list of records beside other fields gives one row per record, with those fields repeated.',
       'Text that starts with = is stored as text, so opening the workbook can never run it as a formula.',
     ],
     limits: [
       'Integers larger than Excel can hold exactly are stored as text, so no digit is lost.',
-      'Records with different fields share one column per field; a missing field is an empty cell.',
+      'Records with different fields share one column per field; a missing field is an empty cell. Lists of records inside a record stay in their row.',
       'Up to 1,048,576 rows and 16,384 columns per sheet, the Excel limits.',
     ],
     related: ['xlsx-to-json', 'json-to-csv', 'csv-to-json'],
@@ -944,7 +946,7 @@ export const PAGES: readonly Page[] = [
     description: 'Convert YAML to CSV: a list of records becomes rows, nested keys become dotted columns, and unsafe tags are never run. Converted in your browser.',
     intro: 'YAML holds configuration, inventories and data files. When it is a list of records, FileConvert lays it out as a CSV table for a spreadsheet.',
     details: [
-      'A list becomes one row per item. A mapping that holds a list of records uses that list, with its other keys repeated on every row so nothing is lost.',
+      'A list becomes one row per item. A mapping that holds a list of records uses that list, with its other keys repeated on every row so nothing is lost. Two lists of records give two CSV files, never a mix of both.',
       'Several documents in one file are one row each, or one table of all their items when each document is a list.',
       'Anchors, aliases and merge keys are resolved, and dates stay text, as YAML 1.2 reads them.',
       'Cells starting with = + - or @ are protected from running as formulas.',

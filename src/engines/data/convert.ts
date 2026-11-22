@@ -12,6 +12,13 @@
 //  5. In a row, nested objects become dotted columns (address.city), and lists become JSON text in one cell or
 //     numbered columns (tags.0, tags.1), as chosen in Data settings. Records with different fields share one column
 //     per field; a missing field is an empty cell. A list of lists gives rows without a header.
+//  6. Tables are never combined: two lists of records are two tables, never a product of their rows. Rows come only
+//     from the top level; lists of records inside the rows stay in their row (rule 5), and a list that mixes records
+//     with other values is never used as the rows. The notes name each such list.
+//  7. Nothing is dropped: a column name two fields would share (a key "a.b" beside a nested a.b) gets _2 for the
+//     later one; null and a missing field are empty cells, [] and {} are written as text; an empty list, an empty
+//     object or records with no fields give an empty table (no blank lines) and a note. A key repeated inside one
+//     JSON object cannot be kept (JSON.parse keeps the last value, like every reader) and is counted in a note.
 // XML has its own rules for finding the records (./xml.ts), then rule 5.
 
 import { XMLBuilder } from 'fast-xml-parser';
@@ -49,27 +56,68 @@ const scalarText = (v: Json): Cell => {
   return { text: stringifyJson(v), isText: true };
 };
 
+/** What flattening met that the notes must explain, gathered over every row of every table of one file. */
+interface FlatNotes {
+  /** Column names that two fields produced (a key "a.b" beside a nested a.b); the later field got a _2 suffix. */
+  clashes: Set<string>;
+  /** Fields inside the rows that hold lists of records; they are kept in the row, never expanded into more rows. */
+  innerRecords: Set<string>;
+}
+
+const newNotes = (): FlatNotes => ({ clashes: new Set(), innerRecords: new Set() });
+
+const isObject = (v: Json): v is { [k: string]: Json } => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isRecordList = (v: Json): v is Json[] => Array.isArray(v) && v.length > 0 && v.every(isObject);
+/** A list holding some records and some other values: not a clear list of records, so never used as the rows. */
+const isMixedList = (v: Json): boolean => Array.isArray(v) && v.some(isObject) && !v.every(isObject);
+
+/** A field's name for the notes: its path without list positions (orders.0.lines becomes orders.lines). */
+const fieldName = (path: string) => path.split('.').filter(p => !/^\d+$/.test(p)).join('.') || path;
+
+/** Sets a column; a name that is already taken gets a _2 (_3, ...) suffix, so no field ever overwrites another. */
+function put(out: Map<string, Json>, path: string, v: Json, notes: FlatNotes): void {
+  if (out.has(path)) {
+    notes.clashes.add(path);
+    let n = 2;
+    while (out.has(`${path}_${n}`)) n++;
+    path = `${path}_${n}`;
+  }
+  out.set(path, v);
+}
+
 /**
- * Flattens one record into dotted columns (address.city). Leaves keep their JSON value: a scalar, null for an
- * empty list or object, or (with arrays as JSON) the whole list.
+ * Flattens one record into dotted columns (address.city). Leaves keep their JSON value: a scalar or null, an empty
+ * list or object (written [] and {}, so they stay apart from a missing field), or (with arrays as JSON) the whole
+ * list.
  */
-function flattenValues(rec: Json, arrays: 'json' | 'columns', out: Map<string, Json>, prefix = ''): void {
+function flattenValues(rec: Json, arrays: 'json' | 'columns', out: Map<string, Json>, notes: FlatNotes, prefix = ''): void {
   if (rec === null || typeof rec !== 'object') {
-    out.set(prefix || 'value', rec);
+    put(out, prefix || 'value', rec, notes);
     return;
   }
   if (Array.isArray(rec)) {
-    if (rec.length === 0) { out.set(prefix || 'value', null); return; }
-    rec.forEach((v, i) => flattenValues(v, arrays, out, prefix ? `${prefix}.${i}` : String(i)));
+    if (rec.length === 0) { put(out, prefix || 'value', rec, notes); return; }
+    // A list in a field (here, one of the top-level fields repeated beside the records) follows the setting too;
+    // only a row that is itself a list is always spread into numbered columns.
+    if (prefix && arrays === 'json') {
+      if (isRecordList(rec)) notes.innerRecords.add(fieldName(prefix));
+      put(out, prefix, rec, notes);
+      return;
+    }
+    if (prefix && isRecordList(rec)) notes.innerRecords.add(fieldName(prefix));
+    rec.forEach((v, i) => flattenValues(v, arrays, out, notes, prefix ? `${prefix}.${i}` : String(i)));
     return;
   }
   const keys = Object.keys(rec);
-  if (keys.length === 0 && prefix) { out.set(prefix, null); return; }
+  if (keys.length === 0 && prefix) { put(out, prefix, rec, notes); return; }
   for (const k of keys) {
-    const v = (rec as Record<string, Json>)[k];
+    const v = rec[k];
     const path = prefix ? `${prefix}.${k}` : k;
-    if (v !== null && typeof v === 'object' && !(Array.isArray(v) && arrays === 'json')) flattenValues(v, arrays, out, path);
-    else out.set(path, v);
+    if (v !== null && typeof v === 'object' && !(Array.isArray(v) && arrays === 'json')) flattenValues(v, arrays, out, notes, path);
+    else {
+      if (isRecordList(v)) notes.innerRecords.add(fieldName(path));
+      put(out, path, v, notes);
+    }
   }
 }
 
@@ -98,55 +146,105 @@ function mapsToTable(flat: Array<Map<string, Json>>, context: Map<string, Json>,
   }
   const header = [...order, ...contextCols.map(c => c[0])];
   if (header.length > LIMITS.xlsxColumns) throw new LimitError(`The records produce ${header.length} columns; the limit is ${LIMITS.xlsxColumns}.`);
+  if (header.length === 0) {
+    // Records with no fields at all ({}) have nothing to write: the table is empty, never a run of blank lines.
+    if (flat.length) warnings.push(`The ${flat.length === 1 ? 'record' : plural(flat.length, 'record')} ${name ? `in "${name}" ` : ''}${flat.length === 1 ? 'has' : 'have'} no fields, so the table is empty.`);
+    return { name, header, rows: [] };
+  }
   if (missing && flat.length > 1) warnings.push(`The records ${name ? `in "${name}" ` : ''}do not all have the same fields: there is one column for every field seen, and ${plural(missing, 'record')} ${missing === 1 ? 'has' : 'have'} empty cells where a field is missing.`);
   return { name, header, rows: flat.map(m => [...order.map(k => m.has(k) ? m.get(k)! : null), ...contextCols.map(c => c[1])]) };
 }
 
-function tableOf(rows: Json[], o: DataOptions, warnings: string[], context = new Map<string, Json>(), name?: string): Table {
+function tableOf(rows: Json[], o: DataOptions, warnings: string[], notes: FlatNotes, context = new Map<string, Json>(), name?: string): Table {
   if (rows.length > 0 && rows.every(r => Array.isArray(r))) {
     warnings.push('Each inner list became one row, with no header row.');
     return { name, header: null, rows: (rows as Json[][]).map(r => r.map(v => v !== null && typeof v === 'object' ? stringifyJson(v) : v)) };
   }
-  let nested = false;
+  let nested = false, records = 0, lists = 0, single = 0;
   const flat = rows.map(r => {
+    if (isObject(r)) records++;
+    else if (Array.isArray(r)) lists++;
+    else single++;
     const m = new Map<string, Json>();
-    flattenValues(r, o.arrays, m);
+    flattenValues(r, o.arrays, m, notes);
     for (const k of m.keys()) if (k.includes('.')) nested = true;
     return m;
   });
   if (nested) warnings.push(o.arrays === 'json' ? 'Nested objects became dotted columns (address.city); lists stayed JSON text in one cell.' : 'Nested objects and lists became dotted, numbered columns (address.city, tags.0).');
+  if ([records, lists, single].filter(Boolean).length > 1) {
+    const kinds = [records && plural(records, 'record'), single && plural(single, 'single value'), lists && plural(lists, 'list')].filter(Boolean);
+    const where = [records && 'records give their fields as columns', single && 'single values are in the "value" column', lists && 'inner lists are numbered columns (0, 1, ...)'].filter(Boolean);
+    warnings.push(`The list ${name ? `"${name}" ` : ''}mixes ${and(kinds as string[])}: ${and(where as string[])}.`);
+  }
   return mapsToTable(flat, context, warnings, name);
 }
 
-const isRecordList = (v: Json): v is Json[] => Array.isArray(v) && v.length > 0 && v.every(r => r !== null && typeof r === 'object' && !Array.isArray(r));
+const and = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items.join('');
+const quoted = (names: string[]) => and(names.map(k => `"${k}"`));
+const keptAs = (o: DataOptions, many: boolean) => o.arrays === 'json'
+  ? `${many ? 'each is' : 'it is'} kept whole as JSON text in one cell`
+  : `${many ? 'they are' : 'it is'} kept as numbered columns (name.0, name.1, ...)`;
 
-/** Finds the tables in a JSON value by the rules at the top of this file. */
+/**
+ * Finds the tables in a JSON value by the rules at the top of this file, and explains every choice that the shape
+ * of the data left open: tables are never combined with each other (no row is a combination of two lists), lists
+ * inside the rows are never expanded into more rows, and nothing is left out.
+ */
 function tablesOf(value: Json, o: DataOptions, warnings: string[], table: 'file' | 'sheet'): Table[] {
-  if (Array.isArray(value)) return [tableOf(value, o, warnings)];
-  if (value === null || typeof value !== 'object') return [tableOf([value], o, warnings)];
+  const notes = newNotes();
+  const tables = findTables(value, o, warnings, table, notes);
+  if (notes.clashes.size) {
+    const names = [...notes.clashes];
+    warnings.push(`Two fields gave the same column name (${quoted(names.slice(0, 4))}${names.length > 4 ? ', ...' : ''}), as a key with a dot in its name does beside a nested field; the later one got a _2 suffix, so both values are kept.`);
+  }
+  if (notes.innerRecords.size) {
+    const names = [...notes.innerRecords];
+    warnings.push(`${quoted(names.slice(0, 4))}${names.length > 4 ? ', ...' : ''} ${names.length === 1 ? 'holds a list' : 'hold lists'} of records inside the rows. Rows come only from the top level, so ${names.length === 1 ? 'it was' : 'they were'} not expanded into more rows (which would repeat or multiply the rows around ${names.length === 1 ? 'it' : 'them'}); ${keptAs(o, names.length > 1)}.`);
+  }
+  return tables;
+}
+
+function findTables(value: Json, o: DataOptions, warnings: string[], table: 'file' | 'sheet', notes: FlatNotes): Table[] {
+  const unit = table === 'sheet' ? 'sheet' : 'file';
+  if (Array.isArray(value)) {
+    if (value.length === 0) warnings.push('The list is empty, so the table has no rows.');
+    return [tableOf(value, o, warnings, notes)];
+  }
+  if (!isObject(value)) {
+    warnings.push(`The file holds a single ${value === null ? 'null' : 'value'}, not a list or an object, so it became one row with one column.`);
+    return [tableOf([value], o, warnings, notes)];
+  }
   const keys = Object.keys(value);
-  const obj = value as Record<string, Json>;
+  const obj = value;
+  if (keys.length === 0) {
+    warnings.push('The file holds an empty object, so the table is empty.');
+    return [{ header: [], rows: [] }];
+  }
+  const empty = keys.filter(k => Array.isArray(obj[k]) && (obj[k] as Json[]).length === 0);
   if (keys.length === 1 && Array.isArray(obj[keys[0]])) {
-    warnings.push(`Used the "${keys[0]}" list as the rows.`);
-    return [tableOf(obj[keys[0]] as Json[], o, warnings)];
+    warnings.push(empty.length ? `The only field, "${keys[0]}", is an empty list, so the table has no rows.` : `Used the "${keys[0]}" list as the rows.`);
+    return [tableOf(obj[keys[0]] as Json[], o, warnings, notes)];
   }
   if (keys.length > 1 && keys.every(k => Array.isArray(obj[k]))) {
-    warnings.push(`Each of the ${keys.length} lists became its own ${table === 'sheet' ? 'sheet' : 'file'}.`);
-    return keys.map(k => tableOf(obj[k] as Json[], o, warnings, new Map(), k));
+    warnings.push(`Each of the ${keys.length} lists became its own ${unit}; their rows are not combined with each other.`);
+    if (empty.length) warnings.push(`${quoted(empty)} ${empty.length === 1 ? `is an empty list, so its ${unit} has` : `are empty lists, so their ${unit}s have`} no rows.`);
+    return keys.map(k => tableOf(obj[k] as Json[], o, warnings, notes, new Map(), k));
   }
   const lists = keys.filter(k => isRecordList(obj[k]));
+  const mixed = keys.filter(k => isMixedList(obj[k]));
+  if (mixed.length) warnings.push(`${quoted(mixed)} ${mixed.length === 1 ? 'mixes' : 'mix'} records with other values, so ${mixed.length === 1 ? 'it was' : 'they were'} not used as rows; ${keptAs(o, mixed.length > 1)}.`);
   if (lists.length) {
     const context = new Map<string, Json>();
-    for (const k of keys.filter(k => !lists.includes(k))) flattenValues(obj[k], o.arrays, context, k);
-    const listNames = lists.map(k => `"${k}"`).join(' and ');
+    for (const k of keys.filter(k => !lists.includes(k))) flattenValues(obj[k], o.arrays, context, notes, k);
     warnings.push(lists.length === 1
-      ? `The rows are the records of the ${listNames} list.`
-      : `Each list of records (${listNames}) became its own ${table === 'sheet' ? 'sheet' : 'file'}.`);
-    if (context.size) warnings.push(`The other top-level ${plural(context.size, 'field')} (${[...context.keys()].slice(0, 4).join(', ')}${context.size > 4 ? ', ...' : ''}) ${context.size === 1 ? 'is' : 'are'} repeated on every row, so nothing is lost.`);
-    return lists.map(k => tableOf(obj[k] as Json[], o, warnings, context, lists.length > 1 ? k : undefined));
+      ? `The rows are the records of the "${lists[0]}" list.`
+      : `Each list of records (${quoted(lists)}) became its own ${unit}. Their rows are not combined with each other, since nothing says which record of one list goes with which record of another.`);
+    if (context.size) warnings.push(`${context.size === 1 ? 'The other top-level field' : `The ${context.size.toLocaleString('en-US')} other top-level fields`} (${[...context.keys()].slice(0, 4).join(', ')}${context.size > 4 ? ', ...' : ''}) ${context.size === 1 ? 'is' : 'are'} repeated on every row, so nothing is lost.`);
+    return lists.map(k => tableOf(obj[k] as Json[], o, warnings, notes, context, lists.length > 1 ? k : undefined));
   }
   warnings.push('The top level is a single object, so it became one row.');
-  return [tableOf([value], o, warnings)];
+  if (empty.length) warnings.push(`${quoted(empty)} ${empty.length === 1 ? 'is an empty list' : 'are empty lists'}, so there are no records to make rows from; ${empty.length === 1 ? 'it is' : 'they are'} written as [].`);
+  return [tableOf([value], o, warnings, notes)];
 }
 
 /** CSV and TSV share one writer; TSV is the same format with tabs. */
@@ -159,7 +257,8 @@ function tablesToText(tables: Table[], o: DataOptions, as: TextTable, warnings: 
   const outputs: DataOutput[] = [];
   let neutralized = 0, rows = 0, columns = 0;
   for (const t of tables) {
-    const cells: Cell[][] = t.header ? [t.header.map(k => ({ text: k, isText: true }))] : [];
+    // A table with no columns writes nothing at all (an empty file), not a line with no fields.
+    const cells: Cell[][] = t.header?.length ? [t.header.map(k => ({ text: k, isText: true }))] : [];
     for (const r of t.rows) cells.push(r.map(scalarText));
     const w = writeCsv(cells, textOptions(o, as));
     neutralized += w.neutralized;
@@ -296,12 +395,12 @@ export function jsonlToJson(bytes: Uint8Array): DataResult {
 
 export function jsonlToCsv(bytes: Uint8Array, o: DataOptions, as: TextTable = 'csv'): DataResult {
   const warnings: string[] = [];
-  return tablesToText([tableOf(readJsonl(bytes, warnings), o, warnings)], o, as, warnings);
+  return tablesToText(tablesOf(readJsonl(bytes, warnings), o, warnings, 'file'), o, as, warnings);
 }
 
 export function jsonlToXlsx(bytes: Uint8Array, o: DataOptions, baseName: string): DataResult {
   const warnings: string[] = [];
-  return tablesToXlsx([tableOf(readJsonl(bytes, warnings), o, warnings)], baseName, warnings);
+  return tablesToXlsx(tablesOf(readJsonl(bytes, warnings), o, warnings, 'sheet'), baseName, warnings);
 }
 
 // ------------------------------------------------------------------ CSV
@@ -764,7 +863,7 @@ function yamlTables(bytes: Uint8Array, o: DataOptions, warnings: string[], table
   const { value, documents } = parseYaml(readText(bytes, warnings), warnings);
   if (documents > 1 && Array.isArray(value) && value.every(d => Array.isArray(d))) {
     warnings.push(`The items of the ${documents} documents' lists are one table.`);
-    return [tableOf((value as Json[][]).flat(), o, warnings)];
+    return tablesOf((value as Json[][]).flat(), o, warnings, table);
   }
   return tablesOf(value, o, warnings, table);
 }

@@ -8,11 +8,12 @@
 // never span two lines), with LF line endings and a final LF.
 
 import { LIMITS, LimitError } from '../../core/limits';
-import { parseJson, plural, stringifyJson, type Json } from './json';
+import { newTally, parseJson, plural, stringifyJson, tallyNotes, type Json } from './json';
 
 export function readJsonLines(text: string, warnings: string[]): Json[] {
   const lines = text.replace(/^\ufeff/, '').split('\n');
   const values: Json[] = [];
+  const tally = newTally();
   let blank = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, '');
@@ -23,7 +24,7 @@ export function readJsonLines(text: string, warnings: string[]): Json[] {
     }
     if (values.length >= LIMITS.jsonlLines) throw new LimitError(`The file has more than ${LIMITS.jsonlLines.toLocaleString('en-US')} lines, the limit.`);
     try {
-      values.push(parseJson(line, warnings));
+      values.push(parseJson(line, warnings, tally));
     } catch (e) {
       if (e instanceof LimitError) throw new LimitError(`Line ${i + 1}: ${e.message}`);
       const whole = text.trim();
@@ -41,6 +42,7 @@ export function readJsonLines(text: string, warnings: string[]): Json[] {
   }
   if (values.length === 0) throw new Error('The file has no JSON values.');
   if (blank) warnings.push(`${plural(blank, 'blank line')} skipped.`);
+  tallyNotes(tally, warnings, 'line');
   return values;
 }
 

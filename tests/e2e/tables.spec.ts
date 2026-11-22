@@ -89,6 +89,44 @@ test('YAML and XML to CSV, TSV and XLSX, with what sits beside the records repea
   expect(w.outside).toEqual([]);
 });
 
+test('JSON and YAML with two lists of records: two tables, never combined, every field kept', async ({ page }, info) => {
+  const w = await openApp(page);
+  const src = JSON.parse(readFileSync(fx('data/orders.json'), 'utf8'));
+  await addFiles(page, [fx('data/orders.json'), fx('data/orders.yaml')]);
+  const tables: Record<string, string[][][]> = {};
+  for (const name of ['orders.json', 'orders.yaml']) {
+    await convert(page, name, 'CSV');
+    await expectDone(page, name);
+    await expect(row(page, name).locator('.outputs button')).toHaveCount(2);
+    const notes = row(page, name).locator('.job-notes');
+    await expect(notes).toContainText('Their rows are not combined with each other');
+    await expect(notes).toContainText('"lines" holds a list of records inside the rows');
+    await expect(notes).toContainText('the later one got a _2 suffix, so both values are kept');
+    const files = [await download(page, name, info, 0), await download(page, name, info, 1)];
+    // Named after their lists; the second file's results are numbered, since both files are called orders.
+    expect(files.map(f => f.filename.replace(/ \(2\)(?=\.csv$)/, ''))).toEqual(['orders - orders.csv', 'orders - refunds.csv']);
+    tables[name] = files.map(f => pyRead<string[][]>('csv', f.path));
+  }
+  const [orders, refunds] = tables['orders.json'];
+  // Three orders and two refunds: five rows in all, not six combinations.
+  expect(orders).toHaveLength(4);
+  expect(refunds).toHaveLength(3);
+  expect(orders[0]).toEqual(['id', 'customer.name', 'customer.city', 'total', 'lines', 'note', 'gift', 'customer', 'store',
+    'store_2', 'exported', 'currency', 'meta.version', 'meta.source', 'meta.tags', 'a.b', 'a.b_2', 'mixed']);
+  expect(orders[2].slice(0, 7)).toEqual(['2', src.orders[1].customer.name, src.orders[1].customer.city, '0', '[]', "'=cmd", 'true']);
+  expect(orders[3].slice(7, 10)).toEqual(['{}', 'Outlet', 'Northwind']);
+  expect(refunds[2]).toEqual(['3', '7', 'damaged', 'Northwind', '2026-11-22', 'EUR', '2', '', '[]', 'a key with a dot', 'a nested field', '[{"x":1},"loose",3]']);
+  expect(tables['orders.yaml']).toEqual(tables['orders.json']);
+  await convert(page, 'orders.json', 'XLSX');
+  const wb = pyRead<Sheet[]>('xlsx', (await download(page, 'orders.json', info)).path);
+  expect(wb.map(s => s.name)).toEqual(['orders', 'refunds']);
+  expect(wb[0].rows[1].slice(0, 4)).toEqual([1, 'Ada', 'London', 12.5]);
+  expect(wb[0].rows[2].slice(5, 7)).toEqual(['=cmd', true]);
+  expect(wb[0].cells.F3.type).toBe('s');
+  expect(wb[1].rows).toHaveLength(3);
+  expect(w.outside).toEqual([]);
+});
+
 test('XLS and ODS to XLSX, CSV, TSV, JSON and JSON Lines', async ({ page }, info) => {
   test.slow();
   await openApp(page);

@@ -158,7 +158,7 @@ describe('YAML to tables', () => {
     expect(rows[3][9]).toBe('2026-11-22');
     const notes = r.warnings.join(' ');
     expect(notes).toMatch(/The rows are the records of the "items" list/);
-    expect(notes).toMatch(/The other top-level 2 fields \(defaults\.unit, defaults\.taxable\) are repeated on every row/);
+    expect(notes).toMatch(/The 2 other top-level fields \(defaults\.unit, defaults\.taxable\) are repeated on every row/);
   });
 
   test('to XLSX: numbers and true/false typed, codes with leading zeros text', () => {
