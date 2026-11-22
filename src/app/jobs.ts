@@ -152,7 +152,7 @@ export class Queue {
       if (fmt.category === 'archive') {
         // An archive is unpacked, not converted: its row offers Extract files instead of a list of formats.
         job.info = parts.join(', ');
-        job.notes.push('An archive. Unpack it to download its files or convert them; FileConvert does not turn one archive format into another.');
+        job.notes.push('An archive: FileConvert unpacks it so its files can be downloaded or converted, but does not turn one archive format into another.');
         job.status = 'ready';
         this.onChange(job);
         return;

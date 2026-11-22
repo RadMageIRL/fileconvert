@@ -49,7 +49,7 @@ test('a ZIP is unpacked, not converted: files to download or convert, links and 
   await page.locator('#picker').setInputFiles([A['mixed.zip']]);
   await ready(page, 'mixed.zip');
   const r = row(page, 'mixed.zip');
-  await expect(r.locator('.job-notes')).toContainText('FileConvert does not turn one archive format into another');
+  await expect(r.locator('.job-notes')).toContainText('FileConvert unpacks it so its files can be downloaded or converted, but does not turn one archive format into another.');
   await expect(r.getByRole('combobox')).toHaveCount(0);
   await expect(page.locator('#convert-all')).toBeDisabled();
   await r.getByRole('button', { name: 'Extract files' }).click();

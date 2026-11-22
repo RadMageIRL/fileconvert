@@ -88,14 +88,15 @@ function routes(cat: Category): Array<[string, string]> {
 
 export function formatsHtml(): string {
   const card = (title: string, pairs: Array<[string, string]>, note: string) =>
-    `<div class="fmt"><h3>${esc(title)}</h3><ul class="pairs">${pairs.map(([a, b]) => `<li><b>${esc(a)}</b> to ${esc(b)}</li>`).join('')}</ul><p>${esc(note)}</p></div>`;
+    `<div class="fmt"><h3>${esc(title)}</h3>${pairs.length ? `<ul class="pairs">${pairs.map(([a, b]) => `<li><b>${esc(a)}</b> to ${esc(b)}</li>`).join('')}</ul>` : ''}<p>${esc(note)}</p></div>`;
   return [
     card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF, WebP or PNG', 'GIF, WebP, MP4 or WebM, keeping the animation']], 'Resize, set quality, keep transparency where the format allows it. HEIC and SVG are read but not written; an SVG is drawn at the size you choose.'),
     card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
     card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
     card('Documents', routes('document'), 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
     card('Data', routes('data'), 'Nested data, encodings, worksheets, dates and spreadsheet formulas are handled explicitly.'),
-    card('Archives', [['ZIP, TAR, GZ, .tar.gz', 'unpacked: download the files inside, or convert them without adding them again']], 'Archives are unpacked, never converted into another archive format. Links, encrypted files and archives inside archives are listed, not opened.'),
+    // Archives are unpacked, not converted, so this card has no "A to B" lines.
+    card('Archives', [], 'ZIP, TAR, GZ and .tar.gz archives are unpacked: download the files inside, or convert them without adding them again. Archives are never converted into another archive format. Links, encrypted files and archives inside archives are listed, not opened.'),
   ].join('');
 }
 
