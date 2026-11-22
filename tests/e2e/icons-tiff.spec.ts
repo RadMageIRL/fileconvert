@@ -132,3 +132,33 @@ test('TIFF keeps transparency, and LZW and uncompressed TIFF hold the same pixel
   const script = 'import sys\nfrom PIL import Image\na, b = Image.open(sys.argv[1]), Image.open(sys.argv[2])\nprint(a.mode, b.mode, a.info.get("compression"), b.info.get("compression"), a.tobytes() == b.tobytes(), a.getchannel("A").getextrema())';
   expect(execFileSync(PYTHON, ['-I', '-c', script, plain.path, lzw.path], { encoding: 'utf8' }).trim()).toBe('RGBA RGBA raw tiff_lzw True (0, 255)');
 });
+
+test('combine images into one TIFF: pages in the chosen order, turned upright, TIFF pages included, LZW', async ({ page }, info) => {
+  await page.goto('./images-to-tiff/');
+  await expect(page.locator('html[data-ready="true"]')).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Combine images into a TIFF');
+  const ws = page.locator('#workspace');
+  await ws.locator('input[type=file]').setInputFiles([fx('image/photo.jpg'), fx('image/alpha.png'), fx('image/two-pages.tiff'), fx('image/rotated-exif6.jpg')]);
+  await expect(ws.locator('.ws-item:not(.rejected) .job-name')).toHaveText(['photo.jpg', 'alpha.png', 'two-pages.tiff', 'rotated-exif6.jpg']);
+  for (let i = 0; i < 3; i++) await ws.getByRole('button', { name: 'Move rotated-exif6.jpg up' }).click();
+  await expect(ws.locator('.ws-item:not(.rejected) .job-name')).toHaveText(['rotated-exif6.jpg', 'photo.jpg', 'alpha.png', 'two-pages.tiff']);
+  await ws.getByLabel('Compression').selectOption('lzw');
+  await ws.getByRole('button', { name: 'Make the TIFF' }).click();
+  await expect(ws.locator('.ws-file')).toContainText('5 pages');
+  const [dl] = await Promise.all([page.waitForEvent('download'), ws.locator('.ws-file').getByRole('button').click()]);
+  const { path, filename } = await (await import('./helpers')).save(dl, info);
+  expect(filename).toBe('combined.tiff');
+  const script = [
+    'import sys, json', 'from PIL import Image, ImageOps',
+    'def upright(p):', '    im = Image.open(p); return [list(ImageOps.exif_transpose(im).size)]',
+    'def pages(p):', '    im = Image.open(p); out = []', '    for i in range(im.n_frames):', '        im.seek(i); out.append([list(im.size), im.mode])', '    return out',
+    'srcs = upright(sys.argv[2]) + upright(sys.argv[3]) + upright(sys.argv[4]) + [p[0] for p in pages(sys.argv[5])]',
+    'out = Image.open(sys.argv[1])',
+    'print(json.dumps({"compression": out.info.get("compression"), "pages": pages(sys.argv[1]), "expected": srcs}))',
+  ].join('\n');
+  const r = JSON.parse(execFileSync(PYTHON, ['-I', '-c', script, path, fx('image/rotated-exif6.jpg'), fx('image/photo.jpg'), fx('image/alpha.png'), fx('image/two-pages.tiff')], { encoding: 'utf8' }));
+  expect(r.compression).toBe('tiff_lzw');
+  expect(r.pages.map((p: [number[], string]) => p[0])).toEqual(r.expected);
+  expect(r.pages[2][1]).toBe('RGBA');
+  await expect(ws.locator('.job-notes')).toContainText('two-pages.tiff added its 2 pages.');
+});

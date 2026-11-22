@@ -18,7 +18,7 @@ describe('the page list', () => {
 
   test('holds the planned pages whose conversions are in place', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
-      'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'heic-to-jpg', 'heic-to-png', 'jpg-to-png', 'json-to-csv',
+      'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'heic-to-jpg', 'heic-to-png', 'images-to-tiff', 'jpg-to-png', 'json-to-csv',
       'json-to-xlsx', 'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text',
       'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
     ]);

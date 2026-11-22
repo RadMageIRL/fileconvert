@@ -435,3 +435,37 @@ export async function convertImage(bytes: Uint8Array, from: FormatId, to: Format
   const summary = last.detail ? `ICO, ${last.detail}` : `${last.width} x ${last.height}${pages}${to === 'tiff' && o.tiffCompression === 'lzw' ? ', LZW' : ''}`;
   return { outputs, mime: FORMATS[to].mime, ext: FORMATS[to].ext, width: last.width, height: last.height, warnings, summary };
 }
+
+/** Combines pictures into one multi-page TIFF, in the order given; a multi-page TIFF adds all its pages. */
+export async function combineTiff(files: Array<{ bytes: Uint8Array; format: FormatId; name: string }>, compression: TiffCompression, progress: (p: { fraction?: number; stage?: string }) => void): Promise<{ bytes: Uint8Array; pages: number; warnings: string[] }> {
+  const warnings: string[] = [];
+  const tiff = new TiffWriter(compression);
+  let pixels = 0;
+  for (const [i, f] of files.entries()) {
+    progress({ fraction: i / files.length, stage: `${i + 1} of ${files.length}: ${f.name}` });
+    if (f.bytes.length > LIMITS.imageBytes) throw new LimitError(`${f.name} is larger than ${LIMITS.imageBytes / 1048576} MB, the limit for images.`);
+    const header = readHeader(f.bytes, f.format);
+    if (header.width && header.height) checkPixels(header.width, header.height, f.name);
+    if (header.animated) warnings.push(`${f.name} is animated; its first frame is the page.`);
+    const tiffIn = f.format === 'tiff' ? await openTiff(f.bytes, warnings) : null;
+    const count = tiffIn ? tiffIn.count : 1;
+    for (let p = 0; p < count; p++) {
+      if (tiff.pages >= LIMITS.tiffPages) throw new LimitError(`A TIFF can hold up to ${LIMITS.tiffPages} pages here.`);
+      const { pic, orientation } = tiffIn ? await tiffIn.decode(p) : await decode(f.bytes, f.format, warnings);
+      try {
+        const swap = orientation >= 5 && orientation <= 8;
+        const w = swap ? pic.height : pic.width, h = swap ? pic.width : pic.height;
+        pixels += w * h;
+        if (pixels > LIMITS.tiffTotalPixels) throw new LimitError(`The pages add up to more than ${LIMITS.tiffTotalPixels / 1e6} megapixels, the limit for one TIFF here.`);
+        const ctx = scaled(pic, w, h, orientation);
+        tiff.addPage({ rgba: ctx.getImageData(0, 0, w, h).data, width: w, height: h });
+        ctx.canvas.width = 0;
+      } finally {
+        pic.close();
+      }
+    }
+    if (count > 1) warnings.push(`${f.name} added its ${count} pages.`);
+  }
+  progress({ fraction: 1, stage: 'Writing the TIFF' });
+  return { bytes: tiff.finish(), pages: tiff.pages, warnings };
+}

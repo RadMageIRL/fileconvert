@@ -254,6 +254,32 @@ export const PAGES: readonly Page[] = [
     keywords: ['exif', 'gps', 'location', 'privacy', 'strip', 'metadata', 'remove', 'clean', 'photo', 'iphone'],
   },
   {
+    kind: 'tool', slug: 'images-to-tiff', tool: 'images-to-tiff', category: 'image', common: 2,
+    name: 'Combine images into a TIFF',
+    title: 'Combine Images into One Multi-Page TIFF | FileConvert',
+    blurb: 'Many pictures, one multi-page TIFF',
+    description: 'Combine JPG, PNG, HEIC and other pictures into one multi-page TIFF, in the order you choose, uncompressed or LZW. Runs in your browser.',
+    intro: 'Scans, receipts and page photos are often wanted as one file. A multi-page TIFF keeps every page lossless, and document systems, fax software and image viewers open it.',
+    steps: [
+      'Add your pictures. JPG, PNG, WebP, AVIF, HEIC, BMP, GIF, ICO, and TIFF files, whose pages are all added.',
+      'Put them in order. Drag the rows, or use Up and Down; the first file becomes page 1.',
+      'Make the TIFF. Choose no compression or LZW, then download the TIFF.',
+    ],
+    details: [
+      'Each picture becomes one page at its own size, turned upright first.',
+      'Pages are stored losslessly: uncompressed, or LZW, which is smaller and read by Windows, macOS and Office.',
+      'Transparency is kept on the pages that have it.',
+      'A multi-page TIFF among your files adds all of its pages, in their order.',
+    ],
+    limits: [
+      'Up to 1,000 pages and 400 megapixels in all.',
+      'An animated GIF or WebP gives its first frame as the page.',
+      'HEIC and TIFF color profiles are not applied.',
+    ],
+    related: ['png-to-ico', 'remove-image-metadata', 'heic-to-jpg'],
+    keywords: ['tiff', 'tif', 'multipage', 'multi-page', 'combine', 'merge', 'scan', 'fax', 'pages'],
+  },
+  {
     slug: 'gif-to-mp4', from: 'gif', to: 'mp4', category: 'image',
     blurb: 'Animated GIFs as small videos',
     description: 'Turn animated GIFs into MP4 videos that are a fraction of the size and play everywhere. Converted with your browser\'s encoder, never uploaded.',
