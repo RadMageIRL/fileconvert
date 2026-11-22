@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import * as XLSX from 'xlsx';
-import { convertData, DEFAULT_DATA_OPTIONS, generalNumber, stringifyJson, xlsxSheetNames, type DataOptions } from '../../src/engines/data/convert';
+import { convertData, DEFAULT_DATA_OPTIONS, generalNumber, stringifyJson, xlsxSheetNames, yamlFlowDepth, type DataOptions } from '../../src/engines/data/convert';
 import { parseCsv } from '../../src/engines/data/csv';
 import { sniff } from '../../src/core/sniff';
 
@@ -73,7 +73,7 @@ describe('JSON Lines', () => {
   });
 
   test('big integers are written exactly, and no text can pass for one', () => {
-    expect(stringifyJson([10n ** 30n, '\u0000x:5', { k: -(2n ** 64n) }])).toBe('[1000000000000000000000000000000,"\\u0000x:5",{"k":-18446744073709551616}]');
+    expect(stringifyJson([10n ** 30n, '\u0000x:5', '\u0000:7', { k: -(2n ** 64n) }])).toBe('[1000000000000000000000000000000,"\\u0000x:5","\\u0000:7",{"k":-18446744073709551616}]');
   });
 
   test('sniffing: .jsonl and .ndjson by name, and NDJSON saved as .json by its lines', () => {
@@ -181,7 +181,12 @@ describe('YAML to tables', () => {
     expect(run('yaml', 'csv', fx('hostile/unsafe-tags.yaml')).outputs).toHaveLength(1);
     expect(r.warnings.join(' ')).toMatch(/Unresolved tag/);
     expect(() => run('yaml', 'csv', fx('hostile/yaml-bomb.yaml'))).toThrow(/billion laughs/);
-    expect(() => run('yaml', 'xlsx', fx('hostile/deep.yaml'))).toThrow(/nested/);
+    // Measured before parsing, so every browser gives the same answer (Firefox's own overflow says "too much recursion").
+    expect(() => run('yaml', 'xlsx', fx('hostile/deep.yaml'))).toThrow(/^The YAML is nested 20000 levels deep; the limit is 500\.$/);
+    expect(yamlFlowDepth('a: [1, [2, {b: 3}]]\nc: "[[[[" # [[[[\nd: \'[\'\'[\'\n')).toBe(3);
+    // Nesting by indentation is not flow nesting; the parser's own overflow is reported as the limit if it comes.
+    expect(yamlFlowDepth('a:\n  b:\n    c: 1\n')).toBe(0);
+    expect(() => run('yaml', 'json', enc(Array.from({ length: 3000 }, (_, i) => ' '.repeat(i) + '- ').join('\n') + 'x\n'))).toThrow(/nested/);
   });
 
   test('JSON follows the same table rules: several lists of records, each with the other fields', () => {
@@ -192,6 +197,8 @@ describe('YAML to tables', () => {
     expect(wb.SheetNames).toEqual(['people', 'orders']);
     // A list of plain values among other fields is a field, not a table.
     expect(csvRows(run('json', 'csv', enc('{"name":"x","tags":["a","b"]}')))).toEqual([['name', 'tags'], ['x', '["a","b"]']]);
+    // A field beside the list named like a field of the records gets its own column, not the records' one.
+    expect(csvRows(run('json', 'csv', enc('{"id":"batch-1","items":[{"id":1},{"id":2}]}')))).toEqual([['id', 'id_2'], ['1', 'batch-1'], ['2', 'batch-1']]);
   });
 });
 
@@ -277,6 +284,8 @@ describe('XLS and ODS', () => {
     expect(() => run('xls', 'csv', word)).toThrow(/not an Excel workbook/);
     expect(() => run('xls', 'csv', xls.slice(0, 3000))).toThrow(/damaged|could not be read/);
     expect(() => run('ods', 'csv', fx('hostile/zip-bomb.docx'))).toThrow(/expand|ratio|larger|limit|bomb|unpack/i);
+    // A ZIP that is not an OpenDocument package is named as such, not handed to the spreadsheet reader.
+    expect(() => run('ods', 'csv', fx('document/word-styles.docx'))).toThrow(/^This is not an OpenDocument spreadsheet \(content\.xml is missing\)\.$/);
   });
 
   test('underlying values: a date is its serial number, never a date in the local time zone', () => {
@@ -296,6 +305,8 @@ describe('XLS and ODS', () => {
     expect(generalNumber(123456789012345)).toBe('123456789012345');
     expect(generalNumber(0.1 + 0.2)).toBe('0.3');
     expect(generalNumber(-1234.5678)).toBe('-1234.5678');
+    expect(generalNumber(987654321098.5)).toBe('987654321098.5');
+    expect(generalNumber(-999999999999999)).toBe('-999999999999999');
     expect(generalNumber(1e21)).toBe('1E+21');
     expect(generalNumber(9007199254740993)).toBe('9.00719925474099E+15');
   });

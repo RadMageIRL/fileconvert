@@ -157,7 +157,7 @@ test('hostile and broken data: the bad line is named, unsafe YAML tags stay data
   expect(pyRead('json', (await download(page, 'unsafe-tags.yaml', info)).path)).toEqual([['echo owned'], 'function () { return 1 }', { a: 1 }, 'plain']);
   await expect(row(page, 'unsafe-tags.yaml').locator('.job-notes')).toContainText('Unresolved tag');
   await convert(page, 'deep.yaml', 'CSV');
-  await expect(row(page, 'deep.yaml').locator('.job-error')).toContainText('nested too deeply');
+  await expect(row(page, 'deep.yaml').locator('.job-error')).toContainText('The YAML is nested 20000 levels deep; the limit is 500.');
   await convert(page, 'external-dtd.xml', 'CSV');
   await expectDone(page, 'external-dtd.xml');
   expect(pyRead('csv', (await download(page, 'external-dtd.xml', info)).path)).toEqual([['a'], ['1'], ['2']]);

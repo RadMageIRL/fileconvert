@@ -664,24 +664,53 @@ export function xlsxToJsonl(bytes: Uint8Array, o: DataOptions, kind: WorkbookKin
 
 // ------------------------------------------------------------------ YAML
 
+/** A stack overflow, as Chrome and Edge (RangeError, "Maximum call stack") and Firefox ("too much recursion") report it. */
+const tooDeep = (e: unknown) => e instanceof RangeError || /call stack|too much recursion/i.test(String((e as Error)?.message ?? e));
+
+/**
+ * Nesting of YAML flow collections ([ ] and { }) outside quoted text and comments, measured before parsing so a deep
+ * one is refused the same way in every browser. Nesting by indentation is caught by tooDeep while parsing.
+ */
+export function yamlFlowDepth(text: string): number {
+  let depth = 0, max = 0, quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) { if (quote === "'" && text[i + 1] === "'") i++; else quote = ''; }
+      else if (c === '\\' && quote === '"') i++;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '#' && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\t' || text[i - 1] === '\n')) {
+      const end = text.indexOf('\n', i);
+      if (end < 0) break;
+      i = end;
+    } else if (c === '[' || c === '{') { if (++depth > max) max = depth; }
+    else if ((c === ']' || c === '}') && depth > 0) depth--;
+  }
+  return max;
+}
+
 /**
  * Parses YAML with the core schema: no custom tags are resolved or run (an unknown tag such as !!python/object is a
  * warning and its value stays plain data), keys must be unique, merge keys (<<) work, aliases may not expand far
  * beyond the file's size (billion laughs), and nesting is limited. Several documents become a list of them.
  */
 function parseYaml(text: string, warnings: string[]): { value: Json; documents: number } {
+  const depth = yamlFlowDepth(text);
+  if (depth > LIMITS.dataDepth) throw new LimitError(`The YAML is nested ${depth} levels deep; the limit is ${LIMITS.dataDepth}.`);
   let list;
   try {
     list = parseAllDocuments(text, { prettyErrors: true, uniqueKeys: true, merge: true, schema: 'core' });
   } catch (e) {
-    if (e instanceof RangeError) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+    if (tooDeep(e)) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
     throw e;
   }
   const docs = Array.isArray(list) ? list : [list];
   const values: unknown[] = [];
   for (const doc of docs) {
     if (doc.errors.length) {
-      if (/call stack/i.test(doc.errors[0].message)) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+      if (tooDeep(doc.errors[0])) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
       throw new Error(`This is not valid YAML: ${doc.errors[0].message.split('\n')[0]}`);
     }
     for (const w of doc.warnings) warnings.push(w.message.split('\n')[0]);
@@ -689,7 +718,7 @@ function parseYaml(text: string, warnings: string[]): { value: Json; documents: 
       values.push(doc.toJS({ maxAliasCount: 100 }));
     } catch (e) {
       if (/alias/i.test((e as Error).message)) throw new LimitError('The YAML uses aliases to expand far beyond its size (a "billion laughs" pattern), so it was not converted.');
-      if (e instanceof RangeError) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
+      if (tooDeep(e)) throw new LimitError(`The YAML is nested too deeply to read; the limit is ${LIMITS.dataDepth} levels.`);
       throw e;
     }
   }
