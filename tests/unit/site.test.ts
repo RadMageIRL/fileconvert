@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { answers, NOT_SUPPORTED, parseQuery } from '../../src/app/catalog';
 import { allConversions, FORMATS } from '../../src/core/formats';
-import { commonPages, isTool, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
+import { commonPages, isConversion, isNamed, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
 import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderPage, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
 
 const template = readFileSync(join(__dirname, '..', '..', 'index.html'), 'utf8');
@@ -18,15 +18,50 @@ describe('the page list', () => {
 
   test('holds the planned pages whose conversions are in place', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
-      'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp', 'heic-to-jpg', 'heic-to-png', 'images-to-tiff', 'jpg-to-png', 'json-to-csv',
-      'json-to-xlsx', 'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text',
-      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
+      'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'docx-to-html', 'docx-to-markdown', 'extract-tar', 'extract-zip', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp',
+      'heic-to-jpg', 'heic-to-png', 'html-to-markdown', 'images-to-tiff', 'jpg-to-png', 'json-to-csv', 'json-to-jsonl',
+      'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'pdf-to-text',
+      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
+      'xls-to-csv', 'xls-to-xlsx', 'xlsx-to-csv', 'xlsx-to-json', 'xml-to-csv', 'xml-to-xlsx', 'yaml-to-csv',
     ]);
+  });
+
+  test('an extraction page is the converter with its archive formats named, and the checks hold it to archives', () => {
+    const zip = PAGES.find(p => p.slug === 'extract-zip')!;
+    expect(zip).toMatchObject({ kind: 'extract', formats: ['zip'], category: 'archive' });
+    const html = renderPage(home, zip);
+    expect(html).toContain('data-page="extract-zip" data-extract="zip"');
+    expect(html).not.toMatch(/<html[^>]*data-tool=/);
+    expect(html).toContain('<h1 id="title">Extract files from a ZIP</h1>');
+    expect(html).toContain('<strong>Drop ZIP files here</strong>');
+    expect(html).toContain('Unpacking runs in this browser tab');
+    expect(renderPage(home, PAGES.find(p => p.slug === 'extract-tar')!)).toContain('<strong>Drop TAR, TAR.GZ, TGZ or GZ files here</strong>');
+    // On the home page it is listed with the tools.
+    expect(home).toMatch(/<h2 class="common-sub">Tools<\/h2><ul class="chips">.*href="\.\/extract-zip\/"/);
+  });
+
+  test('the README table lists exactly the document and data conversions the registry performs', () => {
+    const readme = readFileSync(join(__dirname, '..', '..', 'README.md'), 'utf8');
+    const byLabel = new Map(Object.values(FORMATS).map(f => [f.label, f.id] as const));
+    const listed = new Set<string>();
+    let section = '';
+    for (const line of readme.split('\n')) {
+      const m = /^\| (?:\*\*(\w+):\*\* )?([^|]+?) \| ([^|]+?) \|$/.exec(line);
+      if (!m) continue;
+      if (m[1]) section = m[1];
+      if (section !== 'Documents' && section !== 'Data') continue;
+      for (const from of m[2].split(', ')) for (const to of m[3].split(', ')) {
+        expect(byLabel.has(from) && byLabel.has(to), `${from} to ${to}`).toBe(true);
+        listed.add(`${byLabel.get(from)}>${byLabel.get(to)}`);
+      }
+    }
+    const registry = allConversions().filter(([a]) => ['document', 'data'].includes(FORMATS[a].category)).map(([a, b]) => `${a}>${b}`);
+    expect([...listed].sort()).toEqual(registry.sort());
   });
 
   test('every page names a conversion the registry performs', () => {
     const pairs = new Set(allConversions().map(([a, b]) => `${a}>${b}`));
-    for (const p of PAGES) if (!isTool(p)) expect(pairs.has(`${p.from}>${p.to}`), p.slug).toBe(true);
+    for (const p of PAGES) if (isConversion(p)) expect(pairs.has(`${p.from}>${p.to}`), p.slug).toBe(true);
   });
 
   test('the checks catch a page for a conversion that does not exist, and duplicates', () => {
@@ -45,7 +80,7 @@ describe('the page list', () => {
   test('titles fit in search results and the common list is ordered and unique', () => {
     for (const p of PAGES) expect(pageTitle(p).length, p.slug).toBeLessThanOrEqual(60);
     // Conversions and tools are listed separately on the home page; each list has its own order.
-    for (const group of [commonPages().filter(isTool), commonPages().filter(p => !isTool(p))]) {
+    for (const group of [commonPages().filter(isNamed), commonPages().filter(isConversion)]) {
       const common = group.map(p => p.common);
       expect(common).toEqual([...common].sort((a, b) => a! - b!));
       expect(new Set(common).size).toBe(common.length);

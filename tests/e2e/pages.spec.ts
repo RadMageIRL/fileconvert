@@ -1,6 +1,6 @@
 import { expect, test, type Page as PwPage } from '@playwright/test';
 import { FORMATS, type FormatId } from '../../src/core/formats';
-import { isTool, pageTitle, PAGES, type ConversionPage, type Page } from '../../src/core/pages';
+import { isConversion, isNamed, pageTitle, PAGES, type ConversionPage, type Page } from '../../src/core/pages';
 import { MD_SAMPLE, ORIGIN, addFiles, convert, cspViolations, download, expectDone, ffprobe, fx, openApp, pillow, ready, row, type FilePayload } from './helpers';
 
 // The dedicated conversion pages: each one loads directly and on refresh, carries its own head and content
@@ -14,14 +14,16 @@ const SAMPLE: Partial<Record<FormatId, string | FilePayload>> = {
   flac: fx('audio/tone.flac'), pdf: fx('document/sample.pdf'), md: MD_SAMPLE, json: fx('data/records.json'),
   csv: fx('data/people.csv'), xlsx: fx('data/workbook.xlsx'), ico: fx('image/icon-png.ico'), tsv: fx('data/people.csv'),
   aiff: fx('audio/tone16.aiff'), ts: fx('video/clip-h264-aac.ts'),
+  html: fx('document/page.html'), docx: fx('document/word-styles.docx'), xls: fx('data/legacy.xls'), ods: fx('data/legacy.ods'),
+  jsonl: fx('data/events.jsonl'), xml: fx('data/library.xml'), yaml: fx('data/inventory.yaml'),
   svg: { name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#08f"/></svg>') },
 };
 const sampleName = (s: string | FilePayload) => typeof s === 'string' ? s.split(/[\\/]/).pop()! : s.name;
-const CONVERSIONS = PAGES.filter((p): p is ConversionPage => !isTool(p));
+const CONVERSIONS = PAGES.filter((p): p is ConversionPage => isConversion(p));
 const bySlug = (slug: string) => CONVERSIONS.find(p => p.slug === slug)!;
 /** The page heading: a tool's name, or Convert A to B. */
-const heading = (p: Page) => isTool(p) ? p.name : `Convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
-const howTo = (p: Page) => isTool(p) ? `How to ${p.name.charAt(0).toLowerCase()}${p.name.slice(1)}` : `How to convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
+const heading = (p: Page) => isNamed(p) ? p.name : `Convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
+const howTo = (p: Page) => isNamed(p) ? `How to ${p.name.charAt(0).toLowerCase()}${p.name.slice(1)}` : `How to convert ${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
 
 /** Opens a page and records errors, CSP violations and outside requests, like openApp does for the home page. */
 async function openPage(page: PwPage, p: Page) {
@@ -58,7 +60,7 @@ test('the content is in the HTML itself, for search engines and for browsers wit
     expect(res.status()).toBe(200);
     const html = await res.text();
     expect(html).toContain(`<h2 id="guide-title">${howTo(p)}</h2>`);
-    for (const d of p.details) expect(html).toContain(d.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;'));
+    for (const d of p.details) expect(html).toContain(d.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;'));
     const ld = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/.exec(html)![1]);
     expect(ld['@graph'][1]['@type']).toBe('BreadcrumbList');
     for (const r of p.related) expect(html).toContain(`href="../${r}/"`);

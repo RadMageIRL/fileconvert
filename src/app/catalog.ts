@@ -104,7 +104,7 @@ export function setupCatalog(): void {
     let shown = 0;
     for (const item of items) {
       // A query naming two formats asks for a conversion, so tool pages are left out of its results.
-      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens) && !(item.dataset.tool && q.formats.length >= 2);
+      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens) && !((item.dataset.tool || item.dataset.extract) && q.formats.length >= 2);
       item.hidden = !ok;
       if (ok) shown++;
     }

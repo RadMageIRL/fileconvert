@@ -6,7 +6,7 @@
 
 import { allConversions, AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, targetsFor, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats.ts';
 import { formatBytes, LIMITS } from '../core/limits.ts';
-import { CATEGORY_LABELS, commonPages, isTool, pageName, pageTitle, PAGES, type ConversionPage, type Page } from '../core/pages.ts';
+import { CATEGORY_LABELS, commonPages, isConversion, isExtract, isNamed, isTool, pageName, pageTitle, PAGES, type ConversionPage, type Page } from '../core/pages.ts';
 import { isToolId, TOOLS } from '../core/tools.ts';
 
 /** The canonical address of the app. Every page's canonical URL is under it. */
@@ -44,8 +44,8 @@ function replaceOnce(html: string, find: string, replace: string): string {
 /** Search words for a page: both formats, their extensions, the category and the page's own keywords. */
 export function searchTerms(p: Page): string {
   const words = new Set<string>();
-  if (isTool(p)) for (const w of p.name.toLowerCase().split(/\s+/)) words.add(w);
-  for (const id of isTool(p) ? TOOLS[p.tool].accepts : [p.from, p.to]) {
+  if (isNamed(p)) for (const w of p.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) words.add(w);
+  for (const id of isTool(p) ? TOOLS[p.tool].accepts : isExtract(p) ? p.formats : [p.from, p.to]) {
     words.add(FORMATS[id].label.toLowerCase());
     for (const e of FORMATS[id].exts) words.add(e);
   }
@@ -54,13 +54,16 @@ export function searchTerms(p: Page): string {
   return [...words].join(' ');
 }
 
+/** The data attributes that say what a page does: its tool, its archive formats, or its pair. */
+const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
+
 const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
 
 export function catalogHtml(): string {
   const cats = (Object.keys(CATEGORY_LABELS) as Category[]).filter(c => PAGES.some(p => p.category === c));
   return cats.map(c => {
     const items = PAGES.filter(p => p.category === c).map(p =>
-      `<li class="cat-item" data-cat="${c}" data-slug="${p.slug}" ${isTool(p) ? `data-tool="${p.tool}"` : `data-from="${p.from}" data-to="${p.to}"`} data-terms="${esc(searchTerms(p))}"><a href="./${p.slug}/"><span class="cat-name">${esc(pageName(p))}</span><span class="cat-blurb">${esc(p.blurb)}</span></a></li>`);
+      `<li class="cat-item" data-cat="${c}" data-slug="${p.slug}" ${pageData(p)} data-terms="${esc(searchTerms(p))}"><a href="./${p.slug}/"><span class="cat-name">${esc(pageName(p))}</span><span class="cat-blurb">${esc(p.blurb)}</span></a></li>`);
     return `<section class="cat-group" data-cat="${c}" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${CATEGORY_LABELS[c]}</h3><ul class="cat-list">${items.join('')}</ul></section>`;
   }).join('');
 }
@@ -74,8 +77,8 @@ export function catalogChipsHtml(): string {
 
 export function commonHtml(): string {
   const list = (pages: Page[]) => pages.map(p => `<li>${pageLink(p, 'chip')}</li>`).join('');
-  const tools = commonPages().filter(isTool);
-  return `<nav class="common" aria-labelledby="common-title"><h2 id="common-title">Common conversions</h2><ul class="chips">${list(commonPages().filter(p => !isTool(p)))}</ul>`
+  const tools = commonPages().filter(isNamed);
+  return `<nav class="common" aria-labelledby="common-title"><h2 id="common-title">Common conversions</h2><ul class="chips">${list(commonPages().filter(isConversion))}</ul>`
     + (tools.length ? `<h2 class="common-sub">Tools</h2><ul class="chips">${list(tools)}</ul>` : '') + '</nav>';
 }
 
@@ -93,7 +96,7 @@ export function formatsHtml(): string {
     card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF, WebP or PNG', 'GIF, WebP, MP4 or WebM, keeping the animation']], 'Resize, set quality, keep transparency where the format allows it. HEIC and SVG are read but not written; an SVG is drawn at the size you choose.'),
     card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
     card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
-    card('Documents', routes('document'), 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
+    card('Documents', routes('document'), 'PDFs have real, selectable text; Markdown, HTML and DOCX keep their structure, not their look. Scanned PDFs need OCR, which is not done.'),
     card('Data', routes('data'), 'Nested data, encodings, worksheets, dates and spreadsheet formulas are handled explicitly.'),
     // Archives are unpacked, not converted, so this card has no "A to B" lines.
     card('Archives', [], 'ZIP, TAR, GZ and .tar.gz archives are unpacked: download the files inside, or convert them without adding them again. Archives are never converted into another archive format. Links, encrypted files and archives inside archives are listed, not opened.'),
@@ -107,6 +110,8 @@ export function limitsHtml(): string {
     'Audio and video use your browser\'s WebCodecs. Current Chrome, Edge and Firefox have them. Which codecs work depends on the browser and the computer: Firefox cannot decode HEVC video, for example, and AAC encoding falls back to a built-in encoder where the browser has none.',
     'DOCX to PDF and PDF to DOCX are not offered. Page layout cannot be reproduced faithfully in a browser, and I would rather not offer a conversion that quietly rearranges your document.',
     'Markdown and HTML to PDF keep the document structure (headings, lists, tables, code, links, embedded PNG and JPEG pictures) in a clean default style. Stylesheets are not applied and remote images are not downloaded.',
+    'Conversions between Markdown, HTML and DOCX keep the structure, not the look: fonts, colors, layout, headers and footers, comments and tracked changes are not carried over, and nothing a document links to is fetched.',
+    'XLS and ODS to XLSX keep values, formulas, number formats and merged cells, not cell formatting, charts, pictures, comments or macros.',
     'The PDF font covers Latin, Greek and Cyrillic. Other scripts, such as Chinese, Arabic or Hindi, are reported and do not show.',
     'Animated GIF, WebP and PNG (APNG) keep their animation as GIF, WebP, MP4 or WebM; formats that hold one picture get the first frame, and the menu says which is which. Animated WebP and APNG need ImageDecoder, which current Chrome, Edge and Firefox have. Animated AVIF is read as its first frame.',
     'Converted pictures lose their metadata (EXIF, GPS). Remove photo metadata takes it out of JPG, PNG and WebP photos without converting them. HEIC and TIFF color profiles are not applied.',
@@ -137,8 +142,11 @@ export function settingsHint(p: ConversionPage): string {
   if (toCat === 'audio') return 'Audio settings to change the bitrate, the sample rate or the channels';
   if (fromCat === 'video' && p.to === 'gif') return 'Video settings to change the GIF width or frame rate';
   if (fromCat === 'video') return 'Video settings to change the resolution or the quality, or to remove the sound';
+  // XLS and ODS to XLSX rewrite the whole workbook; no setting changes it.
+  if (fromCat === 'data' && p.to === 'xlsx' && (p.from === 'xls' || p.from === 'ods')) return '';
   if (fromCat === 'data') return 'Data settings to change separators, the header row and how values are read';
-  if (p.to === 'pdf') return 'Documents settings to change the page size';
+  if (p.to === 'pdf' || p.to === 'docx') return 'Documents settings to change the page size';
+  if (p.to === 'md') return 'Documents settings to choose whether pictures stay inside the Markdown';
   return '';
 }
 
@@ -148,7 +156,7 @@ function pageJsonLd(p: Page): string {
     '@context': 'https://schema.org',
     '@graph': [
       {
-        '@type': 'WebApplication', name: `FileConvert: ${pageName(p)}${isTool(p) ? '' : ' converter'}`, url,
+        '@type': 'WebApplication', name: `FileConvert: ${pageName(p)}${isNamed(p) ? '' : ' converter'}`, url,
         applicationCategory: 'UtilitiesApplication', operatingSystem: 'Any modern web browser', isAccessibleForFree: true,
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, description: p.description,
         author: { '@type': 'Person', name: 'RadMageIRL' }, publisher: { '@type': 'Organization', name: 'RadMage Labs', url: 'https://radmagelabs.com/' },
@@ -172,7 +180,7 @@ function pageHead(p: Page): string {
     `<title>${esc(pageTitle(p))}</title>`,
     `<meta name="description" content="${esc(p.description)}">`,
     `<link rel="canonical" href="${url}">`,
-    `<meta property="og:title" content="${esc(`${pageName(p)}${isTool(p) ? '' : ' converter'} | FileConvert`)}">`,
+    `<meta property="og:title" content="${esc(`${pageName(p)}${isNamed(p) ? '' : ' converter'} | FileConvert`)}">`,
     `<meta property="og:description" content="${esc(p.description)}">`,
     `<meta property="og:url" content="${url}">`,
     `<script type="application/ld+json">${pageJsonLd(p)}</script>`,
@@ -182,7 +190,7 @@ function pageHead(p: Page): string {
 function pageHero(p: Page): string {
   return `<section class="hero hero-page" aria-labelledby="title">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="./">FileConvert</a></li><li><span aria-current="page">${esc(pageName(p))}</span></li></ol></nav>
-      <h1 id="title">${isTool(p) ? esc(p.name) : `Convert ${esc(label(p.from))} to ${esc(label(p.to))}`}</h1>
+      <h1 id="title">${isNamed(p) ? esc(p.name) : `Convert ${esc(label(p.from))} to ${esc(label(p.to))}`}</h1>
       <p class="promise">Convert files. Upload nothing.</p>
       <p class="lede">${esc(p.intro)}</p>
     </section>`;
@@ -190,7 +198,7 @@ function pageHero(p: Page): string {
 
 /** The How to steps: written for a tool, generated for a conversion. */
 function steps(p: Page): string {
-  if (isTool(p)) return p.steps.map(t => `<li>${esc(t).replace(/^([^.]+\.)/, '<strong>$1</strong>')}</li>`).join('\n        ');
+  if (isNamed(p)) return p.steps.map(t => `<li>${esc(t).replace(/^([^.]+\.)/, '<strong>$1</strong>')}</li>`).join('\n        ');
   const a = esc(label(p.from)), b = esc(label(p.to));
   const hint = settingsHint(p);
   return [
@@ -200,7 +208,7 @@ function steps(p: Page): string {
   ].join('\n        ');
 }
 
-const howTo = (p: Page) => isTool(p) ? `How to ${esc(p.name.charAt(0).toLowerCase() + p.name.slice(1))}` : `How to convert ${esc(label(p.from))} to ${esc(label(p.to))}`;
+const howTo = (p: Page) => isNamed(p) ? `How to ${esc(p.name.charAt(0).toLowerCase() + p.name.slice(1))}` : `How to convert ${esc(label(p.from))} to ${esc(label(p.to))}`;
 
 function pageGuide(p: Page): string {
   const related = p.related.map(s => PAGES.find(x => x.slug === s)!).map(r => `<li>${pageLink(r, 'chip')}</li>`).join('');
@@ -213,7 +221,7 @@ function pageGuide(p: Page): string {
         <div class="guide-card"><h3>What happens to your files</h3><ul>${p.details.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
         <div class="guide-card"><h3>Good to know</h3><ul>${p.limits.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
       </div>
-      <p class="guide-note"><strong>Nothing is uploaded.</strong> ${isTool(p) ? 'The tool' : 'The conversion'} runs in this browser tab, and the page's security policy does not allow it to send your files anywhere. Privacy, at the bottom of the page, explains how.</p>
+      <p class="guide-note"><strong>Nothing is uploaded.</strong> ${isTool(p) ? 'The tool' : isExtract(p) ? 'Unpacking' : 'The conversion'} runs in this browser tab, and the page's security policy does not allow it to send your files anywhere. Privacy, at the bottom of the page, explains how.</p>
       <nav class="related" aria-labelledby="related-title"><h3 id="related-title">Related</h3><ul class="chips">${related}</ul></nav>
     </section>`;
 }
@@ -224,9 +232,10 @@ const oneLevelDown = (html: string) => html.replace(/\b(href|src)="\.\//g, '$1="
 /** A conversion or tool page, made from the built home page. A tool page opens its tool in place of the converter. */
 export function renderPage(home: string, p: Page): string {
   let html = fillRegion(home, 'head', `\n  ${pageHead(p)}\n`);
-  html = replaceOnce(html, 'data-root="./"', `data-root="../" data-page="${p.slug}" ${isTool(p) ? `data-tool="${p.tool}"` : `data-from="${p.from}" data-to="${p.to}"`}`);
+  html = replaceOnce(html, 'data-root="./"', `data-root="../" data-page="${p.slug}" ${pageData(p)}`);
   html = fillRegion(html, 'hero', pageHero(p));
-  if (!isTool(p)) html = fillRegion(html, 'drop', `<strong>Drop ${esc(label(p.from))} files here</strong>`);
+  if (isConversion(p)) html = fillRegion(html, 'drop', `<strong>Drop ${esc(label(p.from))} files here</strong>`);
+  if (isExtract(p)) html = fillRegion(html, 'drop', `<strong>Drop ${esc(p.formats.map(f => f === 'gz' ? 'TAR.GZ, TGZ or GZ' : label(f)).join(', '))} files here</strong>`);
   html = fillRegion(html, 'common', '');
   html = fillRegion(html, 'guide', pageGuide(p));
   html = html.replace(`<li class="cat-item" data-cat="${p.category}" data-slug="${p.slug}" `, `<li class="cat-item current" data-cat="${p.category}" data-slug="${p.slug}" `)
@@ -268,6 +277,7 @@ export function pageProblems(): string[] {
     const where = `page ${p.slug}`;
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) problems.push(`${where}: the slug must be lowercase words joined by hyphens`);
     if (isTool(p)) { if (!isToolId(p.tool)) problems.push(`${where}: there is no tool ${p.tool}`); }
+    else if (isExtract(p)) { if (!p.formats.length || p.formats.some(f => FORMATS[f].category !== 'archive')) problems.push(`${where}: an extraction page names archive formats only`); }
     else if (!pairs.has(`${p.from}>${p.to}`)) problems.push(`${where}: FileConvert does not convert ${p.from} to ${p.to}`);
     for (const [k, v] of [['slug', p.slug], ['title', pageTitle(p)], ['description', p.description]] as const) {
       if (seen[k].has(v)) problems.push(`${where}: duplicate ${k}`);
@@ -279,7 +289,7 @@ export function pageProblems(): string[] {
     for (const r of p.related) {
       if (r === p.slug || !PAGES.some(x => x.slug === r)) problems.push(`${where}: related page ${r} does not exist`);
     }
-    const text = [p.blurb, p.description, p.intro, ...p.details, ...p.limits, ...(p.keywords ?? []), ...(isTool(p) ? [p.name, p.title, ...p.steps] : [])].join(' ');
+    const text = [p.blurb, p.description, p.intro, ...p.details, ...p.limits, ...(p.keywords ?? []), ...(isNamed(p) ? [p.name, p.title, ...p.steps] : [])].join(' ');
     if (/[^\x20-\x7e]/.test(text)) problems.push(`${where}: text must be plain ASCII`);
   }
   return problems;

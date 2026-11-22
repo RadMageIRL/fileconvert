@@ -50,15 +50,35 @@ export interface ToolPage extends PageText {
   steps: [string, string, string];
 }
 
-export type Page = ConversionPage | ToolPage;
+/**
+ * A page for unpacking archives. It is the converter itself, whose Extract files step unpacks an archive, so the
+ * archive code is the same here as on every other page; the page only explains its formats.
+ */
+export interface ExtractPage extends PageText {
+  kind: 'extract';
+  /** The archive formats the page is about. */
+  formats: FormatId[];
+  /** The page's name, which is also its heading: "Extract files from a ZIP". */
+  name: string;
+  /** The page title, at most 60 characters. */
+  title: string;
+  /** The three steps of the How to section. */
+  steps: [string, string, string];
+}
+
+export type Page = ConversionPage | ToolPage | ExtractPage;
 
 export const isTool = (p: Page): p is ToolPage => p.kind === 'tool';
+export const isExtract = (p: Page): p is ExtractPage => p.kind === 'extract';
+export const isConversion = (p: Page): p is ConversionPage => p.kind === undefined || p.kind === 'convert';
+/** Tool and extraction pages have a name of their own rather than "A to B". */
+export const isNamed = (p: Page): p is ToolPage | ExtractPage => isTool(p) || isExtract(p);
 
 /** The page's display name, such as "HEIC to JPG" or "Remove photo metadata". */
-export const pageName = (p: Page) => isTool(p) ? p.name : `${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
+export const pageName = (p: Page) => isNamed(p) ? p.name : `${FORMATS[p.from].label} to ${FORMATS[p.to].label}`;
 
 /** The page title, at most 60 characters. */
-export const pageTitle = (p: Page) => isTool(p) ? p.title : `${pageName(p)} Converter, Free and Private | FileConvert`;
+export const pageTitle = (p: Page) => isNamed(p) ? p.title : `${pageName(p)} Converter, Free and Private | FileConvert`;
 
 const PRIVATE_PHOTO = 'The photo is turned the right way up, and its EXIF details (camera, date, GPS location) are not copied into the result.';
 
@@ -591,8 +611,88 @@ export const PAGES: readonly Page[] = [
       'The fonts cover Latin, Greek and Cyrillic. Other scripts are reported and do not show.',
       'Files up to 8 MB.',
     ],
-    related: ['pdf-to-text', 'json-to-csv'],
+    related: ['pdf-to-text', 'markdown-to-docx', 'json-to-csv'],
     keywords: ['md', 'readme', 'notes', 'document'],
+  },
+  {
+    slug: 'markdown-to-docx', from: 'md', to: 'docx', category: 'document',
+    blurb: 'Markdown as an editable Word document',
+    description: 'Turn Markdown into a Word DOCX document with real headings, lists, tables, links, code and pictures, in Word\'s own styles. Converted in your browser.',
+    intro: 'Share notes, READMEs or a draft written in Markdown with people who work in Word. The result is an ordinary document, ready to edit and restyle.',
+    details: [
+      'Headings use Word\'s Heading 1 to 6 styles, so the navigation pane and a table of contents work, and lists are real Word lists, nested as in the Markdown.',
+      'Bold, italic, strikethrough, links, tables with a header row and their column alignment, block quotes, subscript and superscript are kept.',
+      'Code is set in Consolas, in Code Block and Inline Code styles you can change in Word.',
+      'PNG, JPEG, GIF and BMP pictures inside the Markdown are included, scaled to fit the page. Pages are US Letter or A4, chosen in Documents settings.',
+    ],
+    limits: [
+      'Pictures from the web are never downloaded: they become their description, as do WebP and SVG pictures.',
+      'Inline HTML is cleaned first: scripts, forms and frames are removed.',
+      'Task list boxes ([ ] and [x]) stay as text.',
+      'Files up to 8 MB.',
+    ],
+    related: ['docx-to-markdown', 'markdown-to-pdf', 'docx-to-html'],
+    keywords: ['md', 'word', 'doc', 'readme', 'notes', 'pandoc'],
+  },
+  {
+    slug: 'docx-to-markdown', from: 'docx', to: 'md', category: 'document',
+    blurb: 'Word documents as Markdown',
+    description: 'Convert Word DOCX documents to GitHub-flavored Markdown with headings, nested lists, tables, links, code and pictures. Converted on your device.',
+    intro: 'Move a Word document into a README, a wiki, a static site or a notes app. The text and its structure come across as Markdown that is easy to edit.',
+    details: [
+      'Mammoth reads the document on your device. Headings, bold, italic, strikethrough, links, nested bullet and numbered lists, block quotes, code blocks and footnotes become their Markdown forms.',
+      'Tables become GitHub-flavored Markdown tables; several paragraphs in a cell are joined with line breaks, and a | in a cell is escaped.',
+      'Pictures are kept inside the Markdown as data URLs, or replaced by their description if you choose that in Documents settings.',
+      'Text in a code font such as Consolas or Courier New becomes code, and Word, LibreOffice and pandoc code styles become code blocks.',
+    ],
+    limits: [
+      'Underline, fonts, colors, alignment, page layout, headers and footers, comments and tracked changes are not part of Markdown.',
+      'Merged table cells are split, since Markdown tables cannot merge cells, and numbered lists start at 1.',
+      'Some Markdown viewers, such as GitHub, do not show pictures kept as data URLs.',
+      'Documents up to 200 MB, with up to 100 MB of pictures.',
+    ],
+    related: ['docx-to-html', 'markdown-to-docx', 'html-to-markdown'],
+    keywords: ['word', 'doc', 'md', 'readme', 'wiki', 'notes', 'obsidian', 'gfm'],
+  },
+  {
+    slug: 'docx-to-html', from: 'docx', to: 'html', category: 'document',
+    blurb: 'Word documents as web pages',
+    description: 'Convert Word DOCX documents to clean, standalone HTML with headings, lists, tables, links and pictures kept. Runs in your browser; nothing is uploaded.',
+    intro: 'Publish a Word document on the web or in an email as one HTML file. The structure of the document is kept, in a clean style that reads well on phones.',
+    details: [
+      'Mammoth reads the document on your device: headings, paragraphs, bold, italic, underline, strikethrough, subscript and superscript, lists to nine levels, tables with merged cells, links and footnotes.',
+      'Pictures stored in the document are kept inside the HTML file, so it stands alone.',
+      'Word, LibreOffice and pandoc quote and code styles become quotes and code blocks, and text set in a code font such as Consolas becomes code.',
+      'The page runs no scripts and loads nothing from the web: its own security policy allows only the pictures inside it.',
+    ],
+    limits: [
+      'This keeps the structure, not the look: fonts, colors, sizes, alignment, page layout, headers and footers, comments and tracked changes are not kept.',
+      'Pictures that are only linked from the document are not fetched, and EMF or WMF drawings are kept but browsers cannot show them.',
+      'Numbered lists start at 1, whatever number the document started them at.',
+      'Documents up to 200 MB, with up to 100 MB of pictures.',
+    ],
+    related: ['docx-to-markdown', 'markdown-to-docx', 'html-to-markdown'],
+    keywords: ['word', 'doc', 'web', 'page', 'publish', 'email'],
+  },
+  {
+    slug: 'html-to-markdown', from: 'html', to: 'md', category: 'document',
+    blurb: 'Web pages as clean Markdown',
+    description: 'Convert HTML pages and fragments to GitHub-flavored Markdown with headings, lists, links, tables and code kept and scripts removed. In your browser.',
+    intro: 'Markdown is how notes, READMEs and wikis are written. FileConvert turns an HTML file into Markdown on your device, keeping the structure and dropping what is not content.',
+    details: [
+      'Headings, paragraphs, bold, italic, strikethrough, inline code, links, pictures, nested lists, block quotes and horizontal rules become their Markdown forms.',
+      'Tables become GitHub-flavored Markdown tables with their column alignment, and a | in a cell is escaped. Tables that hold lists or code stay as HTML, which Markdown allows.',
+      'Code blocks are fenced, with their language when the HTML names it (class="language-python").',
+      'Scripts, styles, forms, frames and event handlers are removed first, and pictures from the web stay as their address: nothing is downloaded.',
+    ],
+    limits: [
+      'The whole page body is converted, menus and footers included; delete what you do not need.',
+      'Layout, colors and fonts are not part of Markdown. Subscript and superscript stay as HTML tags.',
+      'Pictures inside the HTML as data URLs stay inside the Markdown, unless Documents settings say Description only.',
+      'Files up to 8 MB.',
+    ],
+    related: ['docx-to-markdown', 'markdown-to-pdf', 'markdown-to-docx'],
+    keywords: ['md', 'web', 'page', 'htm', 'readme', 'notes', 'gfm', 'github'],
   },
   // ------------------------------------------------------------------ data
   {
@@ -688,6 +788,228 @@ export const PAGES: readonly Page[] = [
     ],
     related: ['xlsx-to-json', 'json-to-csv', 'csv-to-json'],
     keywords: ['excel', 'spreadsheet', 'workbook', 'table', 'api', 'export'],
+  },
+  {
+    slug: 'xls-to-xlsx', from: 'xls', to: 'xlsx', category: 'data',
+    blurb: 'Old Excel workbooks as XLSX',
+    description: 'Convert Excel 97-2003 XLS workbooks to XLSX, keeping every sheet, value, formula and date format. Converted in your browser; nothing is uploaded.',
+    intro: 'XLS is the Excel format from before 2007. Newer apps, Google Sheets imports and many tools want XLSX. FileConvert rewrites the workbook on your device.',
+    details: [
+      'Every sheet is converted, with its values, formulas and their saved results, number formats (so dates stay dates), merged cells, column widths and hidden sheets.',
+      'The file is checked before it is read, and macros are never read or run.',
+      'TRUE and FALSE values that LibreOffice stored as formulas become plain values.',
+      'A note lists what was kept and what was not.',
+    ],
+    limits: [
+      'Fonts, colors, borders and other cell formatting, charts, pictures, comments and macros are not kept. Check the result in Excel before replacing the original.',
+      'Password-protected workbooks cannot be read.',
+      'Workbooks up to 200 MB.',
+    ],
+    related: ['xls-to-csv', 'ods-to-xlsx', 'xlsx-to-csv'],
+    keywords: ['excel', '97', '2003', 'upgrade', 'workbook', 'spreadsheet', 'biff'],
+  },
+  {
+    slug: 'xls-to-csv', from: 'xls', to: 'csv', category: 'data',
+    blurb: 'Excel 97-2003 sheets as CSV',
+    description: 'Convert XLS worksheets from Excel 97-2003 to CSV: one sheet or all of them, dates as Excel shows them, numbers in full. Done in your browser.',
+    intro: 'Get the data out of an old Excel workbook for a database, a script or another app. The workbook is read on your device and each sheet becomes plain CSV.',
+    details: [
+      'Choose the first sheet, a named sheet, or every sheet as a CSV of its own.',
+      'Values come out as Excel shows them (dates, percentages, currency) or as the stored values, set in Data settings. Numbers in the General format keep the 15 digits Excel stores.',
+      'Formulas give their saved results, and cells starting with = + - or @ are protected from running as formulas.',
+      'Text in any language, emoji included, is kept, and the CSV is UTF-8.',
+    ],
+    limits: [
+      'Formatting, charts, comments and the formulas themselves are not part of a CSV.',
+      'Password-protected workbooks cannot be read, and macros are never run.',
+      'Workbooks up to 200 MB.',
+    ],
+    related: ['xls-to-xlsx', 'xlsx-to-csv', 'ods-to-csv'],
+    keywords: ['excel', '97', '2003', 'spreadsheet', 'sheet', 'export'],
+  },
+  {
+    slug: 'ods-to-xlsx', from: 'ods', to: 'xlsx', category: 'data',
+    blurb: 'LibreOffice spreadsheets as Excel files',
+    description: 'Convert OpenDocument ODS spreadsheets from LibreOffice and OpenOffice to Excel XLSX with sheets, values, formulas and dates kept. Runs in your browser.',
+    intro: 'ODS is the spreadsheet format of LibreOffice and OpenOffice. When someone needs an Excel file, FileConvert rewrites the workbook as XLSX on your device.',
+    details: [
+      'Every sheet is converted, with values, formulas and their saved results, number formats (so dates stay dates) and merged cells.',
+      'Formulas are written the way Excel writes them, such as SUM(B2:B3).',
+      'The package is checked for ZIP bombs before it is opened, and macros are never run.',
+      'A note lists what was kept and what was not.',
+    ],
+    limits: [
+      'Cell formatting, column widths, which sheets are hidden, charts, pictures, comments and macros are not kept. Check the result in Excel.',
+      'Password-protected files cannot be read.',
+      'Spreadsheets up to 200 MB.',
+    ],
+    related: ['ods-to-csv', 'xls-to-xlsx', 'xlsx-to-csv'],
+    keywords: ['libreoffice', 'openoffice', 'calc', 'opendocument', 'excel', 'spreadsheet'],
+  },
+  {
+    slug: 'ods-to-csv', from: 'ods', to: 'csv', category: 'data',
+    blurb: 'OpenDocument sheets as CSV',
+    description: 'Convert ODS spreadsheets from LibreOffice, OpenOffice or a Google Sheets export to CSV, one sheet or all of them, in your browser. Nothing is uploaded.',
+    intro: 'Turn an OpenDocument spreadsheet into plain CSV that any database, script or app can import, without opening LibreOffice.',
+    details: [
+      'Choose the first sheet, a named sheet, or every sheet as a CSV of its own.',
+      'Values come out as the spreadsheet shows them or as the stored values, set in Data settings.',
+      'Formulas give their saved results, and cells starting with = + - or @ are protected from running as formulas.',
+      'The package is checked for ZIP bombs before it is opened.',
+    ],
+    limits: [
+      'Formatting, charts and the formulas themselves are not part of a CSV.',
+      'Which sheets are hidden is not read from ODS files, so with All sheets a hidden sheet is converted like the others.',
+      'Spreadsheets up to 200 MB.',
+    ],
+    related: ['ods-to-xlsx', 'xls-to-csv', 'csv-to-json'],
+    keywords: ['libreoffice', 'openoffice', 'calc', 'opendocument', 'google', 'sheets', 'spreadsheet'],
+  },
+  {
+    slug: 'jsonl-to-csv', from: 'jsonl', to: 'csv', category: 'data',
+    blurb: 'NDJSON logs and exports as a table',
+    description: 'Convert JSON Lines (JSONL, NDJSON) to CSV: one row per line, nested fields as dotted columns, and a bad line named, not skipped. In your browser.',
+    intro: 'JSON Lines holds one JSON record per line, as logs, data exports and machine learning datasets do. FileConvert turns it into a CSV table for a spreadsheet.',
+    details: [
+      'Each line is one row. Nested objects become dotted columns (user.name), and lists stay JSON text in one cell or spread into numbered columns.',
+      'Records with different fields share one column per field, in the order the fields first appear.',
+      'Large integers keep every digit, and cells starting with = + - or @ are protected from running as formulas.',
+      'Blank lines are skipped and counted, and Windows and Unix line endings both work.',
+    ],
+    limits: [
+      'Reading is strict: a line that is not a complete JSON value stops the conversion and is named, so no record is ever dropped without you knowing.',
+      'Files up to 200 MB and 10 million lines.',
+    ],
+    related: ['json-to-jsonl', 'json-to-csv', 'csv-to-json'],
+    keywords: ['ndjson', 'lines', 'jsonlines', 'logs', 'dataset', 'export', 'spreadsheet'],
+  },
+  {
+    slug: 'json-to-jsonl', from: 'json', to: 'jsonl', category: 'data',
+    blurb: 'A JSON array as one record per line',
+    description: 'Convert a JSON array to JSON Lines (JSONL, NDJSON), one compact record per line, ready for datasets, logs and bulk imports. Converted in your browser.',
+    intro: 'Many tools take JSON Lines rather than one big JSON array: dataset uploads, log pipelines and database bulk imports. FileConvert writes one record per line.',
+    details: [
+      'Each item of the top-level list becomes one line of compact JSON; an object holding a single list uses that list.',
+      'Every value keeps its type, and integers beyond what JavaScript numbers hold keep all their digits.',
+      'Line breaks inside text are escaped, so each record stays on one line. Lines end with LF, the last one too.',
+      'CSV, TSV and spreadsheets convert to JSON Lines as well, one row per line.',
+    ],
+    limits: [
+      'JSON that is not a list becomes a single line, with a note.',
+      'Files up to 200 MB, nested up to 500 levels.',
+    ],
+    related: ['jsonl-to-csv', 'json-to-csv', 'csv-to-json'],
+    keywords: ['ndjson', 'lines', 'jsonlines', 'dataset', 'training', 'bulk', 'import'],
+  },
+  {
+    slug: 'xml-to-csv', from: 'xml', to: 'csv', category: 'data',
+    blurb: 'Repeated XML records as a table',
+    description: 'Convert XML to CSV: each repeated element becomes a row, attributes and child elements become columns, and nothing beside them is dropped. In your browser.',
+    intro: 'XML exports, feeds and catalogs repeat the same element for every record. FileConvert finds those records and writes them as a CSV table.',
+    details: [
+      'The records are the elements that repeat, such as every <book> in a catalog, and wrapper elements around them are stepped into. Several repeated elements give one CSV each.',
+      'Attributes and child elements are columns by name, deeper elements are dotted columns (address.city), and an element with attributes and text gives price and price.currency.',
+      'What sits beside the records, such as a <meta> block or an attribute of the catalog, is repeated on every row, so nothing is lost.',
+      'Entity tricks (XXE, billion laughs) are refused, and nothing the XML refers to is loaded.',
+    ],
+    limits: [
+      'An element repeated inside one record is one cell holding a JSON list, or numbered columns, as set in Data settings.',
+      'XML that repeats no element becomes a single row.',
+      'Files up to 200 MB, nested up to 500 levels.',
+    ],
+    related: ['xml-to-xlsx', 'json-to-csv', 'yaml-to-csv'],
+    keywords: ['feed', 'rss', 'export', 'records', 'table', 'spreadsheet'],
+  },
+  {
+    slug: 'xml-to-xlsx', from: 'xml', to: 'xlsx', category: 'data',
+    blurb: 'XML records as an Excel workbook',
+    description: 'Convert XML to Excel XLSX: repeated elements become rows on their own sheets, with numbers as numbers and leading zeros kept. Done in your browser.',
+    intro: 'Open an XML export in Excel as a proper table you can sort and filter. Each kind of repeated record gets a sheet of its own.',
+    details: [
+      'The records are the elements that repeat, and each repeated element gets a sheet named after it.',
+      'Attributes and child elements become columns, and what sits beside the records is repeated on every row.',
+      'Plain numbers become number cells, while codes with leading zeros, dates and long digit strings stay text. Turn number detection off in Data settings to keep every cell as text.',
+      'Text that starts with = is stored as text, so the workbook can never run it as a formula.',
+    ],
+    limits: [
+      'An element repeated inside one record is one cell holding a JSON list, or numbered columns.',
+      'Up to 1,048,576 rows and 16,384 columns per sheet, the Excel limits.',
+    ],
+    related: ['xml-to-csv', 'json-to-xlsx', 'xlsx-to-json'],
+    keywords: ['excel', 'spreadsheet', 'workbook', 'feed', 'export', 'records'],
+  },
+  {
+    slug: 'yaml-to-csv', from: 'yaml', to: 'csv', category: 'data',
+    blurb: 'YAML lists as a spreadsheet table',
+    description: 'Convert YAML to CSV: a list of records becomes rows, nested keys become dotted columns, and unsafe tags are never run. Converted in your browser.',
+    intro: 'YAML holds configuration, inventories and data files. When it is a list of records, FileConvert lays it out as a CSV table for a spreadsheet.',
+    details: [
+      'A list becomes one row per item. A mapping that holds a list of records uses that list, with its other keys repeated on every row so nothing is lost.',
+      'Several documents in one file are one row each, or one table of all their items when each document is a list.',
+      'Anchors, aliases and merge keys are resolved, and dates stay text, as YAML 1.2 reads them.',
+      'Cells starting with = + - or @ are protected from running as formulas.',
+    ],
+    limits: [
+      'Custom tags such as !!python/object are never run: their values stay plain data, with a note.',
+      'Aliases that would expand far beyond the file (a billion laughs) and nesting deeper than 500 levels are refused.',
+      'Files up to 200 MB.',
+    ],
+    related: ['json-to-csv', 'xml-to-csv', 'csv-to-json'],
+    keywords: ['yml', 'config', 'inventory', 'table', 'spreadsheet', 'kubernetes'],
+  },
+  // ------------------------------------------------------------------ archives
+  {
+    kind: 'extract', slug: 'extract-zip', formats: ['zip'], category: 'archive', common: 3,
+    name: 'Extract files from a ZIP',
+    title: 'Extract ZIP Files Online, Free and Private | FileConvert',
+    blurb: 'Open a ZIP, then download or convert what is inside',
+    description: 'Unzip ZIP archives in your browser: download each file inside, or convert the photos, documents and data in it, without uploading anything.',
+    intro: 'A ZIP file holds other files, compressed. FileConvert opens it on your device, lists everything inside with its kind and size, and lets you download each file or convert it straight away, with no second upload.',
+    steps: [
+      'Add your ZIP file. Drop it on this page or press Choose files.',
+      'Press Extract files. Every file inside is listed with what it is and its size; files in folders show their path.',
+      'Download or convert. Download a file on its own, or tick files and add them to the list to convert them, for example HEIC photos to JPG.',
+    ],
+    details: [
+      'The archive is read in pieces, so large ZIP files, ZIP64 ones over 4 GB included, are unpacked without loading the whole file into memory.',
+      'Each file is checked against the CRC-32 checksum stored with it as it is unpacked.',
+      'Each file inside is recognized by its contents, so the list shows which ones FileConvert can convert.',
+      'Unpacked files stay in this browser tab, in its private storage when the browser has one, and are deleted when you remove the archive from the list.',
+    ],
+    limits: [
+      'Encrypted (password-protected) files, links and unusual compression methods are listed with the reason and not unpacked.',
+      'A ZIP inside the ZIP is listed as a file: add it to the list to unpack it in turn. Nothing is unpacked automatically.',
+      'Up to 10,000 files and 4 GB unpacked. A file that unpacks to more than 1,000 times its packed size, past the first 64 MB, is stopped as a likely ZIP bomb.',
+      'FileConvert does not make ZIP files, apart from downloading several results together, and does not turn a ZIP into another archive format.',
+    ],
+    related: ['extract-tar', 'heic-to-jpg', 'xlsx-to-csv'],
+    keywords: ['unzip', 'extract', 'open', 'decompress', 'archive', 'uncompress', 'zipfile'],
+  },
+  {
+    kind: 'extract', slug: 'extract-tar', formats: ['tar', 'gz'], category: 'archive',
+    name: 'Extract TAR, TAR.GZ and GZ files',
+    title: 'Extract TAR, TAR.GZ and TGZ Files Online | FileConvert',
+    blurb: 'Unpack .tar, .tar.gz, .tgz and .gz files',
+    description: 'Unpack TAR, TAR.GZ, TGZ and GZ files in your browser on Windows, a Mac or a phone, then download or convert the files inside. Nothing is uploaded.',
+    intro: 'TAR archives, usually compressed with gzip as .tar.gz or .tgz, are how software, backups and data sets are shared on Linux and macOS. Windows and phones often cannot open them; this page can, on your device.',
+    steps: [
+      'Add your .tar, .tar.gz, .tgz or .gz file. Drop it on this page or press Choose files.',
+      'Press Extract files. A gzipped TAR is decompressed and unpacked in one step, and a single .gz file, such as data.csv.gz, gives back its one file.',
+      'Download or convert. Download each file, or tick files and add them to the list to convert them.',
+    ],
+    details: [
+      'Long names and paths in the POSIX (PAX) and GNU formats are read, and so are old TAR files without the ustar mark.',
+      'A .gz file that holds a TAR is recognized by its contents, whatever its name.',
+      'The archive is read in pieces, so large archives do not need to fit in memory.',
+      'Files in folders show their path. Empty folders and file permissions are not recreated, since a download has neither.',
+    ],
+    limits: [
+      'Symbolic and hard links, devices and other special entries are listed with the reason and not followed.',
+      'Only gzip compression: .tar.bz2, .tar.xz and .tar.zst are not supported.',
+      'Up to 10,000 files and 4 GB unpacked, with the same ZIP bomb check as ZIP files.',
+    ],
+    related: ['extract-zip', 'jsonl-to-csv', 'csv-to-json'],
+    keywords: ['tgz', 'gzip', 'targz', 'untar', 'gunzip', 'extract', 'decompress', 'linux', 'backup', 'archive'],
   },
 ];
 

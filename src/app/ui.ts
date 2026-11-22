@@ -502,7 +502,7 @@ export class App {
         select('Lists inside JSON records', d.arrays, [['json', 'Keep as JSON text in one cell'], ['columns', 'Spread into numbered columns']], v => { d.arrays = v as typeof d.arrays; }),
         select('Spreadsheet values (to CSV or TSV)', d.values, [['formatted', 'As shown in Excel'], ['raw', 'Underlying values']], v => { d.values = v as typeof d.values; }),
         check('First row is the header (CSV, TSV, spreadsheets)', d.header, v => { d.header = v; }),
-        check('Detect numbers and true/false in CSV and TSV', d.detectTypes, v => { d.detectTypes = v; }),
+        check('Detect numbers and true/false in CSV and TSV, and numbers in XML', d.detectTypes, v => { d.detectTypes = v; }),
         check('Rebuild nested objects from dotted column names', d.nest, v => { d.nest = v; }),
         check('Add a byte order mark to CSV and TSV (helps Excel read UTF-8)', d.bom, v => { d.bom = v; }),
         check('Protect CSV and TSV from spreadsheet formulas', d.neutralizeFormulas, v => { d.neutralizeFormulas = v; }));

@@ -1,5 +1,5 @@
 // The format registry: every format FileConvert reads or writes, and which conversions exist. The interface,
-// the README's support table check (tests/unit/formats.test.ts) and the engines all read from here, so a
+// the README's support table check (tests/unit/site.test.ts) and the engines all read from here, so a
 // conversion is offered only if it is listed below.
 
 export type Category = 'image' | 'audio' | 'video' | 'document' | 'data' | 'archive';
