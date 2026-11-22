@@ -51,6 +51,8 @@ test('HTML to Markdown: structure kept, nothing unsafe, nothing fetched; mistune
   expect(md.codespans).toEqual(['a <code> span']);
   expect(md.html).toEqual(['<sub>', '</sub>', '<sup>', '</sup>']);
   expect(md.breaks).toBe(1);
+  // The hard break is CommonMark's backslash, which editors do not strip as they do trailing spaces.
+  expect(md.text).toContain('Line\\\nbreak');
   expect(md.rules).toBe(1);
   expect(md.text).toContain(LANGS);
   expect(md.text).toContain('\u0647\u0630\u0627 \u0646\u0635 \u0639\u0631\u0628\u064a');
@@ -64,6 +66,19 @@ test('HTML to Markdown: structure kept, nothing unsafe, nothing fetched; mistune
   expect(described.images.map(i => i.alt)).toEqual(['Remote photo', 'Relative picture']);
   expect(described.text).toContain('\\[Image: Embedded red\\]');
   expect(w.outside).toEqual([]);
+});
+
+test('a table Markdown cannot hold stays HTML inside the Markdown, without the GFM plugin\'s editor wrapper', async ({ page }, info) => {
+  await openApp(page);
+  const html = '<h1>T</h1><table><tr><th>Step</th><th>Details</th></tr><tr><td>1</td><td><ul><li>a</li><li>b</li></ul></td></tr></table>';
+  await addFiles(page, [{ name: 'complex.html', mimeType: 'text/html', buffer: Buffer.from(html) }]);
+  await convert(page, 'complex.html', 'Markdown');
+  await expectDone(page, 'complex.html');
+  const out = readFileSync((await download(page, 'complex.html', info)).path, 'utf8');
+  expect(out).toMatch(/^# T\n\n<table>/);
+  expect(out).toContain('<li>a</li>');
+  expect(out).not.toContain('joplin');
+  await expect(row(page, 'complex.html').locator('.job-notes')).toContainText('1 table holds lists, headings, code or quotes in its cells');
 });
 
 test('DOCX to Markdown: Word and LibreOffice documents, nested lists, code, quotes, tables, pictures', async ({ page }, info) => {
