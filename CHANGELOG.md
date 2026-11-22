@@ -10,6 +10,9 @@ Work toward v0.2.0.
 - The promise is now "Convert files. Upload nothing."
 - The layout works on screens 320 pixels wide.
 - A tab left open while FileConvert is updated, which then asks for a converter the new version no longer has, now says to reload the page instead of blaming memory.
+- **Excel to JSON and JSON to Excel.** JSON from a workbook keeps numbers, true/false and empty cells as JSON values and writes dates as ISO 8601 text; pick one sheet or get all of them in one file. JSON to Excel gives typed cells, one sheet per list, text that can never run as a formula, and every digit of large integers. New pages: Excel to JSON and JSON to Excel.
+- **TSV is its own format**, read and written, to and from CSV, JSON and Excel, with the same formula protection as CSV. Converted files say how many cells protection changed, and it can be turned off.
+- Emoji and other characters beyond the Basic Multilingual Plane are kept in workbooks written by Python tools such as pandas; they used to become a different character on the way to CSV.
 - Mediabunny and its encoders are updated to 1.66.2.
 
 ## v0.1.2 - 2026-11-16

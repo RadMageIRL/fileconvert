@@ -4,7 +4,7 @@
 // search engine needs is in the HTML; the scripts only add behavior. Runs in Node (vite.config.ts, unit tests),
 // never in the browser. Imports carry their .ts extension because Vite's config loader reads this file too.
 
-import { allConversions, AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats.ts';
+import { allConversions, AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, targetsFor, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats.ts';
 import { formatBytes, LIMITS } from '../core/limits.ts';
 import { CATEGORY_LABELS, commonPages, pageName, pageTitle, PAGES, type ConversionPage } from '../core/pages.ts';
 
@@ -75,6 +75,13 @@ export function commonHtml(): string {
   return `<nav class="common" aria-labelledby="common-title"><h2 id="common-title">Common conversions</h2><ul class="chips">${items}</ul></nav>`;
 }
 
+/** "A to B, C or D" for every input of a category, straight from the registry. */
+function routes(cat: Category): Array<[string, string]> {
+  const ins = (Object.keys(FORMATS) as FormatId[]).filter(f => FORMATS[f].category === cat && targetsFor(f).length);
+  const or = (ids: FormatId[]) => ids.length > 1 ? `${ids.slice(0, -1).map(label).join(', ')} or ${label(ids[ids.length - 1])}` : label(ids[0]);
+  return ins.map(f => [label(f), or(targetsFor(f))]);
+}
+
 export function formatsHtml(): string {
   const card = (title: string, pairs: Array<[string, string]>, note: string) =>
     `<div class="fmt"><h3>${esc(title)}</h3><ul class="pairs">${pairs.map(([a, b]) => `<li><b>${esc(a)}</b> to ${esc(b)}</li>`).join('')}</ul><p>${esc(note)}</p></div>`;
@@ -82,8 +89,8 @@ export function formatsHtml(): string {
     card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF', 'MP4, WebM or GIF']], 'Resize, set quality, keep transparency where the format allows it. HEIC and TIFF are read; HEIC is not written.'),
     card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
     card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
-    card('Documents', [['TXT', 'PDF'], ['PDF', 'TXT'], ['Markdown', 'HTML or PDF'], ['HTML', 'PDF'], ['DOCX', 'TXT']], 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
-    card('Data', [['JSON', 'CSV, YAML or XML'], ['CSV', 'JSON or XLSX'], ['YAML', 'JSON'], ['XML', 'JSON'], ['XLSX', 'CSV']], 'Nested data, encodings, worksheets and spreadsheet formulas are handled explicitly.'),
+    card('Documents', routes('document'), 'PDFs have real, selectable text. Scanned PDFs need OCR, which is not done.'),
+    card('Data', routes('data'), 'Nested data, encodings, worksheets, dates and spreadsheet formulas are handled explicitly.'),
   ].join('');
 }
 

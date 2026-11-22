@@ -9,7 +9,7 @@ export type FormatId =
   | 'mp3' | 'wav' | 'flac' | 'aac' | 'm4a' | 'ogg'
   | 'mp4' | 'webm' | 'mov' | 'mkv'
   | 'txt' | 'pdf' | 'md' | 'html' | 'docx'
-  | 'json' | 'csv' | 'yaml' | 'xml' | 'xlsx';
+  | 'json' | 'csv' | 'tsv' | 'yaml' | 'xml' | 'xlsx';
 
 export interface Format {
   id: FormatId;
@@ -57,7 +57,8 @@ export const FORMATS: Readonly<Record<FormatId, Format>> = {
   docx: f('docx', 'DOCX', 'docx', ['docx'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document'),
 
   json: f('json', 'JSON', 'json', ['json', 'geojson'], 'application/json', 'data'),
-  csv: f('csv', 'CSV', 'csv', ['csv', 'tsv'], 'text/csv', 'data'),
+  csv: f('csv', 'CSV', 'csv', ['csv'], 'text/csv', 'data'),
+  tsv: f('tsv', 'TSV', 'tsv', ['tsv', 'tab'], 'text/tab-separated-values', 'data', 'Tab-separated values.'),
   yaml: f('yaml', 'YAML', 'yaml', ['yaml', 'yml'], 'application/yaml', 'data'),
   xml: f('xml', 'XML', 'xml', ['xml'], 'application/xml', 'data'),
   xlsx: f('xlsx', 'XLSX', 'xlsx', ['xlsx'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'data'),
@@ -89,11 +90,12 @@ const DOCUMENT_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   docx: ['txt'],
 };
 const DATA_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
-  json: ['csv', 'yaml', 'xml'],
-  csv: ['json', 'xlsx'],
+  json: ['csv', 'xlsx', 'tsv', 'yaml', 'xml'],
+  csv: ['json', 'xlsx', 'tsv'],
+  tsv: ['json', 'xlsx', 'csv'],
   yaml: ['json'],
   xml: ['json'],
-  xlsx: ['csv'],
+  xlsx: ['csv', 'json', 'tsv'],
 };
 
 /** The category a file is converted as, after inspection (an MP4 with no video track is audio). */

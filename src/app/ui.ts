@@ -264,7 +264,7 @@ export class App {
     if (job.format === 'xlsx' && job.sheets && job.sheets.length > 1) {
       const sel = h('select', { 'aria-label': `Worksheet to convert from ${job.name}`, 'data-key': 'sheet', disabled: job.status === 'converting' }) as HTMLSelectElement;
       sel.append(h('option', { value: 'first', selected: job.sheet === 'first' }, `First sheet (${job.sheets[0]})`));
-      sel.append(h('option', { value: 'all', selected: job.sheet === 'all' }, 'All sheets, one CSV each'));
+      sel.append(h('option', { value: 'all', selected: job.sheet === 'all' }, job.target === 'json' ? 'All sheets, in one JSON file' : `All sheets, one ${FORMATS[job.target ?? 'csv'].label} each`));
       for (const s of job.sheets.slice(1)) sel.append(h('option', { value: s, selected: job.sheet === s }, s));
       sel.addEventListener('change', () => { job.sheet = sel.value; if (job.status === 'done') job.status = 'ready'; this.update(job); });
       side.append(h('label', { class: 'job-target' }, 'Sheet', sel));
@@ -445,13 +445,13 @@ export class App {
         select('CSV separator (output)', d.delimiter, [[',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab']], v => { d.delimiter = v as typeof d.delimiter; }),
         select('CSV separator (input)', d.inputDelimiter, [['auto', 'Detect'], [',', 'Comma'], [';', 'Semicolon'], ['\t', 'Tab'], ['|', 'Pipe']], v => { d.inputDelimiter = v as typeof d.inputDelimiter; }),
         select('Lists inside JSON records', d.arrays, [['json', 'Keep as JSON text in one cell'], ['columns', 'Spread into numbered columns']], v => { d.arrays = v as typeof d.arrays; }),
-        select('Spreadsheet values', d.values, [['formatted', 'As shown in Excel'], ['raw', 'Underlying values']], v => { d.values = v as typeof d.values; }),
-        check('First CSV row is the header', d.header, v => { d.header = v; }),
-        check('Detect numbers and true/false in CSV', d.detectTypes, v => { d.detectTypes = v; }),
+        select('Spreadsheet values (to CSV or TSV)', d.values, [['formatted', 'As shown in Excel'], ['raw', 'Underlying values']], v => { d.values = v as typeof d.values; }),
+        check('First row is the header (CSV, TSV, spreadsheets)', d.header, v => { d.header = v; }),
+        check('Detect numbers and true/false in CSV and TSV', d.detectTypes, v => { d.detectTypes = v; }),
         check('Rebuild nested objects from dotted column names', d.nest, v => { d.nest = v; }),
-        check('Add a byte order mark to CSV (helps Excel read UTF-8)', d.bom, v => { d.bom = v; }),
-        check('Protect CSV from spreadsheet formulas', d.neutralizeFormulas, v => { d.neutralizeFormulas = v; }));
-      box.lastElementChild!.append(h('p', { class: 'note' }, 'Formula protection puts an apostrophe before text cells that start with = + - or @, so opening the CSV in a spreadsheet cannot run them. Numbers with leading zeros, such as ZIP codes, always stay text.'));
+        check('Add a byte order mark to CSV and TSV (helps Excel read UTF-8)', d.bom, v => { d.bom = v; }),
+        check('Protect CSV and TSV from spreadsheet formulas', d.neutralizeFormulas, v => { d.neutralizeFormulas = v; }));
+      box.lastElementChild!.append(h('p', { class: 'note' }, 'Formula protection puts an apostrophe before text cells that start with = + - or @ (plain numbers such as -5 are left alone), so opening the CSV or TSV in a spreadsheet cannot run them; the result says how many cells it changed. XLSX results never need it: their text cells cannot become formulas. Numbers with leading zeros, such as ZIP codes, always stay text. JSON from a spreadsheet keeps numbers, true/false and empty cells, and writes dates as ISO 8601 text.'));
     }
   }
 }

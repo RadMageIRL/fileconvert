@@ -401,7 +401,7 @@ export const PAGES: readonly ConversionPage[] = [
       'The top level should be an array of objects, or an object holding one.',
       'Files up to 200 MB, nested up to 500 levels.',
     ],
-    related: ['csv-to-json', 'xlsx-to-csv', 'pdf-to-text'],
+    related: ['csv-to-json', 'json-to-xlsx', 'xlsx-to-csv'],
     keywords: ['spreadsheet', 'excel', 'table', 'api', 'export'],
   },
   {
@@ -438,8 +438,47 @@ export const PAGES: readonly ConversionPage[] = [
       'A formula saved without a result is noted.',
       'Workbooks up to 200 MB.',
     ],
-    related: ['csv-to-json', 'json-to-csv'],
+    related: ['xlsx-to-json', 'csv-to-json', 'json-to-csv'],
     keywords: ['excel', 'spreadsheet', 'workbook', 'sheet'],
+  },
+  {
+    slug: 'xlsx-to-json', from: 'xlsx', to: 'json', category: 'data',
+    blurb: 'Excel sheets as typed JSON',
+    description: 'Convert Excel XLSX sheets to JSON with numbers, true/false and empty cells kept as JSON types and dates as ISO 8601 text. Done in your browser.',
+    intro: 'Turn a spreadsheet into JSON for code, APIs and configuration: each row becomes an object named by the header row, with real numbers and booleans rather than text.',
+    details: [
+      'Numbers keep the exact value Excel stores, TRUE and FALSE become true and false, and empty cells become null.',
+      'Cells formatted as dates become ISO 8601 text (2026-11-22, with the time when there is one). Excel dates have no time zone, so none is added.',
+      'Choose the first sheet, a named sheet, or all sheets in one JSON object keyed by sheet name.',
+      'Dotted headings (address.city) can rebuild nested objects, set in Data settings. Without a header row, each row becomes a list.',
+      'Emoji and other characters are kept exactly, including in workbooks written by Python tools such as pandas.',
+    ],
+    limits: [
+      'Formulas give their saved results; a formula saved without a result becomes null, with a note.',
+      'Formatting, charts and comments are not part of JSON, and merged cells keep their value in the first cell.',
+      'Workbooks up to 200 MB.',
+    ],
+    related: ['json-to-xlsx', 'xlsx-to-csv', 'csv-to-json', 'json-to-csv'],
+    keywords: ['excel', 'spreadsheet', 'workbook', 'sheet', 'api'],
+  },
+  {
+    slug: 'json-to-xlsx', from: 'json', to: 'xlsx', category: 'data',
+    blurb: 'Records as an Excel workbook',
+    description: 'Convert JSON arrays to Excel XLSX workbooks with typed number and true/false cells, one sheet per list, and text that never runs as a formula.',
+    intro: 'A JSON list of records becomes a worksheet you can sort, filter and share: one row per record and one column per field.',
+    details: [
+      'Numbers and true/false become typed cells. Text, including dates written as text, stays text.',
+      'Nested objects become dotted columns (address.city); lists stay JSON text in one cell or spread into numbered columns, set in Data settings.',
+      'An object whose values are all lists becomes one sheet per list, named after its key.',
+      'Text that starts with = is stored as text, so opening the workbook can never run it as a formula.',
+    ],
+    limits: [
+      'Integers larger than Excel can hold exactly are stored as text, so no digit is lost.',
+      'Records with different fields share one column per field; a missing field is an empty cell.',
+      'Up to 1,048,576 rows and 16,384 columns per sheet, the Excel limits.',
+    ],
+    related: ['xlsx-to-json', 'json-to-csv', 'csv-to-json'],
+    keywords: ['excel', 'spreadsheet', 'workbook', 'table', 'api', 'export'],
   },
 ];
 

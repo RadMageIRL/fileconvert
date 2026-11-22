@@ -20,7 +20,7 @@ test('the catalog lists every page, and the search narrows it as you type', asyn
   await search.fill('Convert MP4 to MP3');
   await expect(visible(page)).toHaveText(['MP4 to MP3']);
   await search.fill('excel');
-  await expect(visible(page)).toHaveText(['JSON to CSV', 'CSV to JSON', 'XLSX to CSV']);
+  await expect(visible(page)).toHaveText(['JSON to CSV', 'CSV to JSON', 'XLSX to CSV', 'XLSX to JSON', 'JSON to XLSX']);
   await search.fill('');
   await expect(page.locator('.cat-item:not([hidden])')).toHaveCount(PAGES.length);
   await expect(page.locator('#catalog-status')).toHaveText('');
@@ -67,5 +67,5 @@ test('on a page, its own entry in the catalog is marked as the current page', as
   await expect(current).toHaveCount(1);
   await expect(current.locator('.cat-name')).toHaveText('CSV to JSON');
   await page.getByRole('searchbox', { name: 'Search conversions' }).fill('json');
-  await expect(visible(page)).toHaveText(['JSON to CSV', 'CSV to JSON']);
+  await expect(visible(page)).toHaveText(['JSON to CSV', 'CSV to JSON', 'XLSX to JSON', 'JSON to XLSX']);
 });

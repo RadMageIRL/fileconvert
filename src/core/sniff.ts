@@ -26,6 +26,9 @@ const starts = (b: Uint8Array, sig: number[], at = 0) => sig.every((v, i) => b[a
 
 const RAW_EXTS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'dng', 'orf', 'rw2', 'raf', 'pef', 'srw', 'x3f', '3fr', 'erf', 'kdc', 'mrw', 'iiq'];
 
+/** Text formats told apart by the file name, since their bytes can look alike. */
+const TEXT_FORMATS: FormatId[] = ['txt', 'md', 'html', 'json', 'csv', 'tsv', 'yaml', 'xml'];
+
 function unsupported(label: string, reason: string): Sniffed {
   return { format: null, label, reason };
 }
@@ -169,7 +172,7 @@ export function looksLikeText(head: Uint8Array): boolean {
 function sniffText(head: Uint8Array, ext: string, size: number): Sniffed {
   if (size === 0) {
     const byExt = formatByExtension('x.' + ext);
-    if (byExt && ['txt', 'md', 'html', 'json', 'csv', 'yaml', 'xml'].includes(byExt)) return { format: byExt, label: FORMATS[byExt].label + ' file (empty)' };
+    if (byExt && TEXT_FORMATS.includes(byExt)) return { format: byExt, label: FORMATS[byExt].label + ' file (empty)' };
     return { format: 'txt', label: 'Empty text file' };
   }
   let text = '';
@@ -184,7 +187,7 @@ function sniffText(head: Uint8Array, ext: string, size: number): Sniffed {
   }
   if (ext === 'rtf' || t.startsWith('{\\rtf')) return unsupported('Rich Text document', 'RTF documents are not supported.');
   const byExt = formatByExtension('x.' + ext);
-  if (byExt && ['txt', 'md', 'html', 'json', 'csv', 'yaml', 'xml'].includes(byExt)) {
+  if (byExt && TEXT_FORMATS.includes(byExt)) {
     return { format: byExt, label: FORMATS[byExt].label + ' file' };
   }
   if (/^(<!doctype html|<html[\s>]|<head[\s>]|<body[\s>])/.test(t)) return { format: 'html', label: 'HTML page' };
@@ -260,8 +263,7 @@ export function sniff(head: Uint8Array, tail: Uint8Array, size: number, name: st
   const claimed = formatByExtension(name);
   if (result.format && claimed && claimed !== result.format) {
     const family = (x: FormatId) => (x === 'm4a' || x === 'mp4' || x === 'mov') ? 'iso' : (x === 'mkv' || x === 'webm') ? 'mkv' : x;
-    const textish: FormatId[] = ['txt', 'md', 'html', 'json', 'csv', 'yaml', 'xml'];
-    const both = textish.includes(claimed) && textish.includes(result.format);
+    const both = TEXT_FORMATS.includes(claimed) && TEXT_FORMATS.includes(result.format);
     if (family(claimed) !== family(result.format) && !both) {
       result.mismatch = `Named .${ext} but contains ${result.label} data. It will be converted as ${FORMATS[result.format].label}.`;
     }

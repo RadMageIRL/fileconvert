@@ -16,11 +16,11 @@ describe('the page list', () => {
     expect(pageProblems()).toEqual([]);
   });
 
-  test('holds the 22 pages planned for the existing conversions', () => {
+  test('holds the planned pages whose conversions are in place', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
       'avif-to-jpg', 'csv-to-json', 'flac-to-mp3', 'gif-to-mp4', 'heic-to-jpg', 'heic-to-png', 'jpg-to-png', 'json-to-csv',
-      'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text', 'png-to-jpg',
-      'png-to-webp', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv',
+      'json-to-xlsx', 'm4a-to-mp3', 'markdown-to-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'pdf-to-text',
+      'png-to-jpg', 'png-to-webp', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-jpg', 'webp-to-png', 'xlsx-to-csv', 'xlsx-to-json',
     ]);
   });
 

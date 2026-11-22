@@ -340,6 +340,38 @@ ws2['B3'].data_type = 's'  # text that starts with =, not a formula
 ws2.append(['Doubled', '=B2*2'])
 wb.save(os.path.join(DAT, 'workbook.xlsx'))
 
+# ---------------------------------------------------------------- workbooks with every kind of value (v0.2.0)
+from openpyxl.utils.datetime import CALENDAR_MAC_1904  # noqa: E402
+
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = 'Types'
+ws.append(['Text', 'Number', 'Date', 'DateTime', 'Time', 'Percent', 'Flag', 'Empty', 'Error', 'Big'])
+ws.append(['Zoë 日本 \U0001F600 مرحبا', 0.1 + 0.2, datetime.date(2026, 11, 22), datetime.datetime(2026, 11, 22, 14, 30, 5), datetime.time(14, 30), 0.25, True, None, '#DIV/0!', 9007199254740993])
+ws.append(['=not a formula', -1234.5678, datetime.date(1900, 3, 1), datetime.datetime(2000, 2, 29, 23, 59, 59), datetime.time(0, 0, 1), 1.5, False, None, None, 12345678901234567890])
+ws.append([None] * 10)
+ws.append(['last', 1e21, None, None, None, None, None, None, None, None])
+for r in (2, 3):
+    ws.cell(r, 3).number_format = 'yyyy-mm-dd'
+    ws.cell(r, 4).number_format = 'yyyy-mm-dd hh:mm:ss'
+    ws.cell(r, 5).number_format = 'hh:mm:ss'
+    ws.cell(r, 6).number_format = '0%'
+ws['A3'].data_type = 's'
+ws['I2'].data_type = 'e'
+ws2 = wb.create_sheet('Second')
+ws2.append(['a', 'b'])
+ws2.append([1, 2])
+wb.save(os.path.join(DAT, 'types.xlsx'))
+
+wb = openpyxl.Workbook()
+wb.epoch = CALENDAR_MAC_1904
+ws = wb.active
+ws.title = 'Mac'
+ws.append(['When'])
+ws.append([datetime.date(2026, 11, 22)])
+ws['A2'].number_format = 'yyyy-mm-dd'
+wb.save(os.path.join(DAT, 'dates1904.xlsx'))
+
 # ---------------------------------------------------------------- hostile inputs
 
 write(os.path.join(BAD, 'xxe.xml'), '<?xml version="1.0"?>\n<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n<r>&x;</r>\n', 'w')

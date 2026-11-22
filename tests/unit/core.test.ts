@@ -87,11 +87,12 @@ describe('format registry', () => {
     expect(targetsFor('md')).toEqual(['html', 'pdf']);
     expect(targetsFor('html')).toEqual(['pdf']);
     expect(targetsFor('docx')).toEqual(['txt']);
-    expect(targetsFor('json')).toEqual(['csv', 'yaml', 'xml']);
-    expect(targetsFor('csv')).toEqual(['json', 'xlsx']);
+    expect(targetsFor('json')).toEqual(['csv', 'xlsx', 'tsv', 'yaml', 'xml']);
+    expect(targetsFor('csv')).toEqual(['json', 'xlsx', 'tsv']);
+    expect(targetsFor('tsv')).toEqual(['json', 'xlsx', 'csv']);
     expect(targetsFor('yaml')).toEqual(['json']);
     expect(targetsFor('xml')).toEqual(['json']);
-    expect(targetsFor('xlsx')).toEqual(['csv']);
+    expect(targetsFor('xlsx')).toEqual(['csv', 'json', 'tsv']);
   });
 
   test('inspection changes what is offered', () => {
