@@ -4,7 +4,8 @@
 
 Prints JSON. csv and tsv use Python's csv module; json and jsonl the json module; xlsx openpyxl (formulas and their
 saved results, number formats, merged cells, sheet states); docx python-docx (paragraph styles, list levels, run
-formatting, links, tables and pictures). None of them shares code with the browser engines.
+formatting, links, tables and pictures); md mistune (CommonMark with GFM tables). None of them shares code with the
+browser engines.
 """
 
 import csv
@@ -92,6 +93,75 @@ def read_docx(path):
     return {'blocks': blocks, 'pictures': pictures, 'title': core.title, 'author': core.author}
 
 
+def read_md(path):
+    """Markdown parsed by mistune (CommonMark with GFM tables and strikethrough), summarized from its syntax tree."""
+    import mistune
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    tree = mistune.create_markdown(renderer='ast', plugins=['table', 'strikethrough'])(text)
+    out = {'headings': [], 'items': [], 'tables': [], 'code': [], 'quotes': [], 'links': [], 'images': [], 'strong': [], 'em': [], 'strike': [], 'codespans': [], 'html': [], 'breaks': 0, 'rules': 0}
+
+    def plain(nodes):
+        s = ''
+        for n in nodes or []:
+            t = n['type']
+            if t in ('text', 'codespan', 'inline_html'):
+                s += n.get('raw', '')
+            elif t in ('linebreak', 'softbreak'):
+                s += '\n' if t == 'linebreak' else ' '
+            elif t == 'image':
+                s += ''
+            else:
+                s += plain(n.get('children'))
+        return s
+
+    def walk(nodes, depth=0, ordered=None):
+        for n in nodes or []:
+            t = n['type']
+            kids = n.get('children')
+            if t == 'heading':
+                out['headings'].append([n['attrs']['level'], plain(kids)])
+            elif t == 'list':
+                walk(kids, depth + 1, n['attrs'].get('ordered'))
+                continue
+            elif t == 'list_item':
+                first = next((k for k in kids or [] if k['type'] in ('paragraph', 'block_text')), None)
+                out['items'].append({'depth': depth, 'ordered': bool(ordered), 'text': plain(first.get('children')) if first else ''})
+            elif t == 'table':
+                head = next(k for k in kids if k['type'] == 'table_head')
+                body = next((k for k in kids if k['type'] == 'table_body'), {'children': []})
+                out['tables'].append({'head': [plain(c.get('children')) for c in head['children']], 'align': [c['attrs'].get('align') for c in head['children']],
+                                      'rows': [[plain(c.get('children')) for c in r['children']] for r in body['children']]})
+                continue
+            elif t == 'block_code':
+                out['code'].append({'info': (n.get('attrs') or {}).get('info'), 'text': n.get('raw', '')})
+            elif t == 'block_quote':
+                out['quotes'].append(plain([{'type': 'x', 'children': [p for p in kids]}]))
+            elif t == 'link':
+                out['links'].append({'url': n['attrs']['url'], 'text': plain(kids)})
+            elif t == 'image':
+                out['images'].append({'url': n['attrs']['url'][:40], 'alt': plain(kids)})
+            elif t == 'strong':
+                out['strong'].append(plain(kids))
+            elif t == 'emphasis':
+                out['em'].append(plain(kids))
+            elif t == 'strikethrough':
+                out['strike'].append(plain(kids))
+            elif t == 'codespan':
+                out['codespans'].append(n.get('raw', ''))
+            elif t in ('inline_html', 'block_html'):
+                out['html'].append(n.get('raw', ''))
+            elif t == 'linebreak':
+                out['breaks'] += 1
+            elif t == 'thematic_break':
+                out['rules'] += 1
+            walk(kids, depth, ordered)
+
+    walk(tree)
+    out['text'] = text
+    return out
+
+
 kind, path = sys.argv[1], sys.argv[2]
 sys.stdout.reconfigure(encoding='utf-8')
 if kind == 'csv':
@@ -110,6 +180,8 @@ elif kind == 'xlsx':
     result = read_xlsx(path)
 elif kind == 'docx':
     result = read_docx(path)
+elif kind == 'md':
+    result = read_md(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

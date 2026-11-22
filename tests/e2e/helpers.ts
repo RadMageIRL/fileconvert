@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, type Download, type Page, type TestInfo } from '@playwright/test';
 
 export const FIX = resolve('tests', 'fixtures');
@@ -45,11 +46,12 @@ export async function cspViolations(page: Page): Promise<string[]> {
 
 /**
  * Chrome reports a violation for every inline event handler or style it parses, even into an inert
- * document that never runs them (Firefox does not). Those reports are expected when hostile HTML is parsed
- * for sanitizing; anything else (a script, a connection, a worker, an image from elsewhere) is not.
+ * document that never runs them (Firefox does not), and for a <base> element in such a document. Those
+ * reports are expected when hostile HTML is parsed for sanitizing; anything else (a script, a connection, a
+ * worker, an image from elsewhere) is not.
  */
 export async function unexpectedViolations(page: Page): Promise<string[]> {
-  return (await cspViolations(page)).filter(v => !/^(script-src-attr|style-src-attr|style-src-elem) inline$/.test(v));
+  return (await cspViolations(page)).filter(v => !/^((script-src-attr|style-src-attr|style-src-elem) inline|base-uri .*)$/.test(v));
 }
 
 export interface FilePayload { name: string; mimeType: string; buffer: Buffer }
@@ -181,6 +183,18 @@ export function writeTemp(dir: string, name: string, data: Uint8Array): string {
 }
 
 /** Reads a document or data result with Python's own readers (tests/e2e/readers.py), never with FileConvert's code. */
-export function pyRead<T = unknown>(kind: 'csv' | 'tsv' | 'json' | 'jsonl' | 'xlsx' | 'docx', path: string): T {
+export function pyRead<T = unknown>(kind: 'csv' | 'tsv' | 'json' | 'jsonl' | 'xlsx' | 'docx' | 'md', path: string): T {
   return JSON.parse(execFileSync(PYTHON, ['-I', resolve('tests/e2e/readers.py'), kind, path], { encoding: 'utf8', maxBuffer: 64 << 20 }));
+}
+
+/** LibreOffice, an independent office suite, for reading DOCX results: it converts a file and returns the new path. */
+export function libreoffice(path: string, to: string): string {
+  const soffice = process.env.FILECONVERT_SOFFICE || (existsSync('C:/Program Files/LibreOffice/program/soffice.exe') ? 'C:/Program Files/LibreOffice/program/soffice.exe' : 'soffice');
+  const out = tempDir();
+  // A private profile, so a LibreOffice the user has open is not disturbed.
+  const profile = pathToFileURL(tempDir()).href;
+  execFileSync(soffice, [`-env:UserInstallation=${profile}`, '--headless', '--convert-to', to, '--outdir', out, path], { stdio: 'pipe', timeout: 180_000 });
+  const made = readdirSync(out);
+  if (made.length !== 1) throw new Error(`LibreOffice did not convert ${path}`);
+  return join(out, made[0]);
 }

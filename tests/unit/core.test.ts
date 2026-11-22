@@ -91,9 +91,9 @@ describe('format registry', () => {
   test('the documents and data conversions are exactly the agreed ones', () => {
     expect(targetsFor('txt')).toEqual(['pdf']);
     expect(targetsFor('pdf')).toEqual(['txt']);
-    expect(targetsFor('md')).toEqual(['html', 'pdf']);
-    expect(targetsFor('html')).toEqual(['pdf']);
-    expect(targetsFor('docx')).toEqual(['txt']);
+    expect(targetsFor('md')).toEqual(['html', 'pdf', 'docx']);
+    expect(targetsFor('html')).toEqual(['pdf', 'md']);
+    expect(targetsFor('docx')).toEqual(['txt', 'html', 'md']);
     expect(targetsFor('json')).toEqual(['csv', 'xlsx', 'tsv', 'jsonl', 'yaml', 'xml']);
     expect(targetsFor('jsonl')).toEqual(['json', 'csv', 'xlsx', 'tsv']);
     expect(targetsFor('csv')).toEqual(['json', 'xlsx', 'tsv', 'jsonl']);

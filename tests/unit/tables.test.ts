@@ -252,7 +252,7 @@ describe('XLS and ODS', () => {
       // Only attributes the format has: SheetJS also writes a "level" attribute that openpyxl rejects.
       const { unzipSync, strFromU8 } = await import('fflate');
       const sheetXml = strFromU8(unzipSync(r.outputs[0].bytes)['xl/worksheets/sheet1.xml']);
-      expect(sheetXml).not.toMatch(/<col [^>]*level=/);
+      expect(sheetXml).not.toMatch(/<col [^>]*\blevel=/);
       if (kind === 'xls') expect(wb.Workbook?.Sheets?.[2]?.Hidden).toBe(1);
       const notes = r.warnings.join(' ');
       expect(notes).toMatch(/^Kept: 3 sheets, /);

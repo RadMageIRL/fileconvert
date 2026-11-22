@@ -9,7 +9,7 @@ export interface Settings {
   image: { quality: number; resize: ResizeMode; background: string; ico: string; tiffCompression: 'none' | 'lzw'; tiffPages: 'all' | 'first'; svgSize: string };
   audio: { bitrate: number; sampleRate: number; channels: number };
   video: { maxHeight: number; quality: 'original' | QualityLevel; removeAudio: boolean; gifWidth: number; gifFps: number };
-  document: { pageSize: 'LETTER' | 'A4'; fontSize: number };
+  document: { pageSize: 'LETTER' | 'A4'; fontSize: number; mdPictures: 'embed' | 'describe' };
   data: Omit<DataOptions, 'sheet'>;
 }
 
@@ -25,7 +25,7 @@ export function defaultSettings(): Settings {
     image: { quality: 85, resize: { mode: 'none' }, background: '#ffffff', ico: 'favicon', tiffCompression: 'none', tiffPages: 'all', svgSize: 'original' },
     audio: { bitrate: 0, sampleRate: 0, channels: 0 },
     video: { maxHeight: 0, quality: 'original', removeAudio: false, gifWidth: 480, gifFps: 10 },
-    document: { pageSize: usLetter() ? 'LETTER' : 'A4', fontSize: 10 },
+    document: { pageSize: usLetter() ? 'LETTER' : 'A4', fontSize: 10, mdPictures: 'embed' },
     data,
   };
 }
@@ -71,6 +71,7 @@ export function loadSettings(): Settings {
     s.video.gifFps = oneOf(s.video.gifFps, [5, 10, 15, 20], 10);
     s.document.pageSize = oneOf(s.document.pageSize, ['LETTER', 'A4'] as const, base.document.pageSize);
     s.document.fontSize = oneOf(s.document.fontSize, [9, 10, 11, 12], 10);
+    s.document.mdPictures = oneOf(s.document.mdPictures, ['embed', 'describe'] as const, 'embed');
     s.data.delimiter = oneOf(s.data.delimiter, [',', ';', '\t'] as const, ',');
     s.data.inputDelimiter = oneOf(s.data.inputDelimiter, ['auto', ',', ';', '\t', '|'] as const, 'auto');
     s.data.arrays = oneOf(s.data.arrays, ['json', 'columns'] as const, 'json');

@@ -238,14 +238,63 @@ p = d.add_paragraph('A line')
 p.add_run().add_break(WD_BREAK.LINE)
 p.add_run('broken in two.')
 d.add_heading('Lists', level=2)
-d.add_paragraph('Bullet one', style='List Bullet')
-d.add_paragraph('Bullet two', style='List Bullet')
-d.add_paragraph('Nested bullet', style='List Bullet 2')
-d.add_paragraph('Deeper bullet', style='List Bullet 3')
-d.add_paragraph('Bullet three', style='List Bullet')
-d.add_paragraph('Number one', style='List Number')
-d.add_paragraph('Number two', style='List Number')
-d.add_paragraph('Nested number', style='List Number 2')
+
+
+def add_list(abstract_id, ordered):
+    """A list definition with nine levels, as Word writes one: bullets or numbers, indented by level."""
+    numbering = d.part.numbering_part.element
+    ab = OxmlElement('w:abstractNum')
+    ab.set(qn('w:abstractNumId'), str(abstract_id))
+    for lvl in range(9):
+        el = OxmlElement('w:lvl')
+        el.set(qn('w:ilvl'), str(lvl))
+        for tag, val in (('w:start', '1'), ('w:numFmt', 'decimal' if ordered else 'bullet'), ('w:lvlText', f'%{lvl + 1}.' if ordered else '\u2022'), ('w:lvlJc', 'left')):
+            x = OxmlElement(tag)
+            x.set(qn('w:val'), val)
+            el.append(x)
+        ppr = OxmlElement('w:pPr')
+        ind = OxmlElement('w:ind')
+        ind.set(qn('w:left'), str(720 * (lvl + 1)))
+        ind.set(qn('w:hanging'), '360')
+        ppr.append(ind)
+        el.append(ppr)
+        ab.append(el)
+    numbering.insert(0, ab)
+    num = OxmlElement('w:num')
+    num.set(qn('w:numId'), str(abstract_id))
+    ref = OxmlElement('w:abstractNumId')
+    ref.set(qn('w:val'), str(abstract_id))
+    num.append(ref)
+    numbering.append(num)
+    return abstract_id
+
+
+BULLETS = add_list(90, False)
+NUMBERS = add_list(91, True)
+
+
+def list_item(text, num_id, level):
+    """A list paragraph at a list level, as Word writes it when Tab indents an item: List Paragraph, numPr ilvl N."""
+    p = d.add_paragraph(text, style='List Paragraph')
+    ppr = p._p.get_or_add_pPr()
+    numpr = OxmlElement('w:numPr')
+    ilvl = OxmlElement('w:ilvl')
+    ilvl.set(qn('w:val'), str(level))
+    num = OxmlElement('w:numId')
+    num.set(qn('w:val'), str(num_id))
+    numpr.append(ilvl)
+    numpr.append(num)
+    ppr.append(numpr)
+
+
+list_item('Bullet one', BULLETS, 0)
+list_item('Bullet two', BULLETS, 0)
+list_item('Nested bullet', BULLETS, 1)
+list_item('Deeper bullet', BULLETS, 2)
+list_item('Bullet three', BULLETS, 0)
+list_item('Number one', NUMBERS, 0)
+list_item('Number two', NUMBERS, 0)
+list_item('Nested number', NUMBERS, 1)
 d.add_heading('Quote and code', level=2)
 d.add_paragraph('Quoted words from someone.', style='Quote')
 d.add_paragraph('An intense quote.', style='Intense Quote')

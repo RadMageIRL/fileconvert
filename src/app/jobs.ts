@@ -532,6 +532,15 @@ export class Queue {
       job.warnings = r.warnings; job.summary = r.summary;
       return asBlob(r.bytes, 'pdf');
     }
+    if (from === 'docx' && (to === 'html' || to === 'md')) {
+      const fragment = await this.engines.document.run<{ html: string; warnings: string[]; pictures: number }>('docxToHtml', { file: job.file }, { onProgress, signal });
+      if (signal.aborted) throw new CanceledError();
+      onProgress({ stage: to === 'md' ? 'Writing Markdown' : 'Writing the page' });
+      const markup = await import('../engines/document/markup');
+      const r = to === 'md' ? await markup.docxHtmlToMarkdown(fragment.html, s.document.mdPictures, fragment.warnings) : markup.docxHtmlToPage(fragment.html, base, fragment.warnings);
+      job.warnings = r.warnings; job.summary = r.summary;
+      return asBlob(r.bytes, FORMATS[to].ext);
+    }
     if (from === 'docx' && to === 'txt') {
       const r = await this.engines.document.run<{ bytes: Uint8Array; warnings: string[]; summary: string }>('docxToText', { file: job.file }, { onProgress, signal });
       job.warnings = r.warnings; job.summary = r.summary;
@@ -557,6 +566,19 @@ export class Queue {
       const r = markup.markdownToHtml(bytes, base);
       job.warnings = r.warnings; job.summary = r.summary;
       return asBlob(r.bytes, 'html');
+    }
+    if (from === 'html' && to === 'md') {
+      const r = await markup.htmlToMarkdown(bytes, s.document.mdPictures);
+      job.warnings = r.warnings; job.summary = r.summary;
+      return asBlob(r.bytes, 'md');
+    }
+    if (from === 'md' && to === 'docx') {
+      onProgress({ stage: 'Reading the document' });
+      const req = markup.markdownToDocxRequest(bytes, base);
+      const r = await this.engines.document.run<{ bytes: Uint8Array; warnings: string[] }>('renderDocx', { html: req.html, title: req.title, pageSize: s.document.pageSize }, { onProgress, signal });
+      job.warnings = [...req.warnings, ...r.warnings];
+      job.summary = 'Word document';
+      return asBlob(r.bytes, 'docx');
     }
     if ((from === 'md' || from === 'html') && to === 'pdf') {
       onProgress({ stage: 'Reading the document' });

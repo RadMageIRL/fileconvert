@@ -1,5 +1,6 @@
 import { buffersOf, serve } from '../core/rpc';
-import { docxToText } from '../engines/document/docx';
+import { docxToHtml, docxToText } from '../engines/document/docx';
+import { renderDocx } from '../engines/document/docxwrite';
 import type { FontFile } from '../engines/document/fonts';
 import { missingIn, renderPdf } from '../engines/document/pdfwrite';
 import { textToPdf, type PageOptions } from '../engines/document/text-to-pdf';
@@ -15,6 +16,15 @@ serve({
     const missing = await missingIn(p.text, 'NotoSans-Regular.ttf');
     const bytes = await renderPdf(p.doc, p.fonts);
     return { result: { bytes, missing }, transfer: buffersOf(bytes) };
+  },
+  async docxToHtml(p: { file: Blob }, progress) {
+    progress({ stage: 'Reading the document' });
+    return { result: await docxToHtml(new Uint8Array(await p.file.arrayBuffer())) };
+  },
+  async renderDocx(p: { html: string; title: string; pageSize: 'LETTER' | 'A4' }, progress) {
+    progress({ stage: 'Writing the Word document' });
+    const r = await renderDocx(p.html, p.title, p.pageSize);
+    return { result: r, transfer: buffersOf(r.bytes) };
   },
   async docxToText(p: { file: Blob }, progress) {
     progress({ stage: 'Reading the document' });

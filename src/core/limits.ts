@@ -30,6 +30,8 @@ export const LIMITS = {
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,
+  /** Pictures carried inside one HTML or Markdown result from a DOCX, as data URLs. */
+  docxPictureBytes: 100 * MB,
   /** Data files, and how far nested structures may go. */
   dataBytes: 200 * MB,
   dataDepth: 500,

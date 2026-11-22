@@ -35,7 +35,28 @@ declare module 'pdfmake/build/pdfmake.js' {
 
 declare module 'mammoth' {
   export function convertToHtml(o: { arrayBuffer: ArrayBuffer }, options?: Record<string, unknown>): Promise<{ value: string; messages: Array<{ type: string; message: string }> }>;
-  export const images: { imgElement(f: (image: unknown) => Promise<Record<string, string>>): unknown };
+  export interface MammothImage { contentType?: string; altText?: string; read(encoding: 'base64'): Promise<string> }
+  export const images: { imgElement(f: (image: MammothImage) => Promise<Record<string, string>>): unknown };
+  export interface MammothElement { type: string; children?: MammothElement[]; styleName?: string | null; styleId?: string | null; font?: string | null; value?: string; [k: string]: unknown }
+  export const transforms: { paragraph(f: (p: MammothElement) => MammothElement): (doc: unknown) => unknown };
+}
+
+declare module 'turndown' {
+  interface Rule { filter: string | string[] | ((node: HTMLElement, options: Record<string, unknown>) => boolean); replacement: (content: string, node: HTMLElement, options: Record<string, unknown>) => string }
+  export default class TurndownService {
+    constructor(options?: Record<string, unknown>);
+    use(plugin: (service: TurndownService) => void): this;
+    addRule(key: string, rule: Rule): this;
+    keep(filter: string | string[] | ((node: HTMLElement) => boolean)): this;
+    remove(filter: string | string[] | ((node: HTMLElement) => boolean)): this;
+    turndown(html: string | Node): string;
+    escape(text: string): string;
+  }
+}
+
+declare module '@joplin/turndown-plugin-gfm' {
+  import type TurndownService from 'turndown';
+  export function gfm(service: TurndownService): void;
 }
 
 declare module '@jsquash/avif/codec/enc/avif_enc.js' {

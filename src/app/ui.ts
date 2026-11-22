@@ -489,9 +489,10 @@ export class App {
       box.lastElementChild!.append(h('p', { class: 'note' }, 'With Original, streams that already fit the new container are copied without re-encoding, which is fast and lossless. Videos are never enlarged.'));
     }
     if (cats.has('document')) {
-      panel('document', ' Page size, text size',
-        select('PDF page size', s.document.pageSize, [['LETTER', 'US Letter'], ['A4', 'A4']], v => { s.document.pageSize = v as 'LETTER' | 'A4'; }),
-        select('Text size (TXT to PDF)', s.document.fontSize, [[9, '9 pt'], [10, '10 pt'], [11, '11 pt'], [12, '12 pt']], v => { s.document.fontSize = Number(v); }));
+      panel('document', ' Page size, text size, pictures in Markdown',
+        select('Page size (PDF and DOCX)', s.document.pageSize, [['LETTER', 'US Letter'], ['A4', 'A4']], v => { s.document.pageSize = v as 'LETTER' | 'A4'; }),
+        select('Text size (TXT to PDF)', s.document.fontSize, [[9, '9 pt'], [10, '10 pt'], [11, '11 pt'], [12, '12 pt']], v => { s.document.fontSize = Number(v); }),
+        select('Pictures in Markdown (from DOCX or HTML)', s.document.mdPictures, [['embed', 'Inside the file'], ['describe', 'Description only']], v => { s.document.mdPictures = v as 'embed' | 'describe'; }));
     }
     if (cats.has('data')) {
       const d = s.data;

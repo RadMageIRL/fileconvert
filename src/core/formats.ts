@@ -102,9 +102,9 @@ export type Engine = 'image' | 'media' | 'gif-to-video' | 'video-to-gif' | 'docu
 const DOCUMENT_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   txt: ['pdf'],
   pdf: ['txt'],
-  md: ['html', 'pdf'],
-  html: ['pdf'],
-  docx: ['txt'],
+  md: ['html', 'pdf', 'docx'],
+  html: ['pdf', 'md'],
+  docx: ['txt', 'html', 'md'],
 };
 const DATA_ROUTES: Partial<Record<FormatId, FormatId[]>> = {
   json: ['csv', 'xlsx', 'tsv', 'jsonl', 'yaml', 'xml'],
