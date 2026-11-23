@@ -307,8 +307,11 @@ class Scanner {
       const first = stages[0];
       const sink: Sink = first ?? headSink!;
       const stop = first ? b.length : Math.min(b.length, start + 256 * 1024);
-      for (let p = start; p < stop && !(first?.done); p += 65536) {
-        const piece = b.subarray(p, Math.min(stop, p + 65536));
+      // Pieces grow from 256 bytes to 64 KB: a short stream is not fed (and its feeding counted) far past its own end,
+      // which made a file of thousands of small streams look like far more work than it is, while a long stream is
+      // soon read 64 KB at a time. The work limit below is unchanged.
+      for (let p = start, size = 256; p < stop && !(first?.done); p += size, size = Math.min(65536, size * 2)) {
+        const piece = b.subarray(p, Math.min(stop, p + size));
         this.fed += piece.length;
         if (this.fed > b.length * 8 + 64 * MB) throw new LimitError('This PDF\'s structure makes it far more work to read than its size suggests, so it was not opened.');
         sink.push(piece);

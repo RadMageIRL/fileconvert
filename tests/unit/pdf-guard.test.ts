@@ -188,6 +188,47 @@ describe('the guard measures compressed data before any reader decodes it', { ti
   });
 });
 
+describe('ordinary PDFs with many small streams', () => {
+  test('3,000 pages of small compressed content in a 1 MB file pass the guard quickly', () => {
+    // Each page's content is a few dozen compressed bytes: feeding every stream 64 KB at a time once counted as
+    // 190 MB of work for this file and refused it as far more work than its size suggests.
+    const enc = new TextEncoder();
+    const parts: Uint8Array[] = [];
+    const offs: number[] = [];
+    let at = 0;
+    const put = (b: Uint8Array | string) => { const u = typeof b === 'string' ? enc.encode(b) : b; parts.push(u); at += u.length; };
+    const N = 3000;
+    put('%PDF-1.7\n');
+    const obj = (n: number, body: string, stream?: Uint8Array) => {
+      offs[n] = at;
+      put(`${n} 0 obj\n${body}`);
+      if (stream) { put('\nstream\n'); put(stream); put('\nendstream'); }
+      put('\nendobj\n');
+    };
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    obj(2, `<< /Type /Pages /Kids [${Array.from({ length: N }, (_, i) => `${3 + 2 * i} 0 R`).join(' ')}] /Count ${N} >>`);
+    for (let i = 0; i < N; i++) {
+      const data = zlibSync(enc.encode(`BT /F1 12 Tf 72 700 Td (Page ${i + 1}) Tj ET`));
+      obj(3 + 2 * i, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents ${4 + 2 * i} 0 R >>`);
+      obj(4 + 2 * i, `<< /Length ${data.length} /Filter /FlateDecode >>`, data);
+    }
+    const size = 3 + 2 * N;
+    const xref = at;
+    put(`xref\n0 ${size}\n0000000000 65535 f \n`);
+    for (let k = 1; k < size; k++) put(`${String(offs[k]).padStart(10, '0')} 00000 n \n`);
+    put(`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    const bytes = new Uint8Array(at);
+    let o = 0;
+    for (const p of parts) { bytes.set(p, o); o += p.length; }
+    expect(bytes.length).toBeLessThan(1_000_000);
+    const t = performance.now();
+    const scan = scanPdf(bytes);
+    expect(scan.pages).toBe(N);
+    expect(scan.streams).toBe(N);
+    expect(performance.now() - t).toBeLessThan(5000);
+  });
+});
+
 describe('the resources a content stream uses', () => {
   test('fonts, XObjects, graphics states, shadings, color spaces, patterns and properties, and nothing in strings', () => {
     const used = usedResources(enc('/GS1 gs BT /F1 12 Tf (/Fake Do) Tj ET q /Im0 Do Q /Sh0 sh /CS0 cs /P0 scn /OC /MC0 BDC EMC /Span << /MCID 1 >> BDC EMC [/Not /Used] TJ'))!;
