@@ -18,10 +18,10 @@ describe('the page list', () => {
 
   test('holds the planned pages whose conversions are in place', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
-      'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'docx-to-html', 'docx-to-markdown', 'extract-tar', 'extract-zip', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp',
+      'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'delete-pdf-pages', 'docx-to-html', 'docx-to-markdown', 'extract-pdf-pages', 'extract-tar', 'extract-zip', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp',
       'heic-to-jpg', 'heic-to-png', 'html-to-docx', 'html-to-markdown', 'images-to-tiff', 'jpg-to-png', 'json-to-csv', 'json-to-jsonl',
-      'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'merge-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'pdf-to-text',
-      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
+      'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'merge-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'organize-pdf', 'pdf-to-text',
+      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'rotate-pdf', 'split-pdf', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
       'xls-to-csv', 'xls-to-xlsx', 'xlsx-to-csv', 'xlsx-to-json', 'xml-to-csv', 'xml-to-xlsx', 'yaml-to-csv',
     ]);
   });

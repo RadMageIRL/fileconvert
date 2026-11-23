@@ -259,6 +259,18 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-main { min-width: 0; }
 .ws-options { margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 6px 0 2px; min-width: 0; }
 .ws-options legend { padding: 0 8px; margin-left: 8px; font-weight: 600; }
+.ws-hint { color: var(--muted); font-size: .88rem; }
+.ws-field { display: grid; gap: 4px; min-width: 0; max-width: 34rem; }
+.ws-field:has(.ws-order) { max-width: none; flex: 1 1 100%; }
+.ws-options .fields > [hidden] { display: none; }
+.ws-order { flex: 1 1 100%; gap: 8px; }
+.ws-page-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.ws-pages { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 26rem; overflow-y: auto; }
+.ws-page { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.ws-page[draggable="true"] { cursor: grab; }
+.ws-page.dragging { opacity: .5; }
+.ws-page.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+.ws-page.drop-after { box-shadow: 0 3px 0 var(--accent); }
 .ws-confirm { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--line)); border-radius: 14px; background: var(--card); }
 .ws-confirm-title { margin: 0; font-weight: 600; color: var(--warn); }
 .ws-confirm .job-notes { margin: 0; }
@@ -269,6 +281,7 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-state.done { color: var(--ok); font-weight: 600; }
 .ws-out { display: grid; gap: 8px; justify-items: start; }
 .ws-out .outputs { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+.ws-file > button { max-width: 100%; }
 
 /* ---------- footer pill and its panel (as in the other RadMage Labs tools) ---------- */
 .pill-panel { margin: 0 0 30px; padding: 14px 20px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }

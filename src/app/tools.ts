@@ -30,11 +30,23 @@ export interface ToolInspection {
   confirm?: string;
 }
 
+/** What every option may have: a line of help under it, and a condition on another option for being shown. */
+interface OptionBase {
+  key: string;
+  label: string;
+  hint?: string;
+  /** Shown only while the select option `key` has this value. */
+  showIf?: { key: string; value: string };
+}
+
 export type ToolOption =
-  | { kind: 'select'; key: string; label: string; value: string; choices: ReadonlyArray<readonly [string, string]> }
-  | { kind: 'number'; key: string; label: string; value: number; min: number; max: number; step?: number; unit?: string }
-  | { kind: 'check'; key: string; label: string; value: boolean }
-  | { kind: 'text'; key: string; label: string; value: string; placeholder?: string; maxLength?: number };
+  | OptionBase & { kind: 'select'; value: string; choices: ReadonlyArray<readonly [string, string]> }
+  | OptionBase & { kind: 'number'; value: number; min: number; max: number; step?: number; unit?: string }
+  | OptionBase & { kind: 'check'; value: boolean }
+  | OptionBase & { kind: 'text'; value: string; placeholder?: string; maxLength?: number }
+  /** A new order for the pages of the one file the tool takes: a list to drag or move with buttons, and the same order
+   *  as text ("3, 1, 2, 4-10"). The value is the text; it starts as every page in order once the file's pages are known. */
+  | OptionBase & { kind: 'order'; value: string };
 
 export type ToolValues = Record<string, string | number | boolean>;
 

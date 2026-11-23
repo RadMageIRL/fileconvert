@@ -5,15 +5,9 @@
 import type { ToolDefinition, ToolInput } from '../app/tools';
 import { formatBytes, LIMITS } from '../core/limits';
 import type { DroppedPart, MergeFile, MergeReport } from '../engines/pdf/merge';
-import type { SignatureInfo } from '../engines/pdf/structure';
+import { inspectPdf, listNames, plural } from './pdf-common';
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-
-/** "a.pdf", "a.pdf and b.pdf", "a.pdf, b.pdf and c.pdf", at most five names. */
-export function listNames(names: string[]): string {
-  const shown = names.length > 5 ? [...names.slice(0, 4), `${names.length - 4} more`] : names;
-  return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0] ?? '';
-}
+export { listNames };
 
 /** How much the files may weigh together: the fixed limit, lower on a device that says it has little memory. */
 export function mergeBudget(deviceMemory = (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory): { bytes: number; device: boolean } {
@@ -87,17 +81,7 @@ export const tool: ToolDefinition = {
   options: [],
   action: 'Merge PDFs',
   confirmLabel: 'Merge anyway; the signatures will no longer be valid',
-  async inspect(input, ctx) {
-    const r = await ctx.engines.pdf.run<{ pages: number; signature: SignatureInfo }>('inspect', { file: input.file }, { signal: ctx.signal });
-    return {
-      pages: r.pages,
-      info: plural(r.pages, 'page'),
-      note: r.signature.signed ? 'Digitally signed.' : undefined,
-      confirm: r.signature.signed
-        ? `${input.name} is digitally signed. Merging changes it, so its signature will no longer be valid: the merged PDF keeps the signature field and how it looks, but PDF readers will report the signature as broken.`
-        : undefined,
-    };
-  },
+  inspect: inspectPdf('Merging'),
   check(inputs: readonly ToolInput[]) {
     const pages = inputs.reduce((n, i) => n + (i.pages ?? 0), 0);
     if (pages > LIMITS.pdfPages) {

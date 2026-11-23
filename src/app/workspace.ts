@@ -10,6 +10,7 @@ import { FORMATS } from '../core/formats';
 import { formatBytes } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
+import { formatPages, parseOrder } from '../core/pageranges';
 import { sniffBlob } from '../core/sniff';
 import { clear, h } from './dom';
 import type { Engines } from './jobs';
@@ -57,6 +58,9 @@ export class Workspace {
   private confirmFor = '';
   private list!: HTMLOListElement;
   private confirmBox!: HTMLElement;
+  /** The page-order option (reorder): its list, its text box, and the file and page count it was made for. */
+  private order?: { opt: ToolOption; list: HTMLOListElement; text: HTMLInputElement; status: HTMLElement; madeFor: string };
+  private dragPage: number | null = null;
   private runBox!: HTMLElement;
   private outBox!: HTMLElement;
   private picker!: HTMLInputElement;
@@ -287,8 +291,23 @@ export class Workspace {
     this.render();
   }
 
+  /** An option's control, with its hint beside its label (read as the control's description, not its name). */
   private field(o: ToolOption): HTMLElement {
+    const el = this.fieldControl(o);
+    if (!o.hint && !o.showIf) return el;
+    const box = h('div', { class: 'ws-field' }, el);
+    if (o.hint) {
+      const id = `ws-hint-${o.key}`;
+      box.append(h('span', { class: 'ws-hint', id }, o.hint));
+      el.querySelector('input, select')?.setAttribute('aria-describedby', id);
+    }
+    if (o.showIf) { box.dataset.showKey = o.showIf.key; box.dataset.showValue = o.showIf.value; }
+    return box;
+  }
+
+  private fieldControl(o: ToolOption): HTMLElement {
     const disabledWhileRunning = (el: HTMLElement) => { el.dataset.lock = ''; return el; };
+    if (o.kind === 'order') return this.orderField(o);
     if (o.kind === 'select') {
       const sel = h('select', { 'data-key': `opt-${o.key}` }) as HTMLSelectElement;
       for (const [v, l] of o.choices) sel.append(h('option', { value: v, selected: v === this.values[o.key] }, l));
@@ -317,6 +336,111 @@ export class Workspace {
   private optionsBox(): HTMLElement {
     if (!this.def.options.length) return h('div', { hidden: true });
     return h('fieldset', { class: 'ws-options' }, h('legend', {}, 'Options'), h('div', { class: 'fields' }, ...this.def.options.map(o => this.field(o))));
+  }
+
+  // ------------------------------------------------------------ page order (reorder)
+
+  private orderField(o: ToolOption): HTMLElement {
+    const text = h('input', { type: 'text', 'data-key': `opt-${o.key}`, 'data-lock': '', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+    const list = h('ol', { class: 'ws-pages', 'aria-label': 'Pages, in their new order' }) as HTMLOListElement;
+    const status = h('span', { class: 'ws-hint', 'aria-live': 'polite' });
+    this.order = { opt: o, list, text, status, madeFor: '' };
+    text.addEventListener('change', () => this.setValue(o.key, text.value.trim()));
+    const tools = h('div', { class: 'ws-page-tools' },
+      h('button', { type: 'button', class: 'small', 'data-key': 'order-reverse', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().reverse(), 'The order was reversed.') }, 'Reverse'),
+      h('button', { type: 'button', class: 'small', 'data-key': 'order-reset', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().sort((a, b) => a - b), 'The pages are back in their first order.') }, 'Reset'));
+    this.setupPageDrag(list);
+    return h('div', { class: 'field ws-order' },
+      h('label', { class: 'field' }, h('span', {}, o.label), text),
+      status, tools, list);
+  }
+
+  /** The order as page numbers, or every page in order while the text does not hold a valid order. */
+  private currentOrder(): number[] {
+    const n = this.accepted()[0]?.pages ?? 0;
+    try { return parseOrder(String(this.values[this.order!.opt.key]), n); } catch { return Array.from({ length: n }, (_, i) => i + 1); }
+  }
+
+  private setOrder(order: number[], message?: string): void {
+    this.values[this.order!.opt.key] = formatPages(order);
+    this.changed();
+    if (message) this.host.announce(message);
+  }
+
+  /** Moves the page at position `from` to position `to` (0-based), keeping the focus on the page that moved. */
+  private movePage(from: number, to: number): void {
+    const order = this.currentOrder();
+    if (to < 0 || to >= order.length || from === to) return;
+    const [p] = order.splice(from, 1);
+    order.splice(to, 0, p);
+    this.setOrder(order, `Page ${p} moved to position ${to + 1} of ${order.length}.`);
+  }
+
+  private renderOrder(): void {
+    const o = this.order;
+    if (!o) return;
+    const file = this.accepted()[0];
+    const n = file?.pages ?? 0;
+    // A new file (or a file with other pages) starts from its own order.
+    const madeFor = file ? `${file.id}:${n}` : '';
+    if (o.madeFor !== madeFor) {
+      o.madeFor = madeFor;
+      this.values[o.opt.key] = n ? `1-${n}` : '';
+    }
+    o.text.value = String(this.values[o.opt.key]);
+    clear(o.list);
+    if (!n) { o.status.textContent = 'Add a PDF to see its pages.'; return; }
+    let order: number[] | null = null;
+    try { order = parseOrder(o.text.value, n); } catch (e) { o.status.textContent = (e as Error).message; }
+    if (!order) return;
+    o.status.textContent = order.every((p, i) => p === i + 1) ? `${n.toLocaleString('en-US')} pages, in their first order.` : `${n.toLocaleString('en-US')} pages, in a new order.`;
+    const lock = this.running;
+    order.forEach((p, i) => {
+      o.list.append(h('li', { class: 'ws-page', draggable: lock ? null : 'true', 'data-page': p, 'data-pos': i },
+        h('span', { class: 'ws-pos', 'aria-hidden': 'true' }, String(i + 1)),
+        h('span', { class: 'ws-page-name' }, `Page ${p}`),
+        h('span', { class: 'job-actions' },
+          h('button', { type: 'button', class: 'small', 'data-key': `pg-up-${p}`, 'aria-label': `Move page ${p} up`, disabled: i === 0 || lock, onclick: () => this.movePage(i, i - 1) }, 'Up'),
+          h('button', { type: 'button', class: 'small', 'data-key': `pg-down-${p}`, 'aria-label': `Move page ${p} down`, disabled: i === order!.length - 1 || lock, onclick: () => this.movePage(i, i + 1) }, 'Down'))));
+    });
+  }
+
+  /** Dragging a page row within the list; the buttons and the text box do the same without a pointer. */
+  private setupPageDrag(list: HTMLOListElement): void {
+    const rowAt = (t: EventTarget | null) => (t as HTMLElement | null)?.closest?.<HTMLLIElement>('li.ws-page') ?? null;
+    const clearMarks = () => list.querySelectorAll('.drop-before, .drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
+    list.addEventListener('dragstart', e => {
+      const row = rowAt(e.target);
+      if (!row || this.running) return;
+      this.dragPage = Number(row.dataset.pos);
+      e.dataTransfer?.setData('text/plain', row.dataset.page!);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    list.addEventListener('dragover', e => {
+      if (this.dragPage === null) return;
+      e.preventDefault();
+      clearMarks();
+      const row = rowAt(e.target);
+      if (!row) return;
+      const r = row.getBoundingClientRect();
+      row.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
+    });
+    list.addEventListener('drop', e => {
+      if (this.dragPage === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const from = this.dragPage;
+      this.dragPage = null;
+      clearMarks();
+      const row = rowAt(e.target);
+      if (!row) return this.render();
+      const r = row.getBoundingClientRect();
+      let to = Number(row.dataset.pos) + (e.clientY < r.top + r.height / 2 ? 0 : 1);
+      if (to > from) to--;
+      this.movePage(from, to);
+    });
+    list.addEventListener('dragend', () => { this.dragPage = null; clearMarks(); });
   }
 
   /** Reordering with the mouse: rows are dragged within the list. Files dropped from outside go to add(). */
@@ -388,13 +512,16 @@ export class Workspace {
     }
     this.list.hidden = this.entries.length === 0;
     this.renderConfirm();
+    this.renderOrder();
+    // Options that belong to one choice of another (split by ranges, or every N pages).
+    for (const el of this.root.querySelectorAll<HTMLElement>('[data-show-key]')) el.hidden = String(this.values[el.dataset.showKey!]) !== el.dataset.showValue;
     for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-lock]')) el.disabled = this.running;
     this.renderRun();
     this.renderOutputs();
     if (focused) {
       let el = this.root.querySelector<HTMLButtonElement>(`[data-key="${CSS.escape(focused)}"]`);
       // A row moved to an end loses the button that moved it there; the other direction keeps the focus nearby.
-      if (el?.disabled && /^(up|down)-/.test(focused)) el = this.root.querySelector(`[data-key="${CSS.escape(focused.startsWith('up-') ? focused.replace('up-', 'down-') : focused.replace('down-', 'up-'))}"]`);
+      if (el?.disabled && /^(pg-)?(up|down)-/.test(focused)) el = this.root.querySelector(`[data-key="${CSS.escape(focused.replace(/(up|down)-(\d+)$/, (_, d: string, n: string) => `${d === 'up' ? 'down' : 'up'}-${n}`))}"]`);
       (el && !el.disabled ? el : this.root.querySelector<HTMLElement>('[data-key="add"]'))?.focus();
     }
   }

@@ -7,6 +7,11 @@ export const TOOLS = {
   'remove-image-metadata': { accepts: ['jpg', 'png', 'webp'] },
   'images-to-tiff': { accepts: ['jpg', 'png', 'webp', 'avif', 'heic', 'bmp', 'gif', 'tiff', 'ico'] },
   'merge-pdf': { accepts: ['pdf'] },
+  'split-pdf': { accepts: ['pdf'] },
+  'extract-pdf-pages': { accepts: ['pdf'] },
+  'delete-pdf-pages': { accepts: ['pdf'] },
+  'organize-pdf': { accepts: ['pdf'] },
+  'rotate-pdf': { accepts: ['pdf'] },
 } as const satisfies Record<string, { accepts: readonly FormatId[] }>;
 
 export type ToolId = keyof typeof TOOLS;

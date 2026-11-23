@@ -325,3 +325,43 @@ test('a problem found during the merge itself names its file; a limit on the who
   }, b64);
   expect(total).toBe('Together the files have more than 5,000 pages, the most one merged PDF can have.');
 });
+
+test('the memory allowance in this browser: 1 GB where no device memory is reported, 128 MB per reported GB otherwise', async ({ page, browserName }) => {
+  await openApp(page);
+  await openMerge(page);
+  // The tool's own check, with stand-ins for checked files of a given size.
+  const check = (sizes: number[]) => page.evaluate(list => {
+    const app = (window as unknown as { __fileconvert: { workspace: { def: { check(i: unknown[], v: unknown): string | null } } } }).__fileconvert;
+    return app.workspace.def.check(list.map(size => ({ file: { size }, pages: 1 })), {});
+  }, sizes);
+  const reported = await page.evaluate(() => (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null);
+  // Chrome and Edge report device memory (rounded, at most 8); Firefox and WebKit do not.
+  if (browserName === 'chromium') expect(typeof reported).toBe('number'); else expect(reported).toBeNull();
+  const MB = 1048576;
+  const allowance = reported ? Math.min(1024, Math.floor(reported * 128)) * MB : 1024 * MB;
+  expect(await check([allowance / 2, allowance / 2])).toBeNull();
+  expect(await check([allowance / 2, allowance / 2 + 1])).toMatch(/^Together these files are .*; FileConvert merges up to /);
+});
+
+test('after the memory allowance stops a merge, taking a file out lets it run', async ({ page }, info) => {
+  await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25, configurable: true }));
+  await openApp(page);
+  await openMerge(page);
+  const dir = tempDir();
+  execFileSync(PYTHON, ['-I', '-c', [
+    'import sys, os',
+    'data = os.urandom(20 << 20)',
+    'img = b"<< /Type /XObject /Subtype /Image /Width 2048 /Height 3413 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\\nstream\\n" % len(data) + data + b"\\nendstream"',
+    'objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>", 2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",',
+    '        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /I 4 0 R >> >> /Contents 5 0 R >>", 4: img,',
+    '        5: b"<< /Length 24 >>\\nstream\\nq 612 0 0 792 0 0 cm /I Do Q\\nendstream"}',
+    'out = b"%PDF-1.7\\n" + b"".join(b"%d 0 obj\\n" % k + v + b"\\nendobj\\n" for k, v in objs.items()) + b"trailer\\n<< /Root 1 0 R >>\\n%%EOF\\n"',
+    'open(sys.argv[1], "wb").write(out); open(sys.argv[2], "wb").write(out)',
+  ].join('\n'), `${dir}/scan-1.pdf`, `${dir}/scan-2.pdf`]);
+  await add(page, [`${dir}/scan-1.pdf`, `${dir}/scan-2.pdf`, fx('pdf/merge-a.pdf')]);
+  await expect(ws(page).locator('.ws-why')).toHaveText(/^Together these files are 40\.0 MB; FileConvert merges up to 32\.0 MB at a time on this device/);
+  await ws(page).getByRole('button', { name: 'Remove scan-2.pdf' }).click();
+  const { deep } = await mergeAndRead(page, info);
+  expect(deep.pages).toHaveLength(4);
+  expect(deep.qpdf.ok).toBe(true);
+});

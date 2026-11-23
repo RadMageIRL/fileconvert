@@ -150,3 +150,46 @@ test('Merge PDFs in WebKit: the workspace checks, merges and offers the result; 
   expect(d.fields.name_2.value).toBe('Bob');
   expect(w.outside).toEqual([]);
 });
+
+test('Split and rotate in WebKit: the page tools check, work and offer their results; independent readers agree', async ({ page }) => {
+  const w = await openApp(page);
+  const ws = page.locator('#workspace');
+  type Deep = { qpdf: { ok: boolean }; pages: Array<{ rotate: number }>; renders: string[] };
+  const outputs = () => page.evaluate(async () => {
+    const app = (window as unknown as { __fileconvert: { workspace: { outputs: Array<{ name: string; blob: Blob }> } } }).__fileconvert;
+    return Promise.all(app.workspace.outputs.map(async o => ({ name: o.name, bytes: [...new Uint8Array(await o.blob.arrayBuffer())] })));
+  });
+  const a = pyRead<Deep>('pdfdeep', fx('pdf/merge-a.pdf'));
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('split-pdf'));
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.locator('[data-key="opt-mode"]').selectOption('each');
+  await ws.getByRole('button', { name: 'Split the PDF' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+  const parts = await outputs();
+  expect(parts.map(p => p.name)).toEqual(['merge-a-p1.pdf', 'merge-a-p2.pdf', 'merge-a-p3.pdf']);
+  const dir = tempDir();
+  const read = parts.map(p => pyRead<Deep>('pdfdeep', writeTemp(dir, p.name, new Uint8Array(p.bytes))));
+  expect(read.every(d => d.qpdf.ok)).toBe(true);
+  expect(read.flatMap(d => d.renders)).toEqual(a.renders);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('rotate-pdf'));
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Rotate the pages' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+  const [turned] = await outputs();
+  expect(pyRead<Deep>('pdfdeep', writeTemp(dir, turned.name, new Uint8Array(turned.bytes))).pages.map(p => p.rotate)).toEqual([90, 90, 270]);
+  expect(w.outside).toEqual([]);
+});
+
+test('the merge memory allowance in WebKit: no device memory reported, so 1 GB', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('merge-pdf'));
+  expect(await page.evaluate(() => (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null)).toBeNull();
+  const check = (sizes: number[]) => page.evaluate(list => {
+    const app = (window as unknown as { __fileconvert: { workspace: { def: { check(i: unknown[], v: unknown): string | null } } } }).__fileconvert;
+    return app.workspace.def.check(list.map(size => ({ file: { size }, pages: 1 })), {});
+  }, sizes);
+  expect(await check([512 * 1048576, 512 * 1048576])).toBeNull();
+  expect(await check([512 * 1048576, 512 * 1048576 + 1])).toMatch(/^Together these files are/);
+});

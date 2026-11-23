@@ -291,8 +291,29 @@ export function cleanDocument(doc: PDFDocumentT, L: Lib, opts: { pagesRemoved: n
   while (holders.length) { const [v, d] = holders.pop()!; visit(v, d); }
 
   // ---- 3. What pointed at removed pages.
+  // Named destinations, read before anything is pruned, so a link or bookmark that names a removed page is found too.
+  const { PDFString, PDFHexString } = L;
+  const keyOf = (o: { asBytes(): Uint8Array }) => Array.from(o.asBytes(), c => String.fromCharCode(c)).join('');
+  const named = new Map<string, unknown>();
+  const seenNames = new Set<string>();
+  const walkNames = (node: unknown, depth: number) => {
+    if (node instanceof PDFRef) { if (seenNames.has(String(node))) return; seenNames.add(String(node)); }
+    const d = deref(node);
+    if (!(d instanceof PDFDict) || depth > 32) return;
+    const arr = d.lookup(N('Names'));
+    if (arr instanceof PDFArray) for (let i = 0; i + 1 < arr.size(); i += 2) {
+      const k = arr.lookup(i);
+      if ((k instanceof PDFString || k instanceof PDFHexString) && !named.has(keyOf(k))) named.set(keyOf(k), arr.get(i + 1));
+    }
+    const kids = d.lookup(N('Kids'));
+    if (kids instanceof PDFArray) for (let i = 0; i < kids.size(); i++) walkNames(kids.get(i), depth + 1);
+  };
+  walkNames(doc.catalog.lookupMaybe(N('Names'), PDFDict)?.get(N('Dests')), 0);
+  const oldDests = doc.catalog.lookupMaybe(N('Dests'), PDFDict);
+  if (oldDests) for (const [k, v] of oldDests.entries()) if (!named.has(keyOf(k))) named.set(keyOf(k), v);
   const deadDest = (v: unknown): boolean => {
     let a = deref(v);
+    if (a instanceof PDFName || a instanceof PDFString || a instanceof PDFHexString) a = deref(named.get(keyOf(a)));
     if (a instanceof PDFDict) a = deref(a.get(N('D')));
     if (!(a instanceof PDFArray) || a.size() === 0) return false;
     const target = a.get(0);
@@ -394,6 +415,25 @@ export function cleanDocument(doc: PDFDocumentT, L: Lib, opts: { pagesRemoved: n
       return { alive, widgets };
     };
     pruneFields(acro.get(N('Fields')), 0);
+    // The calculation order names fields directly: one that left the form must leave it too, or the field (and its
+    // value) would stay in the file through it.
+    const co = acro.lookup(N('CO'));
+    if (co instanceof PDFArray) {
+      const inForm = new Set<string>();
+      const collect = (arr: unknown, depth: number) => {
+        const a = deref(arr);
+        if (!(a instanceof PDFArray) || depth > 64) return;
+        for (let i = 0; i < a.size(); i++) {
+          const ref = a.get(i);
+          if (ref instanceof PDFRef) inForm.add(String(ref));
+          const f = deref(ref);
+          if (f instanceof PDFDict) collect(f.get(N('Kids')), depth + 1);
+        }
+      };
+      collect(acro.get(N('Fields')), 0);
+      for (let i = co.size() - 1; i >= 0; i--) { const r = co.get(i); if (!(r instanceof PDFRef) || !inForm.has(String(r))) co.remove(i); }
+      if (co.size() === 0) acro.delete(N('CO'));
+    }
     if (acro.get(N('XFA')) !== undefined) { acro.delete(N('XFA')); report.xfaRemoved = true; }
     const fields = acro.lookup(N('Fields'));
     if (!(fields instanceof PDFArray) || fields.size() === 0) doc.catalog.delete(N('AcroForm'));
@@ -453,4 +493,37 @@ export function cleanDocument(doc: PDFDocumentT, L: Lib, opts: { pagesRemoved: n
   for (const [ref] of ctx.enumerateIndirectObjects()) max = Math.max(max, ref.objectNumber);
   ctx.largestObjectNumber = max;
   return report;
+}
+
+export interface RotateReport {
+  /** Pages turned. */
+  rotated: number;
+  /** Pages whose rotation was not a multiple of 90 (readers draw those upright), taken as 0 before turning. */
+  invalid: number;
+  clean: CleanReport;
+}
+
+/**
+ * Turns the given pages (0-based, each once) by 90, 180 or 270 degrees clockwise, on top of the rotation they already
+ * have (inherited rotation is pushed onto each page first). Only /Rotate changes: the content, its boxes and its
+ * annotations stay as they are, so every reader turns the whole page. The document is then cleaned as every edit is.
+ */
+export function rotatePages(doc: PDFDocumentT, L: Lib, pages: readonly number[], by: number): RotateReport {
+  const { PDFName, PDFDict, PDFNumber } = L;
+  if (![90, 180, 270].includes(by)) throw new Error('Pages turn by 90, 180 or 270 degrees.');
+  const refs = pageRefs(doc, L);
+  if (!pages.length) throw new Error('Choose at least one page to turn.');
+  for (const i of pages) if (!Number.isInteger(i) || i < 0 || i >= refs.length) throw new Error(`There is no page ${i + 1}; the PDF has ${refs.length}.`);
+  if (new Set(pages).size !== pages.length) throw new Error('A page can be turned only once.');
+  pushDownInherited(doc, L, refs);
+  let invalid = 0;
+  for (const i of pages) {
+    const page = doc.context.lookup(refs[i], PDFDict);
+    const cur = page.lookup(PDFName.of('Rotate'));
+    let now = cur instanceof PDFNumber ? cur.asNumber() : 0;
+    if (!Number.isInteger(now) || now % 90 !== 0) { invalid++; now = 0; }
+    page.set(PDFName.of('Rotate'), doc.context.obj((((now + by) % 360) + 360) % 360));
+  }
+  const clean = cleanDocument(doc, L, { pagesRemoved: 0, reordered: false });
+  return { rotated: pages.length, invalid, clean };
 }

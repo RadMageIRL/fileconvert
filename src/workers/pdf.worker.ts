@@ -35,6 +35,31 @@ serve({
     const bytes = await s.savePdf(doc);
     return { result: { bytes, report, scan, signature }, transfer: buffersOf(bytes) };
   },
+  /** Pages turned by 90, 180 or 270 degrees, in place. */
+  async rotate(p: { file: Blob; pages: number[]; by: number }, progress) {
+    progress({ stage: 'Checking the PDF' });
+    const s = await import('../engines/pdf/structure');
+    const { doc, signature } = await s.openPdf(new Uint8Array(await p.file.arrayBuffer()));
+    progress({ stage: 'Turning the pages' });
+    const report = s.rotatePages(doc, await s.pdfLib(), p.pages, p.by);
+    const bytes = await s.savePdf(doc);
+    return { result: { bytes, report, signature }, transfer: buffersOf(bytes) };
+  },
+  /** New PDFs, each of some pages of one file (0-based, in order): split makes several, extract one. The file is read
+   *  once; each part is copied from it, cleaned and written whole. */
+  async split(p: { file: Blob; name: string; parts: number[][] }, progress) {
+    progress({ stage: 'Checking the PDF' });
+    const s = await import('../engines/pdf/structure');
+    const { takePages } = await import('../engines/pdf/merge');
+    const open = await s.openPdf(new Uint8Array(await p.file.arrayBuffer()));
+    const parts: Array<{ bytes: Uint8Array; report: import('../engines/pdf/merge').MergeReport }> = [];
+    for (const [i, pages] of p.parts.entries()) {
+      progress({ stage: `Writing ${i + 1} of ${p.parts.length}`, fraction: i / p.parts.length });
+      const { doc, report } = await takePages(open, p.name, pages);
+      parts.push({ bytes: await s.savePdf(doc), report });
+    }
+    return { result: { parts, signature: open.signature }, transfer: buffersOf(...parts.map(x => x.bytes)) };
+  },
   /** The files in order, one at a time: each is checked, read, copied in, and let go before the next. */
   async merge(p: { files: Array<{ file: Blob; name: string }> }, progress) {
     const s = await import('../engines/pdf/structure');

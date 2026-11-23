@@ -523,6 +523,15 @@ def read_pdf_deep(path):
     }
 
 
+def read_pdf_turns(path):
+    """Each page rendered by PDFium at 72 dpi with no extra turn and with 90, 180 and 270 degrees added (SHA-256 of
+    each bitmap), so a page turned by FileConvert can be compared with PDFium turning the source page itself."""
+    import hashlib
+    import pypdfium2
+    doc = pypdfium2.PdfDocument(path)
+    return [[hashlib.sha256(doc[i].render(scale=1, rotation=r).to_numpy().tobytes()).hexdigest() for r in (0, 90, 180, 270)] for i in range(len(doc))]
+
+
 def read_media(path):
     """The picture parts of a DOCX (word/media), by SHA-256, as zipfile reads them."""
     import hashlib
@@ -559,6 +568,8 @@ elif kind == 'pdf':
     result = read_pdf(path)
 elif kind == 'pdfdeep':
     result = read_pdf_deep(path)
+elif kind == 'pdfturns':
+    result = read_pdf_turns(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

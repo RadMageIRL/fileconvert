@@ -51,6 +51,12 @@ export interface MergeFile {
   destinationsRenamed: number;
   /** Links, bookmarks and actions whose destination could not be found in the file; the destination was removed. */
   unresolved: number;
+  /** Only some pages taken (split, extract): links and bookmarks that went only to pages left out were removed, named
+   *  destinations on those pages dropped, and actions that went there emptied. */
+  linksRemoved: number;
+  bookmarksRemoved: number;
+  destinationsRemoved: number;
+  actionsRemoved: number;
   /** The form has scripts, which may refer to fields by name. */
   formScripts: boolean;
   /** The file asks readers to redraw its form fields (carried only when it has fields). */
@@ -131,20 +137,33 @@ function namedDestinations(doc: PDFDocumentT, L: Lib): Map<string, PDFObject> {
   return out;
 }
 
+/** The names the copier compares with; typed, so a name it does not have is a compile error, not a silent miss. */
+const COPIER_NAMES = ['S', 'D', 'A', 'GoTo', 'Dest', 'Subtype', 'Link', 'Type', 'Annot', 'Rect', 'StructParent', 'Page', 'Pages',
+  'Catalog', 'Outlines', 'StructTreeRoot', 'Contents', 'Parent', 'Kids', 'StructParents', 'B'] as const;
+type CopierName = typeof COPIER_NAMES[number];
+
 /** Copies one source file's objects into the merged document (see the top of this file). */
 class Copier {
   private map = new Map<PDFRefT, PDFObject>();
   private queue: Array<[PDFRefT, PDFRefT]> = [];
   /** Destinations that could not be found in the file, so they were removed. */
   unresolved = 0;
-  private N: Record<string, PDFNameT>;
+  /** Actions whose page was left out (split, extract), so they were removed. */
+  excluded = 0;
+  /** Why the last destination asked for was not found: the file does not have it, or its page was left out. */
+  why: 'missing' | 'excluded' = 'missing';
+  /** Links (as copied) that went only to a page left out: the caller takes them off their pages. */
+  readonly deadLinks = new Set<PDFDictT>();
+  private N: Record<CopierName, PDFNameT>;
+  private allPages: Set<PDFRefT>;
 
+  /** srcPages: every page of the file, in order; pageMap: the pages taken, to their new references. */
   constructor(private L: Lib, private src: PDFDocumentT, private out: PDFDocumentT, private srcPages: PDFRefT[],
     private pageMap: Map<PDFRefT, PDFRefT>, private named: Map<string, PDFObject>) {
     for (const [s, d] of pageMap) this.map.set(s, d);
+    this.allPages = new Set(srcPages);
     const n = (s: string) => L.PDFName.of(s);
-    this.N = Object.fromEntries(['S', 'D', 'GoTo', 'Dest', 'Subtype', 'Link', 'Type', 'Annot', 'Rect', 'StructParent', 'Page', 'Pages',
-      'Catalog', 'Outlines', 'StructTreeRoot', 'Contents', 'Parent', 'Kids', 'StructParents', 'B'].map(k => [k, n(k)]));
+    this.N = Object.fromEntries(COPIER_NAMES.map(k => [k, n(k)])) as Record<CopierName, PDFNameT>;
   }
 
   /** A page dictionary, a page tree node, a catalog, an outline root or a structure tree: never copied through a
@@ -197,10 +216,19 @@ class Copier {
       if ((goTo && k === N.D) || (link && k === N.Dest)) {
         const r = this.dest(v);
         if (r) { out.set(k, r); continue; }
-        this.unresolved++;
+        if (this.why === 'excluded') { this.excluded++; if (link) this.deadLinks.add(out); } else this.unresolved++;
         // A GoTo action without its destination is not an action; the link or bookmark keeps no action at all.
         if (goTo) return this.L.PDFNull;
         continue;
+      }
+      // A link whose action goes to a page left out goes with that page.
+      if (link && k === N.A) {
+        const act = v instanceof this.L.PDFRef ? this.src.context.lookup(v) : v;
+        if (act instanceof this.L.PDFDict && act.get(N.S) === N.GoTo && !this.dest(act.get(N.D)) && this.why === 'excluded') {
+          this.excluded++;
+          this.deadLinks.add(out);
+          continue;
+        }
       }
       out.set(k, this.value(v, depth + 1));
     }
@@ -211,6 +239,7 @@ class Copier {
   dest(v: PDFObject | undefined, followNames = true): PDFArrayT | null {
     const { PDFName, PDFString, PDFHexString, PDFDict, PDFArray, PDFRef, PDFNumber } = this.L;
     let d: PDFObject | undefined = v instanceof PDFRef ? this.src.context.lookup(v) : v;
+    this.why = 'missing';
     if (d instanceof PDFName || d instanceof PDFString || d instanceof PDFHexString) {
       if (!followNames) return null;
       return this.dest(this.named.get(keyOf(d)), false);
@@ -221,14 +250,15 @@ class Copier {
     }
     if (!(d instanceof PDFArray) || d.size() === 0) return null;
     const first = d.get(0);
-    let page: PDFRefT | undefined;
-    if (first instanceof PDFRef) page = this.pageMap.get(first);
+    let target: PDFRefT | undefined;
+    if (first instanceof PDFRef) target = first;
     else if (first instanceof PDFNumber) {
       // Some programs write the page number (0-based) where a page reference belongs.
       const i = first.asNumber();
-      if (Number.isInteger(i) && i >= 0 && i < this.srcPages.length) page = this.pageMap.get(this.srcPages[i]);
+      if (Number.isInteger(i) && i >= 0 && i < this.srcPages.length) target = this.srcPages[i];
     }
-    if (!page) return null;
+    const page = target ? this.pageMap.get(target) : undefined;
+    if (!page) { if (target && this.allPages.has(target)) this.why = 'excluded'; return null; }
     const out = this.out.context.obj([]) as PDFArrayT;
     out.push(page);
     for (let i = 1; i < d.size(); i++) out.push(this.value(d.get(i), 1));
@@ -286,16 +316,25 @@ export class Merger {
 
   private n(s: string): PDFNameT { return this.L.PDFName.of(s); }
 
-  /** Adds every page of one file, after the pages added so far. */
-  add(src: OpenPdf, name: string): MergeFile {
+  /**
+   * Adds the pages of one file after the pages added so far: every page, or only `pages` (0-based, in that order,
+   * each once) for split and extract. `section` (on for merge) puts the file's bookmarks under one titled with its name.
+   */
+  add(src: OpenPdf, name: string, opts: { pages?: readonly number[]; section?: boolean } = {}): MergeFile {
     const L = this.L;
     const { PDFDict, PDFArray, PDFRef, PDFHexString } = L;
     const N = (s: string) => this.n(s);
     const doc = src.doc;
     const cat = doc.catalog;
     const ctx = this.doc.context;
-    const srcPages = pageRefs(doc, L);
-    if (!srcPages.length) throw new Error('This PDF has no pages.');
+    const allPages = pageRefs(doc, L);
+    if (!allPages.length) throw new Error('This PDF has no pages.');
+    if (opts.pages) {
+      if (!opts.pages.length) throw new Error('At least one page has to be taken.');
+      for (const i of opts.pages) if (!Number.isInteger(i) || i < 0 || i >= allPages.length) throw new Error(`There is no page ${i + 1}; the PDF has ${allPages.length}.`);
+      if (new Set(opts.pages).size !== opts.pages.length) throw new Error('A page can be taken only once.');
+    }
+    const srcPages = opts.pages ? opts.pages.map(i => allPages[i]) : allPages;
     if (this.kids.length + srcPages.length > LIMITS.pdfPages) {
       const e = new Error(`Together the files have more than ${LIMITS.pdfPages.toLocaleString('en-US')} pages, the most one merged PDF can have.`);
       // About the whole merge, not one file.
@@ -306,14 +345,14 @@ export class Merger {
     const fileNo = this.files.length + 1;
     const report: MergeFile = {
       name, pages: srcPages.length, firstPage: this.kids.length + 1, bookmarks: 0, links: 0, fields: 0, renamed: [],
-      resourcesRenamed: 0, destinationsRenamed: 0, unresolved: 0, formScripts: false, needAppearances: false,
-      signed: src.signature.signed, dropped: [],
+      resourcesRenamed: 0, destinationsRenamed: 0, unresolved: 0, linksRemoved: 0, bookmarksRemoved: 0, destinationsRemoved: 0,
+      actionsRemoved: 0, formScripts: false, needAppearances: false, signed: src.signature.signed, dropped: [],
     };
     const drop = (p: DroppedPart) => { if (!report.dropped.includes(p)) report.dropped.push(p); };
     const pageMap = new Map<PDFRefT, PDFRefT>();
     for (const r of srcPages) pageMap.set(r, ctx.nextRef());
     const named = namedDestinations(doc, L);
-    const c = new Copier(L, doc, this.doc, srcPages, pageMap, named);
+    const c = new Copier(L, doc, this.doc, allPages, pageMap, named);
 
     // ---- Pages.
     for (const r of srcPages) {
@@ -336,36 +375,46 @@ export class Merger {
         seen.add(String(r));
         const it = doc.context.lookup(r);
         if (!(it instanceof PDFDict)) break;
+        r = it.get(N('Next'));
         const dict = ctx.obj({}) as PDFDictT;
         dict.set(N('Title'), it.get(N('Title')) !== undefined ? c.value(it.get(N('Title'))) : L.PDFString.of(''));
         for (const k of ['C', 'F']) if (it.get(N(k)) !== undefined) dict.set(N(k), c.value(it.get(N(k))));
+        // An entry that goes only to a page left out goes with it, unless entries under it stay (then only its target).
+        let gone = false;
         if (it.get(N('Dest')) !== undefined) {
           const d = c.dest(it.get(N('Dest')));
-          if (d) dict.set(N('Dest'), d); else c.unresolved++;
+          if (d) dict.set(N('Dest'), d); else if (c.why === 'excluded') gone = true; else c.unresolved++;
         } else if (it.get(N('A')) !== undefined) {
-          const a = c.value(it.get(N('A')));
-          if (a !== L.PDFNull) dict.set(N('A'), a);
+          const act = it.lookup(N('A'));
+          if (act instanceof PDFDict && act.get(N('S')) === N('GoTo') && !c.dest(act.get(N('D'))) && c.why === 'excluded') gone = true;
+          else {
+            const a = c.value(it.get(N('A')));
+            if (a !== L.PDFNull) dict.set(N('A'), a);
+          }
         }
         const count = it.lookup(N('Count'));
-        const node: OutlineNode = { dict, ref: ctx.register(dict), open: !(count instanceof L.PDFNumber && count.asNumber() < 0), children: [] };
+        const children = outline(it, depth + 1);
+        if (gone && !children.length) { report.bookmarksRemoved++; continue; }
+        const node: OutlineNode = { dict, ref: ctx.register(dict), open: !(count instanceof L.PDFNumber && count.asNumber() < 0), children };
         report.bookmarks++;
-        node.children = outline(it, depth + 1);
         items.push(node);
-        r = it.get(N('Next'));
       }
       return items;
     };
     const outlines = cat.lookupMaybe(N('Outlines'), PDFDict);
-    const base = name.replace(/\.pdf$/i, '') || name;
-    const section = ctx.obj({ Title: PDFHexString.fromText(base) }) as PDFDictT;
-    const first = ctx.obj([pageMap.get(srcPages[0])!, N('Fit')]);
-    section.set(N('Dest'), first);
-    this.sections.push({ dict: section, ref: ctx.register(section), open: true, children: outlines ? outline(outlines, 0) : [] });
+    const own = outlines ? outline(outlines, 0) : [];
+    if (opts.section === false) this.sections.push(...own);
+    else {
+      const base = name.replace(/\.pdf$/i, '') || name;
+      const section = ctx.obj({ Title: PDFHexString.fromText(base) }) as PDFDictT;
+      section.set(N('Dest'), ctx.obj([pageMap.get(srcPages[0])!, N('Fit')]));
+      this.sections.push({ dict: section, ref: ctx.register(section), open: true, children: own });
+    }
 
     // ---- Named destinations.
     for (const [k, v] of named) {
       const d = c.dest(v, false);
-      if (!d) continue;
+      if (!d) { if (c.why === 'excluded') report.destinationsRemoved++; continue; }
       let key = k;
       if (this.dests.has(key)) { key = uniqueName(k, fileNo, s => this.dests.has(s) || named.has(s)); report.destinationsRenamed++; }
       this.dests.set(key, d);
@@ -380,9 +429,37 @@ export class Merger {
     if (af) {
       if (af.get(N('XFA')) !== undefined) drop('xfa');
       const fields = af.lookup(N('Fields'));
-      if (fields instanceof PDFArray) for (let i = 0; i < fields.size(); i++) tops.push(c.value(fields.get(i)));
+      // Only some pages taken: only the fields with a box on those pages (or with no box at all, which belong to no
+      // page) are copied; the rest are not read, so splitting a large form does not copy every field into every part.
+      let wanted = (_: PDFObject | undefined) => true;
+      if (opts.pages) {
+        const onPages = new Set<string>();
+        for (const r of srcPages) {
+          const annots = doc.context.lookup(r, PDFDict).lookup(N('Annots'));
+          if (annots instanceof PDFArray) for (let i = 0; i < annots.size(); i++) onPages.add(String(annots.get(i)));
+        }
+        const memo = new Map<string, boolean>();
+        const keep = (v: PDFObject | undefined, depth: number): boolean => {
+          const key = v instanceof PDFRef ? String(v) : null;
+          if (key && memo.has(key)) return memo.get(key)!;
+          if (key) memo.set(key, false);
+          const f = v instanceof PDFRef ? doc.context.lookup(v) : v;
+          let out = false;
+          if (f instanceof PDFDict && depth <= 64) {
+            const kids = f.lookup(N('Kids'));
+            const widget = f.get(N('Subtype')) === N('Widget');
+            if (widget && key && onPages.has(key)) out = true;
+            else if (kids instanceof PDFArray && kids.size()) for (let i = 0; i < kids.size() && !out; i++) out = keep(kids.get(i), depth + 1);
+            else out = !widget;
+          }
+          if (key) memo.set(key, out);
+          return out;
+        };
+        wanted = v => keep(v, 0);
+      }
+      if (fields instanceof PDFArray) for (let i = 0; i < fields.size(); i++) if (wanted(fields.get(i))) tops.push(c.value(fields.get(i)));
       const co = af.lookup(N('CO'));
-      if (co instanceof PDFArray) for (let i = 0; i < co.size(); i++) this.co.push(c.value(co.get(i)));
+      if (co instanceof PDFArray) for (let i = 0; i < co.size(); i++) if (wanted(co.get(i))) this.co.push(c.value(co.get(i)));
       if (af.get(N('DR')) !== undefined) drCopy = c.value(af.get(N('DR')));
       formDA = af.lookup(N('DA'));
       formQ = af.lookup(N('Q'));
@@ -453,9 +530,22 @@ export class Merger {
 
     c.drain();
 
+    // ---- Links that went only to pages left out come off their pages.
+    if (c.deadLinks.size) {
+      for (const ref of pageMap.values()) {
+        const annots = ctx.lookup(ref, PDFDict).lookup(N('Annots'));
+        if (!(annots instanceof PDFArray)) continue;
+        for (let i = annots.size() - 1; i >= 0; i--) {
+          const a = annots.lookup(i);
+          if (a instanceof PDFDict && c.deadLinks.has(a)) { annots.remove(i); report.linksRemoved++; }
+        }
+      }
+    }
+
     // ---- Form, now that its objects exist: resources, names, default appearances.
     if (af) this.settleForm(tops, drCopy, formDA, formQ, fileNo, report, pageMap);
     report.unresolved = c.unresolved;
+    report.actionsRemoved = Math.max(0, c.excluded - report.linksRemoved);
     this.files.push(report);
     return report;
   }
@@ -641,7 +731,8 @@ export class Merger {
     if (this.dests.size) {
       const keys = [...this.dests.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
       const arr: PDFObject[] = [];
-      for (const k of keys) arr.push(PDFHexString.of(hexOf(k)), this.dests.get(k)!);
+      // Printable names are written as they read (keep-one); any other bytes as hex, exactly.
+      for (const k of keys) arr.push(/^[\x20-\x7e]*$/.test(k) ? L.PDFString.of(escapeLiteral(k)) : PDFHexString.of(hexOf(k)), this.dests.get(k)!);
       cat.set(N('Names'), ctx.obj({ Dests: ctx.register(ctx.obj({ Names: arr })) }));
     }
 
@@ -673,4 +764,12 @@ export class Merger {
       fields: this.files.reduce((n, f) => n + f.fields, 0), layers: this.oc.ocgs.length, infoFrom: this.infoFrom, clean,
     };
   }
+}
+
+/** A new document of some pages of one file, in the order given (split, extract): copied as a merge copies, without
+ *  a section for the file, cleaned, ready to write. */
+export async function takePages(src: OpenPdf, name: string, pages: readonly number[]): Promise<{ doc: PDFDocumentT; report: MergeReport }> {
+  const m = await Merger.create();
+  m.add(src, name, { pages, section: false });
+  return { doc: m.doc, report: m.finish() };
 }

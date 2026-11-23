@@ -24,14 +24,14 @@ export default defineConfig({
     timeout: 30_000,
   },
   projects: [
-    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testIgnore: ['**/webkit.spec.ts', '**/large.spec.ts'] },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testIgnore: ['**/webkit.spec.ts', '**/large.spec.ts'] },
-    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' }, testIgnore: ['**/webkit.spec.ts', '**/large.spec.ts'] },
+    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testIgnore: ['**/webkit.spec.ts', '**/large*.spec.ts'] },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testIgnore: ['**/webkit.spec.ts', '**/large*.spec.ts'] },
+    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' }, testIgnore: ['**/webkit.spec.ts', '**/large*.spec.ts'] },
     // Playwright's WebKit on Windows lacks OffscreenCanvas and WebCodecs, so it gets its own checks.
     { name: 'webkit', use: { ...devices['Desktop Safari'] }, testMatch: ['**/webkit.spec.ts'] },
     // A phone-sized Chrome: layout, touch-sized controls and a real conversion.
-    { name: 'mobile', use: { ...devices['Pixel 7'], channel: 'chrome' }, testMatch: ['**/smoke.spec.ts', '**/app.spec.ts', '**/pages.spec.ts', '**/catalog.spec.ts', '**/pdf-merge.spec.ts'] },
+    { name: 'mobile', use: { ...devices['Pixel 7'], channel: 'chrome' }, testMatch: ['**/smoke.spec.ts', '**/app.spec.ts', '**/pages.spec.ts', '**/catalog.spec.ts', '**/pdf-merge.spec.ts', '**/pdf-pages.spec.ts'] },
     // Large files, run on request: npx playwright test --project large
-    { name: 'large', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testMatch: ['**/large.spec.ts'], timeout: 900_000 },
+    { name: 'large', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testMatch: ['**/large.spec.ts', '**/large-pdf.spec.ts'], timeout: 900_000 },
   ],
 });

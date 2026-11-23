@@ -8,5 +8,10 @@ export async function loadTool(id: ToolId): Promise<ToolDefinition> {
     case 'remove-image-metadata': return (await import('../tools/metadata')).tool;
     case 'images-to-tiff': return (await import('../tools/combine-tiff')).tool;
     case 'merge-pdf': return (await import('../tools/merge-pdf')).tool;
+    case 'split-pdf': return (await import('../tools/split-pdf')).tool;
+    case 'extract-pdf-pages': return (await import('../tools/extract-pdf-pages')).tool;
+    case 'delete-pdf-pages': return (await import('../tools/delete-pdf-pages')).tool;
+    case 'organize-pdf': return (await import('../tools/organize-pdf')).tool;
+    case 'rotate-pdf': return (await import('../tools/rotate-pdf')).tool;
   }
 }
