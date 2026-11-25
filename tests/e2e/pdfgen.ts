@@ -82,3 +82,17 @@ export function forms(pages: number): Buffer {
   objs[2] = enc(`<< /Type /Pages /Kids [${kids.map(k => `${k} 0 R`).join(' ')}] /Count ${pages} >>`);
   return pdf(objs);
 }
+
+/** `pages` small pages, each with its number as text ("Page 1"), so the order of the pages can be read back. */
+export function numbered(pages: number): Buffer {
+  const objs: Record<number, Buffer> = { 1: enc('<< /Type /Catalog /Pages 2 0 R >>'), 3: enc('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>') };
+  const kids: number[] = [];
+  for (let i = 0; i < pages; i++) {
+    const n = 10 + 2 * i;
+    objs[n + 1] = stream(enc(`BT /F1 24 Tf 40 120 Td (Page ${i + 1}) Tj ET`));
+    objs[n] = enc(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents ${n + 1} 0 R >>`);
+    kids.push(n);
+  }
+  objs[2] = enc(`<< /Type /Pages /Kids [${kids.map(k => `${k} 0 R`).join(' ')}] /Count ${pages} >>`);
+  return pdf(objs);
+}

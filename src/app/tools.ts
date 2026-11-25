@@ -50,10 +50,12 @@ export type ToolOption =
   | OptionBase & { kind: 'check'; value: boolean }
   | OptionBase & { kind: 'text'; value: string; placeholder?: string; maxLength?: number }
   /** A new order for the pages of the one file the tool takes: a list to drag or move with buttons, and the same order
-   *  as text ("3, 1, 2, 4-10"). The value is the text; it starts as every page in order once the file's pages are known. */
+   *  as text ("3, 1, 2, 4-10", or "10-1" for every page in reverse). Once the file's pages are known the value is the
+   *  order itself, a list of page numbers from 1 (every page in order to start with), so no order depends on how long
+   *  its text would be; while the text box holds text that is not a valid order, the value is that text. */
   | OptionBase & { kind: 'order'; value: string };
 
-export type ToolValues = Record<string, string | number | boolean>;
+export type ToolValues = Record<string, string | number | boolean | readonly number[]>;
 
 export interface ToolContext {
   signal: AbortSignal;

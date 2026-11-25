@@ -532,6 +532,23 @@ def read_pdf_turns(path):
     return [[hashlib.sha256(doc[i].render(scale=1, rotation=r).to_numpy().tobytes()).hexdigest() for r in (0, 90, 180, 270)] for i in range(len(doc))]
 
 
+def read_pdf_order(path):
+    """The text of every page, in page order, as pypdf and PDFium each read it (for page orders of thousands of pages,
+    where rendering every page would be slow), with qpdf's structure check."""
+    import shutil
+    import subprocess
+    import pypdf
+    import pypdfium2
+    qpdf = shutil.which('qpdf') or 'C:/msys64/ucrt64/bin/qpdf.exe'
+    check = subprocess.run([qpdf, '--check', path], capture_output=True, text=True)
+    doc = pypdfium2.PdfDocument(path)
+    return {
+        'qpdf': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout,
+        'pypdf': [p.extract_text().strip() for p in pypdf.PdfReader(path).pages],
+        'pdfium': [doc[i].get_textpage().get_text_range().strip() for i in range(len(doc))],
+    }
+
+
 def read_media(path):
     """The picture parts of a DOCX (word/media), by SHA-256, as zipfile reads them."""
     import hashlib
@@ -570,6 +587,8 @@ elif kind == 'pdfdeep':
     result = read_pdf_deep(path)
 elif kind == 'pdfturns':
     result = read_pdf_turns(path)
+elif kind == 'pdforder':
+    result = read_pdf_order(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

@@ -10,7 +10,7 @@ import { FORMATS } from '../core/formats';
 import { formatBytes } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
-import { formatPages, parseOrder } from '../core/pageranges';
+import { checkOrder, formatOrder, parseOrder } from '../core/pageranges';
 import { sniffBlob } from '../core/sniff';
 import { clear, h } from './dom';
 import type { Engines } from './jobs';
@@ -58,8 +58,10 @@ export class Workspace {
   private confirmFor = '';
   private list!: HTMLOListElement;
   private confirmBox!: HTMLElement;
-  /** The page-order option (reorder): its list, its text box, and the file and page count it was made for. */
-  private order?: { opt: ToolOption; list: HTMLOListElement; text: HTMLInputElement; status: HTMLElement; madeFor: string };
+  /** The page-order option (reorder): its list, its text box, what the box shows, and the file and page count it was
+   *  made for. The order itself is the option's value, a list of pages; the box shows it as short text ("5000-1"), or
+   *  the text as typed. */
+  private order?: { opt: ToolOption; list: HTMLOListElement; text: HTMLInputElement; status: HTMLElement; shown: string; madeFor: string };
   private dragPage: number | null = null;
   private runBox!: HTMLElement;
   private outBox!: HTMLElement;
@@ -345,8 +347,8 @@ export class Workspace {
     const text = h('input', { type: 'text', 'data-key': `opt-${o.key}`, 'data-lock': '', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
     const list = h('ol', { class: 'ws-pages', 'aria-label': 'Pages, in their new order' }) as HTMLOListElement;
     const status = h('span', { class: 'ws-hint', 'aria-live': 'polite' });
-    this.order = { opt: o, list, text, status, madeFor: '' };
-    text.addEventListener('change', () => this.setValue(o.key, text.value.trim()));
+    this.order = { opt: o, list, text, status, shown: '', madeFor: '' };
+    text.addEventListener('change', () => this.typeOrder(text.value.trim()));
     const tools = h('div', { class: 'ws-page-tools' },
       h('button', { type: 'button', class: 'small', 'data-key': 'order-reverse', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().reverse(), 'The order was reversed.') }, 'Reverse'),
       h('button', { type: 'button', class: 'small', 'data-key': 'order-reset', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().sort((a, b) => a - b), 'The pages are back in their first order.') }, 'Reset'));
@@ -359,11 +361,30 @@ export class Workspace {
   /** The order as page numbers, or every page in order while the text does not hold a valid order. */
   private currentOrder(): number[] {
     const n = this.accepted()[0]?.pages ?? 0;
-    try { return parseOrder(String(this.values[this.order!.opt.key]), n); } catch { return Array.from({ length: n }, (_, i) => i + 1); }
+    try { return this.orderValue(n); } catch { return Array.from({ length: n }, (_, i) => i + 1); }
+  }
+
+  /** The option's order for a file of n pages: the list kept, or the text typed read as an order (which may throw). */
+  private orderValue(n: number): number[] {
+    const v = this.values[this.order!.opt.key];
+    return Array.isArray(v) ? checkOrder(v, n) : parseOrder(String(v), n);
+  }
+
+  /** Text typed in the box: kept as the order when it is one (the box keeps the text as typed), otherwise kept as
+   *  text, so the tool's check shows what is wrong with it. */
+  private typeOrder(text: string): void {
+    const o = this.order!;
+    const n = this.accepted()[0]?.pages ?? 0;
+    o.shown = text;
+    let value: string | number[] = text;
+    try { value = parseOrder(text, n); } catch { /* the check says why */ }
+    this.values[o.opt.key] = value;
+    this.changed();
   }
 
   private setOrder(order: number[], message?: string): void {
-    this.values[this.order!.opt.key] = formatPages(order);
+    this.values[this.order!.opt.key] = order;
+    this.order!.shown = formatOrder(order);
     this.changed();
     if (message) this.host.announce(message);
   }
@@ -386,13 +407,14 @@ export class Workspace {
     const madeFor = file ? `${file.id}:${n}` : '';
     if (o.madeFor !== madeFor) {
       o.madeFor = madeFor;
-      this.values[o.opt.key] = n ? `1-${n}` : '';
+      this.values[o.opt.key] = n ? Array.from({ length: n }, (_, i) => i + 1) : '';
+      o.shown = n ? `1-${n}` : '';
     }
-    o.text.value = String(this.values[o.opt.key]);
+    o.text.value = o.shown;
     clear(o.list);
     if (!n) { o.status.textContent = 'Add a PDF to see its pages.'; return; }
     let order: number[] | null = null;
-    try { order = parseOrder(o.text.value, n); } catch (e) { o.status.textContent = (e as Error).message; }
+    try { order = this.orderValue(n); } catch (e) { o.status.textContent = (e as Error).message; }
     if (!order) return;
     o.status.textContent = order.every((p, i) => p === i + 1) ? `${n.toLocaleString('en-US')} pages, in their first order.` : `${n.toLocaleString('en-US')} pages, in a new order.`;
     const lock = this.running;

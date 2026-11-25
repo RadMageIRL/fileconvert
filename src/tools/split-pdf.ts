@@ -2,7 +2,7 @@
 // read once in the PDF worker; each part is copied from it with only its own pages (src/engines/pdf/merge.ts,
 // takePages), so links, bookmarks and form fields stay where their pages are and nothing of the other pages is in it.
 
-import type { ToolDefinition } from '../app/tools';
+import type { ToolDefinition, ToolValues } from '../app/tools';
 import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { everyN, parseRanges, type PageRange } from '../core/pageranges';
@@ -10,7 +10,7 @@ import type { MergeReport } from '../engines/pdf/merge';
 import { allowance, checkWith, describeParts, inspectPdf, pageLabel, pagesOfInput, plural } from './pdf-common';
 
 /** The parts the options ask for, as page ranges (1-based). */
-export function splitParts(values: Record<string, string | number | boolean>, pages: number): PageRange[] {
+export function splitParts(values: ToolValues, pages: number): PageRange[] {
   if (values.mode === 'every') return everyN(pages, Number(values.every));
   if (values.mode === 'each') return everyN(pages, 1);
   return parseRanges(String(values.ranges), pages);

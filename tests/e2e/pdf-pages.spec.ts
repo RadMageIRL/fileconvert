@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { fx, openApp, PYTHON, pyRead, save, tempDir, unexpectedViolations, writeTemp } from './helpers';
+import { numbered } from './pdfgen';
 
 // Split, extract, delete, reorder and rotate (v0.2.0, Phase 2) in the browser: each tool in the workspace, the work in
 // the PDF worker, every result read by qpdf, pypdf and PDFium (tests/e2e/readers.py), which share no code with
@@ -194,6 +195,14 @@ test('reorder pages with the keyboard, by dragging, or as text: links, bookmarks
   // At the top its Up button is off, so the focus goes to its Down button, not back to the start of the page.
   await expect(ws(page).getByRole('button', { name: 'Move page 3 down' })).toBeFocused();
   await expect(ws(page).getByLabel('New page order')).toHaveValue('3, 1-2');
+  // Reverse turns the order as it is now, not the first order, and twice gives it back.
+  const reverse = ws(page).getByRole('button', { name: 'Reverse' });
+  await reverse.click();
+  await expect(rows).toHaveText(['Page 2', 'Page 1', 'Page 3']);
+  await expect(ws(page).getByLabel('New page order')).toHaveValue('2-1, 3');
+  await reverse.click();
+  await expect(rows).toHaveText(['Page 3', 'Page 1', 'Page 2']);
+  await expect(ws(page).getByLabel('New page order')).toHaveValue('3, 1-2');
   // Text: the accessible way to set any order at once.
   const text = ws(page).getByLabel('New page order');
   await text.fill('2, 2, 1');
@@ -229,6 +238,61 @@ test('reorder pages with the keyboard, by dragging, or as text: links, bookmarks
   await add(page, [fx('pdf/merge-b.pdf')]);
   await expect(rows).toHaveText(['Page 1', 'Page 2']);
   await expect(text).toHaveValue('1-2');
+});
+
+test('Reverse on a 5,000-page PDF: one range each way, twice gives the order back, and readers see every page reversed', async ({ page }, info) => {
+  test.slow();
+  await openApp(page);
+  await openTool(page, 'organize-pdf', 'Reorder PDF pages');
+  const file = writeTemp(tempDir(), 'numbered-5000.pdf', numbered(5000));
+  await add(page, [file]);
+  const text = ws(page).getByLabel('New page order');
+  const rows = ws(page).locator('.ws-page .ws-page-name');
+  const reverse = ws(page).getByRole('button', { name: 'Reverse' });
+  await expect(text).toHaveValue('1-5000');
+  await reverse.click();
+  await expect(text).toHaveValue('5000-1');
+  await expect(rows).toHaveCount(5000);
+  await expect(rows.first()).toHaveText('Page 5000');
+  await expect(rows.last()).toHaveText('Page 1');
+  await expect(ws(page).locator('.ws-why')).toHaveCount(0);
+  await reverse.click();
+  await expect(text).toHaveValue('1-5000');
+  await expect(ws(page).locator('.ws-why')).toHaveText('The pages are in their first order; move some to reorder them.');
+  // An order that is not the first one: page 1 moved below page 2, then the whole order reversed, and back.
+  await ws(page).getByRole('button', { name: 'Move page 1 down' }).click();
+  await expect(text).toHaveValue('2-1, 3-5000');
+  await reverse.click();
+  await expect(text).toHaveValue('5000-3, 1-2');
+  await expect(rows.nth(4997)).toHaveText('Page 3');
+  await expect(rows.nth(4998)).toHaveText('Page 1');
+  await reverse.click();
+  await expect(text).toHaveValue('2-1, 3-5000');
+  // Typed: ranges up and down mixed, reversed both ways.
+  await text.fill('4234-1, 4235-5000');
+  await text.press('Tab');
+  await expect(rows.first()).toHaveText('Page 4234');
+  await expect(rows.nth(4234)).toHaveText('Page 4235');
+  await reverse.click();
+  await expect(text).toHaveValue('5000-4235, 1-4234');
+  await reverse.click();
+  await expect(text).toHaveValue('4234-1, 4235-5000');
+  // Still refused as typed: a page twice, a page the PDF does not have.
+  await text.fill('5000-1, 7');
+  await text.press('Tab');
+  await expect(ws(page).locator('.ws-why')).toHaveText('Page 7 is listed more than once; list each page once.');
+  await text.fill('5001-1');
+  await text.press('Tab');
+  await expect(ws(page).locator('.ws-why')).toHaveText('There is no page 5,001; the PDF has 5,000 pages.');
+  // Reverse from text that is not an order starts from the first order, as before.
+  await reverse.click();
+  await expect(text).toHaveValue('5000-1');
+  const [out] = await runAndSave(page, info, 'Reorder the pages');
+  const r = pyRead<{ qpdf: boolean; pypdf: string[]; pdfium: string[] }>('pdforder', out.path);
+  const expected = Array.from({ length: 5000 }, (_, i) => `Page ${5000 - i}`);
+  expect(r.qpdf).toBe(true);
+  expect(r.pypdf).toEqual(expected);
+  expect(r.pdfium).toEqual(expected);
 });
 
 test('rotate every page or some, either way: PDFium draws each page as it draws the source page turned', async ({ page }, info) => {
