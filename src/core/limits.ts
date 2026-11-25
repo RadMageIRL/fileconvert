@@ -89,6 +89,30 @@ export const LIMITS = {
     gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, stream: 3.5 },
     other: { base: 320 * MB, byte: 4.5, parsed: 48, page: 64 * 1024, stream: 4 },
   },
+  /**
+   * Images to PDF (src/engines/pdf/images.ts): pictures in one PDF, and what the PDF may hold in all. Pictures are read
+   * one at a time; each is the same size limit as any image (imageBytes, imagePixels, imageSide), and the pages, with
+   * a multi-page TIFF's, are no more than pdfPages.
+   */
+  imagePdfFiles: 500,
+  imagePdfBytes: 2048 * MB,
+  /**
+   * The memory estimate for Images to PDF (src/core/pdfmemory.ts, estimateImages), for each engine: a base; per byte
+   * the PDF holds (`held`: kept while the next pictures are added, then written out whole and handed to the page);
+   * for the one picture being added, per byte of its file (`copy`: read and copied once), per byte of its decoded
+   * samples when a PNG is decoded here (`planes`), or per pixel when the browser decodes it (`pixel`: its bitmap, a
+   * canvas, the pixels read back, and the planes made from them); and per page. A JPEG or a PNG that goes in as it is
+   * is never decoded, so it costs its bytes only; each page costs most for many small pictures (each is checked as it is
+   * added, listed, and becomes PDF objects). Fitted to peaks measured in Chrome, Firefox and WebKit as Playwright runs it
+   * on Windows (not Safari), each set at least 10% above every peak in its browser; 'other' is at least the highest of
+   * them, part by part, and is all an unknown engine gets. WebKit held a PDF of pictures at seven to eight times its bytes.
+   * Pictures the browser decodes (WebP, GIF, BMP) were not measured in WebKit, which has no OffscreenCanvas there.
+   */
+  imagePdfMemory: {
+    v8: { base: 128 * MB, held: 3.5, copy: 3, planes: 3, pixel: 24, page: 768 * 1024 },
+    gecko: { base: 256 * MB, held: 3.5, copy: 3, planes: 3, pixel: 24, page: 1536 * 1024 },
+    other: { base: 320 * MB, held: 7.5, copy: 3, planes: 5, pixel: 40, page: 1536 * 1024 },
+  },
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,

@@ -57,7 +57,7 @@ const label = (id: FormatId) => FORMATS[id].label;
 const listOf = (ids: FormatId[]) => ids.map(label).join(', ');
 
 /** Answers for the formats named in a query that the page list alone cannot give. */
-export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boolean): string[] {
+export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boolean, served: (from: FormatId, to: FormatId) => boolean = () => false): string[] {
   const out = [...q.unsupported];
   const [a, b] = q.formats;
   const archive = (f: FormatId | undefined) => !!f && FORMATS[f].category === 'archive';
@@ -70,6 +70,8 @@ export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boo
   } else if (a && b) {
     if (PAIRS.has(`${a}>${b}`)) {
       if (!hasPage(a, b)) out.push(`${label(a)} to ${label(b)} is supported. Add your file to the converter at the top of the page and choose ${label(b)}.`);
+    } else if (served(a, b)) {
+      // A tool page does it (Images to PDF for JPG to PDF), and is listed.
     } else if (b === 'heic') {
       out.push('HEIC is read but not written: the open HEVC encoders are GPL-licensed and patent-encumbered.');
     } else if (a !== b) {
@@ -97,19 +99,22 @@ export function setupCatalog(): void {
   const groups = [...document.querySelectorAll<HTMLElement>('.cat-group')];
   const chips = [...tools.querySelectorAll<HTMLButtonElement>('.chip')];
   const hasPage = (a: FormatId, b: FormatId) => items.some(i => i.dataset.from === a && i.dataset.to === b);
+  const serves = (i: HTMLElement, a?: FormatId, b?: FormatId) => !!a && !!b && (i.dataset.serves ?? '').split(' ').includes(`${a}>${b}`);
+  const served = (a: FormatId, b: FormatId) => items.some(i => serves(i, a, b));
   let category = '';
 
   const update = () => {
     const q = parseQuery(input.value);
     let shown = 0;
     for (const item of items) {
-      // A query naming two formats asks for a conversion, so tool pages are left out of its results.
-      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens) && !((item.dataset.tool || item.dataset.extract) && q.formats.length >= 2);
+      // A query naming two formats asks for a conversion, so tool pages are left out of its results, unless they do it.
+      const two = q.formats.length >= 2;
+      const ok = (!category || item.dataset.cat === category) && matches((item.dataset.terms ?? '').split(' '), q.tokens) && !((item.dataset.tool || item.dataset.extract) && two && !serves(item, q.formats[0], q.formats[1]));
       item.hidden = !ok;
       if (ok) shown++;
     }
     for (const g of groups) g.hidden = !g.querySelector('.cat-item:not([hidden])');
-    const lines = q.tokens.length ? answers(q, hasPage) : [];
+    const lines = q.tokens.length ? answers(q, hasPage, served) : [];
     clear(more);
     for (const l of lines) more.append(h('p', {}, l));
     if (lines.some(l => l.includes('converter at the top'))) {

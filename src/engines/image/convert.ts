@@ -85,6 +85,12 @@ interface HeifImage {
 }
 
 async function decodeHeic(bytes: Uint8Array, warnings: string[]): Promise<Picture> {
+  const { data, width, height } = await heicRgba(bytes, warnings);
+  return imageDataPicture(data, width, height);
+}
+
+/** A HEIC file's main picture as 8-bit RGBA, from libheif. */
+async function heicRgba(bytes: Uint8Array, warnings: string[]): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
   if (!heif) heif = import('libheif-js/libheif-wasm/libheif-bundle.mjs').then(m => (m.default as unknown as () => Promise<never>)());
   const lib = await heif;
   const decoder = new lib.HeifDecoder();
@@ -98,13 +104,13 @@ async function decodeHeic(bytes: Uint8Array, warnings: string[]): Promise<Pictur
   await new Promise<void>((resolve, reject) => image.display({ data, width, height }, r => r ? resolve() : reject(new Error('The HEIC picture could not be decoded. It may be damaged.'))));
   for (const i of images) i.free?.();
   warnings.push('HEIC color profiles are not applied; photos in a wide color space (such as Display P3) can look slightly less vivid.');
-  return imageDataPicture(data, width, height);
+  return { data, width, height };
 }
 
-interface TiffIfd { width: number; height: number; data?: Uint8Array; t254?: number[]; t256?: number[]; t257?: number[]; t274?: number[]; t34675?: unknown }
+interface TiffIfd { width: number; height: number; data?: Uint8Array; t254?: number[]; t256?: number[]; t257?: number[]; t258?: number[]; t274?: number[]; t34675?: unknown }
 
 /** The pages of a TIFF (thumbnails and other reduced images left out), decoded one at a time. */
-async function openTiff(bytes: Uint8Array, warnings: string[]): Promise<{ count: number; decode(i: number): Promise<{ pic: Picture; orientation: number }> }> {
+async function openTiff(bytes: Uint8Array, warnings: string[]): Promise<{ count: number; size(i: number): { width: number; height: number; bits: number }; raw(i: number): Promise<RawPicture>; decode(i: number): Promise<{ pic: Picture; orientation: number }> }> {
   const UTIF = (await import('utif')).default as unknown as {
     decode(b: ArrayBuffer | Uint8Array): TiffIfd[];
     decodeImage(b: ArrayBuffer | Uint8Array, ifd: TiffIfd, ifds: TiffIfd[]): void;
@@ -118,17 +124,23 @@ async function openTiff(bytes: Uint8Array, warnings: string[]): Promise<{ count:
   if (!pages.length) throw new Error('No picture was found in this TIFF file.');
   if (pages.length > LIMITS.tiffPages) throw new LimitError(`The TIFF has ${pages.length} pages; the limit is ${LIMITS.tiffPages}.`);
   if (pages.some(p => p.t34675)) warnings.push('The TIFF has an embedded color profile, which is not applied.');
+  const raw = async (i: number): Promise<RawPicture> => {
+    const page = pages[i];
+    checkPixels(page.t256?.[0] ?? 0, page.t257?.[0] ?? 0);
+    try { UTIF.decodeImage(buf, page, ifds); } catch { throw new Error(`Page ${i + 1} of this TIFF uses a compression or layout that could not be decoded.`); }
+    const rgba = UTIF.toRGBA8(page);
+    if (!page.width || !page.height || rgba.length < page.width * page.height * 4) throw new Error(`Page ${i + 1} of this TIFF could not be decoded.`);
+    page.data = undefined;
+    return { rgba: new Uint8Array(rgba.buffer, rgba.byteOffset, page.width * page.height * 4), width: page.width, height: page.height, orientation: page.t274?.[0] ?? 1, bits: Math.max(...(page.t258 ?? [8])), exact: true };
+  };
   return {
     count: pages.length,
+    size: (i: number) => ({ width: pages[i].t256?.[0] ?? 0, height: pages[i].t257?.[0] ?? 0, bits: Math.max(...(pages[i].t258 ?? [8])) }),
+    raw,
     async decode(i: number) {
-      const page = pages[i];
-      checkPixels(page.t256?.[0] ?? 0, page.t257?.[0] ?? 0);
-      try { UTIF.decodeImage(buf, page, ifds); } catch { throw new Error(`Page ${i + 1} of this TIFF uses a compression or layout that could not be decoded.`); }
-      const rgba = UTIF.toRGBA8(page);
-      if (!page.width || !page.height || rgba.length < page.width * page.height * 4) throw new Error(`Page ${i + 1} of this TIFF could not be decoded.`);
-      const pic = imageDataPicture(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, page.width * page.height * 4), page.width, page.height);
-      page.data = undefined;
-      return { pic, orientation: page.t274?.[0] ?? 1 };
+      const r = await raw(i);
+      const pic = imageDataPicture(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.width * r.height * 4), r.width, r.height);
+      return { pic, orientation: r.orientation };
     },
   };
 }
@@ -146,12 +158,18 @@ async function decodeIco(bytes: Uint8Array, warnings: string[]): Promise<Picture
 }
 
 async function decodeAvifWasm(bytes: Uint8Array): Promise<Picture> {
+  const img = await avifRgba(bytes);
+  return imageDataPicture(img.data, img.width, img.height);
+}
+
+/** An AVIF picture as 8-bit RGBA, from the AVIF decoder (for browsers that cannot decode AVIF themselves). */
+async function avifRgba(bytes: Uint8Array): Promise<ImageData> {
   const factory = (await import('@jsquash/avif/codec/dec/avif_dec.js')).default as unknown as (o: Record<string, unknown>) => Promise<{ decode(b: Uint8Array, bitDepth: number): ImageData | null }>;
   const mod = await factory({ noInitialRun: true });
   const img = mod.decode(bytes, 8);
   if (!img) throw new Error('The AVIF picture could not be decoded. It may be damaged.');
   checkPixels(img.width, img.height);
-  return imageDataPicture(img.data, img.width, img.height);
+  return img;
 }
 
 async function decodeNative(bytes: Uint8Array, mime: string): Promise<Picture> {
@@ -172,6 +190,72 @@ async function decode(bytes: Uint8Array, format: FormatId, warnings: string[]): 
     if (format === 'avif') return { pic: await decodeAvifWasm(bytes), orientation: 1 };
     throw new Error(`The ${FORMATS[format].label} image could not be decoded. It may be damaged or incomplete.`, { cause: e });
   }
+}
+
+// ------------------------------------------------------------------ pixels for a PDF
+
+/** One picture as 8-bit RGBA, for Images to PDF, with the orientation still to apply (a TIFF's own tag; the browser
+ *  applies EXIF orientation itself, so 1 for every other format). `exact` is false when the pixels were read back
+ *  from a canvas, which keeps partly transparent colors only approximately. `bits` is the source's bits per channel. */
+export interface RawPicture {
+  rgba: Uint8Array;
+  width: number;
+  height: number;
+  orientation: number;
+  bits: number;
+  exact: boolean;
+}
+
+/** The bits per channel an AVIF or HEIF file declares (its pixi property), or 8. */
+function isobmffBits(b: Uint8Array): number {
+  for (let i = 4; i + 9 <= b.length && i < 1 << 20; i++) {
+    if (b[i] === 0x70 && b[i + 1] === 0x69 && b[i + 2] === 0x78 && b[i + 3] === 0x69) return b[i + 9] || 8;
+  }
+  return 8;
+}
+
+/**
+ * The pictures of a file as 8-bit RGBA, for Images to PDF: each page of a multi-page TIFF (from the TIFF decoder, as
+ * they are), or the one picture (HEIC and, where the browser cannot, AVIF from their decoders; the rest from the
+ * browser, which applies the EXIF orientation and converts colors to sRGB). `size` gives a page's size before it is
+ * decoded, so its memory can be checked first.
+ */
+export async function rawPictures(bytes: Uint8Array, format: FormatId, warnings: string[]): Promise<{ count: number; size(i: number): { width: number; height: number; bits: number }; get(i: number): Promise<RawPicture> }> {
+  if (format === 'tiff') {
+    const t = await openTiff(bytes, warnings);
+    return { count: t.count, size: t.size, get: t.raw };
+  }
+  const header = readHeader(bytes, format);
+  const bits = format === 'avif' || format === 'heic' ? isobmffBits(bytes) : 8;
+  const size = { width: header.width ?? 0, height: header.height ?? 0, bits };
+  checkPixels(size.width, size.height);
+  const get = async (): Promise<RawPicture> => {
+    if (format === 'heic') {
+      const r = await heicRgba(bytes, warnings);
+      return { rgba: new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.length), width: r.width, height: r.height, orientation: 1, bits, exact: true };
+    }
+    let bmp: ImageBitmap;
+    try {
+      bmp = await createImageBitmap(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: FORMATS[format].mime }), { imageOrientation: 'from-image', premultiplyAlpha: 'none', colorSpaceConversion: 'default' });
+    } catch (e) {
+      if (format === 'avif') {
+        const img = await avifRgba(bytes);
+        return { rgba: new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.length), width: img.width, height: img.height, orientation: 1, bits, exact: true };
+      }
+      throw new Error(`The ${FORMATS[format].label} picture could not be decoded. It may be damaged or incomplete.`, { cause: e });
+    }
+    try {
+      checkPixels(bmp.width, bmp.height);
+      const ctx = context(bmp.width, bmp.height);
+      ctx.drawImage(bmp, 0, 0);
+      const data = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+      ctx.canvas.width = 0;
+      return { rgba: new Uint8Array(data.buffer, data.byteOffset, data.length), width: bmp.width, height: bmp.height, orientation: 1, bits, exact: false };
+    } finally {
+      bmp.close();
+    }
+  };
+  return { count: 1, size: () => size, get };
 }
 
 // ------------------------------------------------------------------ geometry

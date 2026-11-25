@@ -57,8 +57,8 @@ test('a conversion page loads with its content, and the catalog search works', a
   await expect(page.locator('html[data-ready="true"]')).toBeAttached();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Convert JSON to CSV');
   await page.getByRole('searchbox', { name: 'Search conversions' }).fill('heic');
-  // The TIFF tool takes HEIC pictures, so it matches too.
-  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF']);
+  // The TIFF tool and Images to PDF take HEIC pictures, so they match too.
+  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF', 'Images to PDF']);
   await addFiles(page, [fx('data/records.json')]);
   await expect(row(page, 'records.json').getByRole('combobox', { name: 'Convert records.json to' })).toHaveValue('csv');
   expect(errors).toEqual([]);
@@ -239,4 +239,32 @@ test('WebKit on an iPhone or iPad: no device memory reported, so a phone or tabl
     await expect(ws.locator('.ws-item .job-error')).toHaveText(/^This PDF needs about [\d.]+ GB of memory, more than the 1\.00 GB FileConvert lets one task use on a phone or tablet whose browser does not say how much memory it has, so it was not started\. Chrome and Edge say how much memory the device has, so FileConvert may allow more there\.$/);
     await context.close();
   }
+});
+
+test('Images to PDF in WebKit: JPEG, PNG, TIFF and HEIC go in exactly; a WebP, which needs a canvas in a worker, says why not', async ({ page }) => {
+  const w = await openApp(page);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('images-to-pdf'));
+  const ws = page.locator('#workspace');
+  await ws.locator('[data-key="opt-size"]').selectOption('picture');
+  const sources = [fx('image-pdf/orient6.jpg'), fx('image-pdf/rgba16.png'), fx('image-pdf/pal8-trns.png'), fx('image/two-pages.tiff'), fx('image/photo.heic')];
+  await ws.locator('input[type=file]').setInputFiles([...sources, fx('image/alpha.webp')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  const webp = ws.locator('.ws-item').filter({ hasText: 'alpha.webp' });
+  await expect(webp.locator('.job-error')).toContainText('it has no OffscreenCanvas');
+  await ws.getByRole('button', { name: 'Make the PDF' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 120_000 });
+  const bytes = await page.evaluate(async () => {
+    const app = (window as unknown as { __fileconvert: { workspace: { outputs: Array<{ blob: Blob }> } } }).__fileconvert;
+    return [...new Uint8Array(await app.workspace.outputs[0].blob.arrayBuffer())];
+  });
+  const pdf = writeTemp(tempDir(), 'images-webkit.pdf', new Uint8Array(bytes));
+  const spec = writeTemp(tempDir(), 'spec.json', new TextEncoder().encode(JSON.stringify({ pdf, sources, pictureSize: true })));
+  type R = { qpdf: boolean; pages: Array<{ source: string; exact?: boolean; alphaExact?: boolean; jpegSame?: boolean; render?: { max: number } }> };
+  const r = pyRead<R>('imagepdf', spec);
+  expect(r.qpdf).toBe(true);
+  expect(r.pages.map(p => p.source)).toEqual(['orient6.jpg', 'rgba16.png', 'pal8-trns.png', 'two-pages.tiff', 'two-pages.tiff', 'photo.heic']);
+  expect(r.pages.slice(0, 3).map(p => [p.exact, p.render!.max <= 1])).toEqual([[true, true], [true, true], [true, true]]);
+  expect(r.pages[0].jpegSame).toBe(true);
+  expect(r.pages[1].alphaExact).toBe(true);
+  expect(w.outside).toEqual([]);
 });

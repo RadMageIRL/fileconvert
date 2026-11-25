@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { answers, NOT_SUPPORTED, parseQuery } from '../../src/app/catalog';
 import { allConversions, FORMATS } from '../../src/core/formats';
 import { commonPages, isConversion, isNamed, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
-import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderPage, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
+import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderPage, searchTerms, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
 
 const template = readFileSync(join(__dirname, '..', '..', 'index.html'), 'utf8');
 /** The home page as the build makes it, with its static content filled in. */
@@ -19,9 +19,9 @@ describe('the page list', () => {
   test('holds the planned pages whose conversions are in place', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
       'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'delete-pdf-pages', 'docx-to-html', 'docx-to-markdown', 'extract-pdf-pages', 'extract-tar', 'extract-zip', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp',
-      'heic-to-jpg', 'heic-to-png', 'html-to-docx', 'html-to-markdown', 'images-to-tiff', 'jpg-to-png', 'json-to-csv', 'json-to-jsonl',
+      'heic-to-jpg', 'heic-to-png', 'html-to-docx', 'html-to-markdown', 'images-to-pdf', 'images-to-tiff', 'jpg-to-pdf', 'jpg-to-png', 'json-to-csv', 'json-to-jsonl',
       'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'merge-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'organize-pdf', 'pdf-to-text',
-      'png-to-ico', 'png-to-jpg', 'png-to-webp', 'remove-image-metadata', 'rotate-pdf', 'split-pdf', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
+      'png-to-ico', 'png-to-jpg', 'png-to-pdf', 'png-to-webp', 'remove-image-metadata', 'rotate-pdf', 'split-pdf', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
       'xls-to-csv', 'xls-to-xlsx', 'xlsx-to-csv', 'xlsx-to-json', 'xml-to-csv', 'xml-to-xlsx', 'yaml-to-csv',
     ]);
   });
@@ -194,6 +194,17 @@ describe('catalog search', () => {
     expect(answers(parseQuery('heic to jpg'), (a, b) => a === 'heic' && b === 'jpg')).toEqual([]);
     expect(answers(parseQuery('jpg to heic'), none)[0]).toMatch(/^HEIC is read but not written/);
     expect(answers(parseQuery('docx to pdf'), none)).toEqual(['FileConvert does not convert DOCX to PDF.']);
+    // A tool page that does the conversion is listed instead of a "does not convert" answer.
+    const served = (a: string, b: string) => b === 'pdf' && ['jpg', 'png', 'heic'].includes(a);
+    expect(answers(parseQuery('jpg to pdf'), none, served)).toEqual([]);
+    expect(answers(parseQuery('heic to pdf'), none, served)).toEqual([]);
+    expect(answers(parseQuery('docx to pdf'), none, served)).toEqual(['FileConvert does not convert DOCX to PDF.']);
+    const imagesPage = PAGES.find(p => p.slug === 'images-to-pdf')!;
+    expect(searchTerms(imagesPage).split(' ')).toEqual(expect.arrayContaining(['pdf', 'jpg', 'jpeg', 'heic', 'tiff']));
+    // JPG to PDF is found by its own formats, not by every picture its tool takes.
+    const jpgPage = searchTerms(PAGES.find(p => p.slug === 'jpg-to-pdf')!).split(' ');
+    expect(jpgPage).toEqual(expect.arrayContaining(['jpg', 'jpeg', 'pdf']));
+    expect(jpgPage).not.toContain('heic');
     expect(answers(parseQuery('avi to mp4'), none)[0]).toMatch(/^AVI video is not supported yet/);
     expect(answers(parseQuery('webp to mp4'), none)).toEqual(['WebP to MP4 is supported. Add your file to the converter at the top of the page and choose MP4.']);
     const yaml = answers(parseQuery('yaml'), none);

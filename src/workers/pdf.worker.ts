@@ -6,9 +6,11 @@
 // refuses before it starts: on the file's size alone before reading it, then on what the guard counted before any
 // PDF library reads it. Split checks once more, before copying anything, what its parts would hold together.
 
+import type { FormatId } from '../core/formats';
 import { formatBytes } from '../core/limits';
-import { admit, estimate, estimateFromSize, workOf, type MemoryAllowance, type PdfWork } from '../core/pdfmemory';
+import { admit, estimate, estimateFromSize, estimateImageCheck, workOf, type MemoryAllowance, type PdfWork } from '../core/pdfmemory';
 import { buffersOf, serve } from '../core/rpc';
+import type { ImagePageOptions } from '../engines/pdf/imagelayout';
 import { ENCRYPTED_MESSAGE, scanPdf } from '../engines/pdf/scan';
 
 /** An error about one of several files names it. */
@@ -96,6 +98,20 @@ serve({
       parts.push({ bytes: await s.savePdf(doc), report });
     }
     return { result: { parts, signature: open.signature }, transfer: buffersOf(...parts.map(x => x.bytes)) };
+  },
+  /** A picture added to Images to PDF: checked whole, nothing decoded (src/engines/pdf/images.ts, checkPicture). */
+  async inspectImage(p: { file: Blob; format: FormatId; allowance?: MemoryAllowance }, progress) {
+    progress({ stage: 'Checking the picture' });
+    admit(estimateImageCheck(p.file.size, p.allowance?.engine), p.allowance, 'Checking this picture needs', '');
+    const { checkPicture } = await import('../engines/pdf/images');
+    return { result: await checkPicture(new Uint8Array(await p.file.arrayBuffer()), p.format) };
+  },
+  /** Images to PDF: the pictures in order, one page each, each read and checked for memory before it is added and let
+   *  go before the next (src/engines/pdf/images.ts). */
+  async imagesToPdf(p: { files: Array<{ file: Blob; format: FormatId; name: string }>; options: ImagePageOptions; allowance?: MemoryAllowance }, progress) {
+    const { imagesToPdf } = await import('../engines/pdf/images');
+    const r = await imagesToPdf(p.files, p.options, p.allowance, progress);
+    return { result: r, transfer: buffersOf(r.bytes) };
   },
   /** The files in order, one at a time: each is checked, read, copied in, and let go before the next. Before each is
    *  read, the files so far and this one together are held to the allowance (the page checked the whole set first). */

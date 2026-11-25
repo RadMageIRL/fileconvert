@@ -549,6 +549,432 @@ def read_pdf_order(path):
     }
 
 
+# ---------------------------------------------------------------- Images to PDF
+
+ADAM7 = [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)]
+
+
+def unpredict(data, columns, colors, bpc, rows=None):
+    """Undoes PNG row filters (PNG files, and PDF's Predictor 10 to 15), returning the rows without their filter bytes."""
+    import numpy as np
+    bpp = max(1, (colors * bpc + 7) // 8)
+    rowbytes = (columns * colors * bpc + 7) // 8
+    n = rows if rows is not None else len(data) // (rowbytes + 1)
+    out = np.zeros((n, rowbytes), dtype=np.int64)
+    prev = np.zeros(rowbytes, dtype=np.int64)
+    for y in range(n):
+        f = data[y * (rowbytes + 1)]
+        cur = np.frombuffer(data, dtype=np.uint8, count=rowbytes, offset=y * (rowbytes + 1) + 1).astype(np.int64).copy()
+        if f == 0:
+            pass
+        elif f == 2:
+            cur = (cur + prev) & 0xFF
+        else:
+            for i in range(rowbytes):
+                a = cur[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                if f == 1:
+                    cur[i] = (cur[i] + a) & 0xFF
+                elif f == 3:
+                    cur[i] = (cur[i] + ((a + b) >> 1)) & 0xFF
+                else:
+                    c = prev[i - bpp] if i >= bpp else 0
+                    p = a + b - c
+                    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                    cur[i] = (cur[i] + (a if pa <= pb and pa <= pc else (b if pb <= pc else c))) & 0xFF
+        out[y] = cur
+        prev = cur
+    return out
+
+
+def unpack(rows, width, n, bpc):
+    """Rows of bytes to samples (h, w, n) at the bit depth (big-endian for 16 bits)."""
+    import numpy as np
+    h = rows.shape[0]
+    if bpc == 16:
+        b = rows.astype(np.uint16)
+        s = (b[:, 0::2] << 8) | b[:, 1::2]
+        return s[:, : width * n].reshape(h, width, n).astype(np.int64)
+    if bpc == 8:
+        return rows[:, : width * n].reshape(h, width, n)
+    bits = np.unpackbits(rows.astype(np.uint8), axis=1)[:, : width * n * bpc].reshape(h, width * n, bpc)
+    vals = np.zeros((h, width * n), dtype=np.int64)
+    for k in range(bpc):
+        vals = (vals << 1) | bits[:, :, k]
+    return vals.reshape(h, width, n)
+
+
+def png_source(path):
+    """A PNG decoded by this file's own decoder: its samples at their own depth, its alpha, palette, color key and
+    orientation."""
+    import zlib
+    import numpy as np
+    from PIL import Image
+    b = open(path, 'rb').read()
+    p = 8
+    idat = b''
+    info = {'palette': None, 'trns': None}
+    while p < len(b):
+        n = int.from_bytes(b[p:p + 4], 'big')
+        kind = b[p + 4:p + 8]
+        data = b[p + 8:p + 8 + n]
+        if kind == b'IHDR':
+            w, h, depth, ct, _, _, interlace = int.from_bytes(data[:4], 'big'), int.from_bytes(data[4:8], 'big'), data[8], data[9], data[10], data[11], data[12]
+        elif kind == b'PLTE':
+            info['palette'] = data
+        elif kind == b'tRNS':
+            info['trns'] = data
+        elif kind == b'IDAT':
+            idat += data
+        p += 12 + n
+    spp = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
+    raw = zlib.decompressobj().decompress(idat)
+    if interlace:
+        samples = np.zeros((h, w, spp), dtype=np.int64)
+        at = 0
+        for x0, y0, dx, dy in ADAM7:
+            pw, ph = max(0, -(-(w - x0) // dx)), max(0, -(-(h - y0) // dy))
+            if not pw or not ph:
+                continue
+            rb = (pw * spp * depth + 7) // 8
+            part = raw[at: at + ph * (rb + 1)]
+            at += ph * (rb + 1)
+            samples[y0::dy, x0::dx] = unpack(unpredict(part, pw, spp, depth, ph), pw, spp, depth)
+    else:
+        samples = unpack(unpredict(raw, w, spp, depth, h), w, spp, depth)
+    colors = 3 if ct in (2, 6) else 1
+    orientation = 1
+    try:
+        orientation = Image.open(path).getexif().get(0x0112, 1)
+    except Exception:
+        pass
+    return {'ct': ct, 'depth': depth, 'w': w, 'h': h, 'color': samples[..., :colors], 'alpha': samples[..., colors] if ct in (4, 6) else None,
+            'palette': info['palette'], 'trns': info['trns'], 'orientation': orientation}
+
+
+def jpeg_without_metadata(b):
+    """A JPEG with its APPn segments other than JFIF and Adobe, and its comments, taken out (between scans too), cut
+    at its end marker: what a PDF should hold. Walked by this file's own code."""
+    out = bytearray(b[:2])
+    p = 2
+    while p + 1 < len(b):
+        m = b[p + 1]
+        if b[p] != 0xFF:
+            break
+        if m == 0xFF:
+            p += 1
+            continue
+        if m == 0xD9:
+            out += b[p:p + 2]
+            return bytes(out), p + 2
+        if 0xD0 <= m <= 0xD7:
+            out += b[p:p + 2]
+            p += 2
+            continue
+        end = p + 2 + int.from_bytes(b[p + 2:p + 4], 'big')
+        if m == 0xDA:
+            q = end
+            while True:
+                q = b.find(b'\xff', q)
+                if q < 0 or q + 1 >= len(b):
+                    q = len(b)
+                    break
+                n = b[q + 1]
+                if n == 0 or 0xD0 <= n <= 0xD7:
+                    q += 2
+                    continue
+                if n == 0xFF:
+                    q += 1
+                    continue
+                break
+            out += b[p:q]
+            p = q
+            continue
+        keep = not ((0xE0 <= m <= 0xEF) or m == 0xFE) or (m == 0xE0 and b[p + 4:p + 9] == b'JFIF\x00') or (m == 0xEE and b[p + 4:p + 9] == b'Adobe')
+        if keep:
+            out += b[p:end]
+        p = end
+    return bytes(out + b'\xff\xd9'), None
+
+
+def pdf_image(xobj):
+    """A PDF image XObject decoded by this file's own code (zlib and the PNG predictor; JPEG data by Pillow): its
+    samples (h, w, n) at its own depth, and the facts of its dictionary."""
+    import io
+    import zlib
+    import numpy as np
+    from PIL import Image
+    d = xobj
+    w, h, bpc = int(d['/Width']), int(d['/Height']), int(d.get('/BitsPerComponent', 8))
+    cs = d.get('/ColorSpace')
+    cs = cs.get_object() if hasattr(cs, 'get_object') else cs
+    facts = {'width': w, 'height': h, 'bpc': bpc, 'filter': str(d.get('/Filter')), 'decode': [float(x) for x in d['/Decode']] if '/Decode' in d else None,
+             'mask': [int(x) for x in d['/Mask']] if isinstance(d.get('/Mask'), list) else None}
+    n = 1
+    if isinstance(cs, list):
+        kind = str(cs[0])
+        if kind == '/ICCBased':
+            prof = cs[1].get_object()
+            n = int(prof['/N'])
+            import hashlib
+            facts['cs'] = f'ICCBased:{n}'
+            facts['icc'] = hashlib.sha256(prof.get_data()).hexdigest()
+        elif kind == '/Indexed':
+            base = cs[1].get_object() if hasattr(cs[1], 'get_object') else cs[1]
+            look = cs[3].get_object() if hasattr(cs[3], 'get_object') else cs[3]
+            look = look.get_data() if hasattr(look, 'get_data') else bytes(look.original_bytes if hasattr(look, 'original_bytes') else look)
+            facts['cs'] = f'Indexed:{"ICCBased" if isinstance(base, list) else str(base)[1:]}:{int(cs[2])}'
+            facts['palette'] = look.hex()
+        else:
+            facts['cs'] = kind[1:]
+    else:
+        facts['cs'] = str(cs)[1:]
+        n = {'DeviceGray': 1, 'DeviceRGB': 3, 'DeviceCMYK': 4}[facts['cs']]
+    raw = xobj._data
+    if facts['filter'] == '/DCTDecode':
+        facts['raw'] = raw
+        img = Image.open(io.BytesIO(raw))
+        img.draft(None, None)
+        arr = np.asarray(img).astype(np.int64)
+        if arr.ndim == 2:
+            arr = arr[..., None]
+        return arr, facts
+    data = zlib.decompress(raw)
+    parms = d.get('/DecodeParms')
+    if parms and int(parms.get('/Predictor', 1)) >= 10:
+        rows = unpredict(data, int(parms['/Columns']), int(parms['/Colors']), int(parms['/BitsPerComponent']), h)
+    else:
+        rb = (w * n * bpc + 7) // 8
+        rows = np.frombuffer(data[: rb * h], dtype=np.uint8).reshape(h, rb).astype(np.int64)
+    facts['predictor'] = int(parms.get('/Predictor', 1)) if parms else 1
+    return unpack(rows, w, n, bpc), facts
+
+
+def png_rgba8(s):
+    """A decoded PNG (png_source) as 8-bit RGBA, the way a PDF reader shows it: 16-bit samples by their high byte,
+    fewer than 8 bits scaled up, palettes looked up, a color key made transparent."""
+    import numpy as np
+    c, d, ct = s['color'], s['depth'], s['ct']
+    to8 = (lambda v: v >> 8) if d == 16 else (lambda v: (v * 255) // ((1 << d) - 1)) if d < 8 else (lambda v: v)
+    h, w = c.shape[:2]
+    if ct == 3:
+        pal = np.frombuffer(s['palette'], dtype=np.uint8).astype(np.int64).reshape(-1, 3)
+        rgb = pal[c[..., 0]]
+        lut = np.full(256, 255, dtype=np.int64)
+        if s['trns'] is not None:
+            t = np.frombuffer(s['trns'], dtype=np.uint8).astype(np.int64)
+            lut[: len(t)] = t
+        a = lut[c[..., 0]]
+    else:
+        rgb = to8(np.repeat(c, 3, axis=-1) if c.shape[-1] == 1 else c)
+        a = to8(s['alpha']) if s['alpha'] is not None else np.full((h, w), 255, dtype=np.int64)
+        if s['trns'] is not None and ct in (0, 2):
+            n = c.shape[-1]
+            key = np.array([int.from_bytes(s['trns'][2 * k: 2 * k + 2], 'big') for k in range(n)])
+            a = np.where((c == key).all(-1), 0, a)
+    return np.concatenate([rgb, a[..., None]], -1)
+
+
+def oriented(arr, o):
+    """Samples (h, w, n) as an EXIF orientation shows them."""
+    import numpy as np
+    if o == 2: return arr[:, ::-1]
+    if o == 3: return arr[::-1, ::-1]
+    if o == 4: return arr[::-1]
+    if o == 5: return arr.transpose(1, 0, 2)
+    if o == 6: return arr.transpose(1, 0, 2)[:, ::-1]
+    if o == 7: return arr.transpose(1, 0, 2)[::-1, ::-1]
+    if o == 8: return arr.transpose(1, 0, 2)[::-1]
+    return arr
+
+
+def cmyk_reference(samples, w, h, pw, ph):
+    """A one-page PDF holding CMYK samples (h, w, 4) uncompressed, as plain DeviceCMYK with no Decode array, drawn over
+    the whole page: what a CMYK JPEG should look like once its inversion is undone."""
+    import numpy as np
+    data = np.asarray(samples, dtype=np.uint8).tobytes()
+    content = f'q {pw} 0 0 {ph} 0 0 cm /Im0 Do Q'.encode()
+    objs = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {pw} {ph}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>'.encode(),
+        f'<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceCMYK /BitsPerComponent 8 /Length {len(data)} >>\nstream\n'.encode() + data + b'\nendstream',
+        f'<< /Length {len(content)} >>\nstream\n'.encode() + content + b'\nendstream',
+    ]
+    out = b'%PDF-1.7\n'
+    offs = []
+    for i, o in enumerate(objs):
+        offs.append(len(out))
+        out += f'{i + 1} 0 obj\n'.encode() + o + b'\nendobj\n'
+    x = len(out)
+    out += f'xref\n0 {len(objs) + 1}\n0000000000 65535 f \n'.encode() + b''.join(f'{o:010d} 00000 n \n'.encode() for o in offs)
+    out += f'trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n'.encode()
+    return out
+
+
+def read_image_pdf_light(r, check, full, per_page):
+    """For large results: qpdf's checks, each page's size and its picture's dictionary, and for a JPEG whether the stream
+    is the file without its metadata (readers.py's own walk); no picture is decoded."""
+    pages = []
+    for i, page in enumerate(r.pages):
+        img = list(page['/Resources']['/XObject'].values())[0].get_object()
+        source = per_page[min(i, len(per_page) - 1)][0]
+        info = {'source': os.path.basename(source), 'size': [round(float(x), 3) for x in page.mediabox[2:]],
+                'image': {'width': int(img['/Width']), 'height': int(img['/Height']), 'bpc': int(img.get('/BitsPerComponent', 8)),
+                          'filter': str(img.get('/Filter')), 'smask': '/SMask' in img}}
+        if source.lower().endswith('.jpg'):
+            info['jpegSame'] = img._data == jpeg_without_metadata(open(source, 'rb').read())[0]
+        pages.append(info)
+    return {'qpdf': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout, 'qpdfDecode': full.returncode == 0,
+            'qpdfOut': (check.stdout + check.stderr + full.stderr).strip()[-600:], 'pages': pages, 'pageCount': len(r.pages)}
+
+
+def read_image_pdf(spec_path):
+    """An Images to PDF result against its sources (a JSON spec: {pdf, sources: [path, ...]}, one page per source):
+    qpdf's checks, each page's size, its drawing matrix and clip, and its picture decoded by this file's code and by
+    PDFium, compared with the source decoded the same independent ways."""
+    import hashlib
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+    import numpy as np
+    import pypdf
+    import pypdfium2
+    from PIL import Image, ImageOps
+    from PIL import ImageFile
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    spec = json.load(open(spec_path, encoding='utf-8'))
+    path = spec['pdf']
+    qpdf = shutil.which('qpdf') or 'C:/msys64/ucrt64/bin/qpdf.exe'
+    check = subprocess.run([qpdf, '--check', path], capture_output=True, text=True)
+    full = subprocess.run([qpdf, '--decode-level=all', '--object-streams=disable', path, os.path.join(tempfile.mkdtemp(prefix='pdf-'), 'all.pdf')], capture_output=True, text=True)
+    r = pypdf.PdfReader(path)
+    doc = pypdfium2.PdfDocument(path)
+    pages = []
+    # One page per picture, every page of a multi-page TIFF (its reduced images, such as thumbnails, left out).
+    per_page = []
+    for s in spec['sources']:
+        frames = 1
+        if s.lower().endswith(('.tif', '.tiff')):
+            im = Image.open(s)
+            frames = getattr(im, 'n_frames', 1)
+        per_page += [(s, k) for k in range(frames)]
+    if spec.get('light'):
+        # Large results hold pictures past pypdf's own 75 MB stream limit, which it keeps against hostile files.
+        import dataclasses
+        from pypdf import _configuration as pc
+        pc.CURRENT_CONFIGURATION.set(dataclasses.replace(pc.get_configuration(), maximum_declared_stream_length=4_000_000_000))
+        r = pypdf.PdfReader(path)
+        return read_image_pdf_light(r, check, full, per_page)
+    for i, page in enumerate(r.pages):
+        info = {'size': [round(float(x), 3) for x in page.mediabox[2:]]}
+        content = page.get_contents().get_data().decode('latin-1')
+        nums = r'(-?[\d.]+)'
+        m = re.search(r'\s'.join([nums] * 6) + r'\s+cm', content)
+        info['matrix'] = [round(float(x), 3) for x in m.groups()] if m else None
+        c = re.search(r'\s'.join([nums] * 4) + r'\s+re\s+W\s+n', content)
+        info['clip'] = [round(float(x), 3) for x in c.groups()] if c else None
+        xobjs = page['/Resources']['/XObject']
+        img = list(xobjs.values())[0].get_object()
+        arr, facts = pdf_image(img)
+        sm = img.get('/SMask')
+        alpha = None
+        if sm is not None:
+            alpha, sfacts = pdf_image(sm.get_object())
+            facts['smask'] = {'bpc': sfacts['bpc'], 'cs': sfacts['cs']}
+        else:
+            facts['smask'] = None
+        raw = facts.pop('raw', None)
+        info['image'] = facts
+        source, frame = per_page[min(i, len(per_page) - 1)]
+        info['source'] = os.path.basename(source)
+        ext = os.path.splitext(source)[1].lower()
+        upright = None  # the source as shown, 8-bit RGB, for the render
+        if ext == '.png':
+            s = png_source(source)
+            want = s['color']
+            if facts['bpc'] == 8 and s['depth'] < 8 and s['ct'] == 0:
+                want = (want * 255 + ((1 << s['depth']) - 1) // 2) // ((1 << s['depth']) - 1)
+            info['exact'] = bool(want.shape == arr.shape and (want == arr).all())
+            if s['ct'] in (4, 6):
+                a = s['alpha'][..., None]
+                info['alphaExact'] = None if alpha is None else bool(a.shape == alpha.shape and (a == alpha).all())
+                info['alphaOpaque'] = bool((s['alpha'] == (1 << s['depth']) - 1).all())
+            elif s['ct'] == 3 and s['trns'] is not None:
+                t = np.frombuffer(s['trns'], dtype=np.uint8).astype(np.int64)
+                lut = np.full(256, 255, dtype=np.int64)
+                lut[: len(t)] = t
+                a = lut[s['color'][..., 0]][..., None]
+                info['alphaExact'] = None if alpha is None else bool(a.shape == alpha.shape and (a == alpha).all())
+            if 'palette' in facts:
+                info['paletteExact'] = facts['palette'] == s['palette'][: len(facts['palette']) // 2].hex()
+            upright = oriented(png_rgba8(s), s['orientation'])
+        elif ext in ('.jpg', '.jpeg'):
+            b = open(source, 'rb').read()
+            expected, _ = jpeg_without_metadata(b)
+            info['jpegSame'] = raw == expected if raw is not None else None
+            info['metadataFree'] = raw is not None and not any(x in raw for x in (b'Exif', b'LeakyCam', b'Jane Example', b'http://ns.adobe.com/xap', b'Secret'))
+            src = Image.open(source)
+            src.draft(None, None)
+            sarr = np.asarray(src).astype(np.int64)
+            if sarr.ndim == 2:
+                sarr = sarr[..., None]
+            info['exact'] = bool(sarr.shape == arr.shape and (sarr == arr).all())
+            upright = np.asarray(ImageOps.exif_transpose(Image.open(source)).convert('RGBA')).astype(np.int64)
+            if sarr.shape[-1] == 4 and spec.get('pictureSize'):
+                # CMYK: PDFium draws the page and a plain DeviceCMYK copy of Pillow's samples (which undo Adobe's
+                # inversion); the two must look the same, so the Decode array the PDF gives is the right one.
+                pw, ph = float(page.mediabox[2]), float(page.mediabox[3])
+                ref = pypdfium2.PdfDocument(cmyk_reference(sarr, sarr.shape[1], sarr.shape[0], pw, ph))
+                s = sarr.shape[1] / pw
+                mine = np.asarray(doc[i].render(scale=s).to_pil().convert('RGB')).astype(np.int64)
+                want = np.asarray(ref[0].render(scale=s).to_pil().convert('RGB')).astype(np.int64)
+                d = abs(mine - want)
+                info['cmykRender'] = {'mean': round(float(d.mean()), 3), 'max': int(d.max())}
+                upright = None
+        else:
+            try:
+                import pillow_heif
+                pillow_heif.register_heif_opener()
+            except Exception:
+                pass
+            im = Image.open(source)
+            if frame:
+                im.seek(frame)
+            upright = np.asarray(ImageOps.exif_transpose(im).convert('RGBA')).astype(np.int64) if im.mode != 'I;16' else np.repeat(np.concatenate([(np.asarray(im).astype(np.int64) >> 8)[..., None]] * 3 + [np.full(im.size[::-1] + (1,), 255)], -1), 1, axis=-1)
+            got = arr if arr.shape[-1] == 3 else np.repeat(arr, 3, axis=-1)
+            if facts['bpc'] == 8 and got.shape[:2] == upright.shape[:2]:
+                # Colors under fully transparent pixels do not show, and decoders differ there; compare the rest.
+                seen = upright[..., 3] > 0
+                info['diffMean'] = float(abs(got - upright[..., :3])[seen].mean()) if seen.any() else 0.0
+        # PDFium renders the page at the picture's own resolution (one image pixel per render pixel when the page is the
+        # picture's size), composited on white; compared with the source as shown, composited the same way.
+        pw, ph = page.mediabox[2], page.mediabox[3]
+        if upright is not None:
+            scale = upright.shape[1] / float(pw) if spec.get('pictureSize') else 1
+            bmp = np.asarray(doc[i].render(scale=scale).to_pil().convert('RGB')).astype(np.int64)
+            a = upright[..., 3:4] / 255.0
+            comp = np.round(upright[..., :3] * a + 255 * (1 - a)).astype(np.int64)
+            # A page size in points can round the render a pixel short; compare what both cover.
+            if spec.get('pictureSize') and abs(bmp.shape[0] - comp.shape[0]) <= 1 and abs(bmp.shape[1] - comp.shape[1]) <= 1:
+                hh, ww = min(bmp.shape[0], comp.shape[0]), min(bmp.shape[1], comp.shape[1])
+                d = abs(bmp[:hh, :ww] - comp[:hh, :ww])
+                info['render'] = {'mean': round(float(d.mean()), 3), 'max': int(d.max())}
+            info['renderShape'] = list(bmp.shape[:2])
+        # PDFium's own decoding of the picture (its image object's bitmap, before any drawing).
+        try:
+            objs = [o for o in doc[i].get_objects() if o.type == pypdfium2.raw.FPDF_PAGEOBJ_IMAGE]
+            if objs:
+                pil = objs[0].get_bitmap(render=False).to_pil().convert('RGB')
+                info['pdfiumImage'] = list(pil.size)
+        except Exception as e:
+            info['pdfiumImage'] = str(e)
+        pages.append(info)
+    return {'qpdf': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout, 'qpdfDecode': full.returncode == 0,
+            'qpdfOut': (check.stdout + check.stderr + full.stderr).strip()[-600:], 'pages': pages, 'pageCount': len(r.pages)}
+
+
 def read_media(path):
     """The picture parts of a DOCX (word/media), by SHA-256, as zipfile reads them."""
     import hashlib
@@ -589,6 +1015,8 @@ elif kind == 'pdfturns':
     result = read_pdf_turns(path)
 elif kind == 'pdforder':
     result = read_pdf_order(path)
+elif kind == 'imagepdf':
+    result = read_image_pdf(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

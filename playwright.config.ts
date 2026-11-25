@@ -32,6 +32,6 @@ export default defineConfig({
     // A phone-sized Chrome: layout, touch-sized controls and a real conversion.
     { name: 'mobile', use: { ...devices['Pixel 7'], channel: 'chrome' }, testMatch: ['**/smoke.spec.ts', '**/app.spec.ts', '**/pages.spec.ts', '**/catalog.spec.ts', '**/pdf-merge.spec.ts', '**/pdf-pages.spec.ts', '**/pdf-memory.spec.ts'] },
     // Large files, run on request: npx playwright test --project large
-    { name: 'large', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testMatch: ['**/large.spec.ts', '**/large-pdf.spec.ts'], timeout: 900_000 },
+    { name: 'large', use: { ...devices['Desktop Chrome'], channel: 'chrome' }, testMatch: ['**/large.spec.ts', '**/large-pdf.spec.ts', '**/large-images.spec.ts'], timeout: 900_000 },
   ],
 });

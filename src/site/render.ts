@@ -45,7 +45,10 @@ function replaceOnce(html: string, find: string, replace: string): string {
 export function searchTerms(p: Page): string {
   const words = new Set<string>();
   if (isNamed(p)) for (const w of p.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) words.add(w);
-  for (const id of isTool(p) ? TOOLS[p.tool].accepts : isExtract(p) ? p.formats : [p.from, p.to]) {
+  // A tool page that names the conversions it serves is found by those formats (JPG to PDF by JPG and PDF), not by
+  // every format its tool takes.
+  const formats = isTool(p) ? (p.serves ? p.serves.flat() : TOOLS[p.tool].accepts) : isExtract(p) ? p.formats : [p.from, p.to];
+  for (const id of new Set(formats)) {
     words.add(FORMATS[id].label.toLowerCase());
     for (const e of FORMATS[id].exts) words.add(e);
   }
@@ -55,7 +58,7 @@ export function searchTerms(p: Page): string {
 }
 
 /** The data attributes that say what a page does: its tool, its archive formats, or its pair. */
-const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
+const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"${p.serves ? ` data-serves="${p.serves.map(([a, b]) => `${a}>${b}`).join(' ')}"` : ''}` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
 
 const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
 

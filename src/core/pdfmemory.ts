@@ -132,6 +132,44 @@ export function estimate(works: readonly PdfWork[], kind: 'edit' | 'text', more:
   return { total: Math.ceil(total), heap: Math.ceil(heap) };
 }
 
+/** What one picture costs Images to PDF, from its header (src/engines/pdf/imageinfo.ts), before it is decoded. */
+export interface ImageWork {
+  /** The file's size. */
+  bytes: number;
+  /** Pixels of its largest page. */
+  pixels: number;
+  /** Bytes of its decoded samples, every page, alpha included: what the PDF holds when it is decoded. */
+  raw: number;
+  /** As it is (a JPEG, or a PNG PDF can hold), decoded here (a PNG), or decoded by the browser. */
+  path: 'jpeg' | 'png' | 'png-decode' | 'decode';
+  pages: number;
+}
+
+/**
+ * The memory Images to PDF needs for these pictures, at most: what the PDF holds of every picture (as it is, or its
+ * decoded samples, compressed without loss, which is never more than the samples), plus the most that adding any one
+ * of them takes (pictures are added one at a time, and each is let go before the next), plus the pages.
+ */
+export function estimateImages(works: readonly ImageWork[], engine: MemoryEngine = 'other'): MemoryEstimate {
+  const F = LIMITS.imagePdfMemory[engine];
+  let held = 0, adding = 0, pages = 0;
+  for (const w of works) {
+    const asIs = w.path === 'jpeg' || w.path === 'png';
+    held += asIs ? w.bytes : w.raw;
+    pages += w.pages;
+    const one = F.copy * w.bytes + (w.path === 'png-decode' ? F.planes * w.raw : w.path === 'decode' ? F.pixel * w.pixels : 0);
+    adding = Math.max(adding, one);
+  }
+  const total = F.base + F.held * held + adding + F.page * pages;
+  return { total: Math.ceil(total), heap: Math.ceil(LIMITS.pdfHeapMemory.page * pages + LIMITS.pdfHeapMemory.output) };
+}
+
+/** What checking one picture as it is added needs: the file read whole in the PDF worker, nothing decoded. */
+export function estimateImageCheck(bytes: number, engine: MemoryEngine = 'other'): MemoryEstimate {
+  const F = LIMITS.imagePdfMemory[engine];
+  return { total: Math.ceil(F.base + F.copy * bytes), heap: 0 };
+}
+
 /** The check before any reading: the size alone, against the allowance (the cheapest part of the estimate). */
 export function estimateFromSize(bytes: number, kind: 'edit' | 'text', engine: MemoryEngine = 'other'): MemoryEstimate {
   const per = kind === 'edit' ? LIMITS.pdfEditMemory[engine] : LIMITS.pdfTextMemory[engine];

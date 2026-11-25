@@ -4,7 +4,7 @@
 // names and the downloads. A tool only says what it accepts and how to run, so every tool behaves the same way.
 
 import type { FormatId } from '../core/formats';
-import type { PdfWork } from '../core/pdfmemory';
+import type { ImageWork, PdfWork } from '../core/pdfmemory';
 import type { Engines } from './jobs';
 
 /** A file in the workspace that the tool accepts. */
@@ -18,6 +18,8 @@ export interface ToolInput {
   pages?: number;
   /** What the PDF guard counted in the file, for the memory admission check (PDF tools). */
   work?: PdfWork;
+  /** What a picture's header says it costs, for the memory admission check (Images to PDF). */
+  image?: ImageWork;
 }
 
 /** What a tool's inspect found about one file. */
@@ -27,6 +29,8 @@ export interface ToolInspection {
   pages?: number;
   /** What the PDF guard counted (PDF tools). */
   work?: PdfWork;
+  /** What a picture's header says it costs (Images to PDF). */
+  image?: ImageWork;
   /** Shown under the file. */
   note?: string;
   /** Why the tool cannot use the file; it stays listed but is never passed to the tool. */
@@ -40,8 +44,8 @@ interface OptionBase {
   key: string;
   label: string;
   hint?: string;
-  /** Shown only while the select option `key` has this value. */
-  showIf?: { key: string; value: string };
+  /** Shown only while the select option `key` has this value, or one of these values. */
+  showIf?: { key: string; value: string | readonly string[] };
 }
 
 export type ToolOption =

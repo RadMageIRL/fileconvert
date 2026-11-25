@@ -48,6 +48,8 @@ export interface ToolPage extends PageText {
   title: string;
   /** The three steps of the How to section. */
   steps: [string, string, string];
+  /** Conversions the tool does, for the search: asking for JPG to PDF finds a page that serves jpg > pdf. */
+  serves?: ReadonlyArray<readonly [FormatId, FormatId]>;
 }
 
 /**
@@ -624,6 +626,90 @@ export const PAGES: readonly Page[] = [
     ],
     related: ['split-pdf', 'pdf-to-text', 'organize-pdf'],
     keywords: ['combine', 'join', 'append', 'pdf', 'bookmarks', 'forms', 'document', 'pages'],
+  },
+  {
+    kind: 'tool', slug: 'images-to-pdf', tool: 'images-to-pdf', category: 'document', common: 10,
+    name: 'Images to PDF',
+    title: 'Images to PDF: JPG, PNG and More, Private | FileConvert',
+    blurb: 'Pictures as one PDF, one per page',
+    description: 'Turn JPG, PNG, HEIC, WebP and other pictures into one PDF, one picture per page, in your order. JPEGs go in without recompression. Nothing is uploaded.',
+    intro: 'Scans, receipts, photos and screenshots are often needed as one PDF. Each picture becomes a page, in the order you set, at its full quality: JPEG pictures are copied in as they are, and PNG pictures stay lossless.',
+    steps: [
+      'Add your pictures. JPG, PNG, HEIC, WebP, AVIF, GIF, BMP and TIFF; each is checked as it is added, and a damaged one is refused with the reason.',
+      'Put them in order and choose the page. Drag the rows or use Up and Down; A4, US Letter or the size of each picture; portrait, landscape or automatic; a margin; fit or fill.',
+      'Make the PDF and download it. The result says how each picture went in and anything that changed.',
+    ],
+    details: [
+      'JPEG pictures are copied into the PDF byte for byte: no decoding, no new compression, no loss. Their EXIF orientation is applied as the page is laid out, so sideways photos come out upright without changing a pixel.',
+      'PNG pictures stay lossless, 16-bit color included, and their transparency stays transparent in the PDF rather than being flattened.',
+      'Color profiles in JPEG and PNG pictures are kept as the color space of the picture, and CMYK JPEGs keep their CMYK colors.',
+      'Photo metadata is left out of the PDF: EXIF camera details, dates and GPS location, XMP and comments.',
+      'By default each picture fits inside the margins with nothing cut off, and a picture smaller than the page stays at its own size. Enlarging, and filling the page by cutting off edges, are options, and the result says what they did.',
+      'A multi-page TIFF adds every page. HEIC, WebP, AVIF, GIF and BMP pictures are decoded once and stored without further loss.',
+    ],
+    limits: [
+      'Pictures the browser decodes (WebP, AVIF, GIF, BMP) get sRGB colors, HEIC and TIFF color profiles are not applied, and 16-bit TIFF becomes 8 bits per channel. The result names each picture this happens to.',
+      'An animated GIF, WebP or PNG gives one picture, the first.',
+      'Up to 500 pictures and 5,000 pages in one PDF, each picture up to 300 MB and 100 megapixels, and less on a device with little memory: the memory needed is estimated before anything starts.',
+      'The PDF has no text layer: words in a picture cannot be searched or selected.',
+    ],
+    related: ['jpg-to-pdf', 'png-to-pdf', 'merge-pdf'],
+    keywords: ['photo', 'photos', 'scan', 'scans', 'receipt', 'combine', 'picture', 'pictures', 'image', 'images', 'jpeg'],
+    serves: [['jpg', 'pdf'], ['png', 'pdf'], ['heic', 'pdf'], ['webp', 'pdf'], ['avif', 'pdf'], ['gif', 'pdf'], ['bmp', 'pdf'], ['tiff', 'pdf']],
+  },
+  {
+    kind: 'tool', slug: 'jpg-to-pdf', tool: 'images-to-pdf', category: 'image',
+    name: 'JPG to PDF',
+    title: 'JPG to PDF Without Quality Loss, Private | FileConvert',
+    blurb: 'JPEG photos into a PDF, not recompressed',
+    description: 'Convert JPG photos to PDF without recompressing them: each JPEG is copied in byte for byte, upright, with its metadata left out. Done in your browser.',
+    intro: 'Most converters decode a JPEG and compress it again, which costs quality every time. Here the JPEG data goes into the PDF exactly as it is, so the PDF shows the very same pixels.',
+    steps: [
+      'Add your JPG photos, as many as you need. Other pictures can go in the same PDF too.',
+      'Put them in order and choose the page size, orientation, margin and fit.',
+      'Make the PDF and download it. The result confirms that each JPEG went in as it was.',
+    ],
+    details: [
+      'Byte for byte: the compressed picture data is copied as it is, baseline and progressive JPEGs alike, so there is no loss of quality at all.',
+      'Upright: the EXIF orientation of phone photos is applied as the page is laid out, not by turning pixels.',
+      'Private: EXIF camera details, dates, GPS location, XMP and comments are not copied into the PDF, nor data a camera adds after the picture, such as a second image.',
+      'Colors: an embedded color profile becomes the color space of the picture in the PDF, and CMYK JPEGs keep their CMYK colors.',
+    ],
+    limits: [
+      '12-bit, lossless and arithmetic-coded JPEGs, which PDF readers cannot show, are decoded and stored without further loss instead; the result says so.',
+      'A JPEG cut off before its end is refused, since part of its picture is missing.',
+      'Photos up to 300 MB and 100 megapixels each, up to 500 in one PDF.',
+    ],
+    related: ['images-to-pdf', 'png-to-pdf', 'remove-image-metadata'],
+    keywords: ['jpeg', 'photo', 'photos', 'picture', 'pictures', 'scan', 'exif', 'lossless'],
+    serves: [['jpg', 'pdf']],
+  },
+  {
+    kind: 'tool', slug: 'png-to-pdf', tool: 'images-to-pdf', category: 'image',
+    name: 'PNG to PDF',
+    title: 'PNG to PDF, Lossless with Transparency | FileConvert',
+    blurb: 'PNG pictures into a PDF, lossless',
+    description: 'Convert PNG to PDF without losing a pixel: transparency, 16-bit color, palettes and color profiles are kept. Done in your browser, nothing uploaded.',
+    intro: 'Screenshots, diagrams and scans saved as PNG are lossless, and stay so here. Where PDF can hold the PNG data as it is, it is copied in; otherwise the picture is decoded exactly and stored without loss.',
+    steps: [
+      'Add your PNG pictures. Other formats can go in the same PDF too.',
+      'Put them in order and choose the page size, orientation, margin and fit.',
+      'Make the PDF and download it. The result says how each PNG went in.',
+    ],
+    details: [
+      'Lossless: every pixel is kept exactly, at its own bit depth, 16 bits per channel included.',
+      'Transparency stays transparent in the PDF, where readers show the page behind it: an alpha channel, a palette with transparency or one transparent color.',
+      'Gray, color and palette PNGs go in with their compressed data as it is, so the PDF is about the size of the PNG.',
+      'Color profiles are kept, and interlaced PNGs are decoded and stored without loss.',
+    ],
+    limits: [
+      'A PNG with a gamma setting but no color profile is shown with its colors as stored; the result says so.',
+      'An animated PNG gives its first picture.',
+      'Damaged PNGs, with a wrong checksum or missing data, are refused with the reason.',
+    ],
+    related: ['images-to-pdf', 'jpg-to-pdf', 'png-to-jpg'],
+    keywords: ['screenshot', 'screenshots', 'diagram', 'transparent', 'transparency', 'lossless', 'picture', 'pictures', 'image'],
+    serves: [['png', 'pdf']],
   },
   {
     kind: 'tool', slug: 'split-pdf', tool: 'split-pdf', category: 'document', common: 5,

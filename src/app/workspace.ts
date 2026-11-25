@@ -123,6 +123,7 @@ export class Workspace {
           if (r.info) e.info += `, ${r.info}`;
           if (r.pages !== undefined) e.pages = r.pages;
           if (r.work) e.work = r.work;
+          if (r.image) e.image = r.image;
           if (r.note) e.notes.push(r.note);
           if (r.error) e.error = r.error;
           if (r.confirm) e.confirm = r.confirm;
@@ -193,7 +194,7 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work }) => ({ id, file, name, format, pages, work }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image }) => ({ id, file, name, format, pages, work, image }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;
@@ -304,7 +305,7 @@ export class Workspace {
       box.append(h('span', { class: 'ws-hint', id }, o.hint));
       el.querySelector('input, select')?.setAttribute('aria-describedby', id);
     }
-    if (o.showIf) { box.dataset.showKey = o.showIf.key; box.dataset.showValue = o.showIf.value; }
+    if (o.showIf) { box.dataset.showKey = o.showIf.key; box.dataset.showValue = ([] as string[]).concat(o.showIf.value).join('|'); }
     return box;
   }
 
@@ -537,7 +538,7 @@ export class Workspace {
     this.renderConfirm();
     this.renderOrder();
     // Options that belong to one choice of another (split by ranges, or every N pages).
-    for (const el of this.root.querySelectorAll<HTMLElement>('[data-show-key]')) el.hidden = String(this.values[el.dataset.showKey!]) !== el.dataset.showValue;
+    for (const el of this.root.querySelectorAll<HTMLElement>('[data-show-key]')) el.hidden = !el.dataset.showValue!.split('|').includes(String(this.values[el.dataset.showKey!]));
     for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-lock]')) el.disabled = this.running;
     this.renderRun();
     this.renderOutputs();

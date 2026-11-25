@@ -12,10 +12,10 @@ test('the catalog lists every page, and the search narrows it as you type', asyn
   await expect(page.locator('.cat-item')).toHaveCount(PAGES.length);
   const search = page.getByRole('searchbox', { name: 'Search conversions' });
   await search.fill('heic');
-  // The TIFF tool takes HEIC pictures too.
-  await expect(visible(page)).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF']);
-  await expect(page.locator('#catalog-status')).toHaveText('3 pages match.');
-  await expect(page.locator('.cat-group:not([hidden]) h3')).toHaveText(['Images']);
+  // The TIFF tool and Images to PDF take HEIC pictures too.
+  await expect(visible(page)).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF', 'Images to PDF']);
+  await expect(page.locator('#catalog-status')).toHaveText('4 pages match.');
+  await expect(page.locator('.cat-group:not([hidden]) h3')).toHaveText(['Images', 'Documents']);
   await search.fill('iphone video');
   await expect(visible(page)).toHaveText(['MOV to MP4']);
   await search.fill('Convert MP4 to MP3');
@@ -60,6 +60,12 @@ test('conversions without a page, and formats that are not supported, are answer
   await search.fill('heic to jpg');
   await expect(more).toBeHidden();
   await expect(visible(page)).toHaveText(['HEIC to JPG']);
+  // A conversion a tool does finds the tool's pages, not "does not convert".
+  await search.fill('jpg to pdf');
+  await expect(more).toBeHidden();
+  await expect(visible(page)).toHaveText(['JPG to PDF', 'Images to PDF']);
+  await search.fill('heic to pdf');
+  await expect(visible(page)).toHaveText(['Images to PDF']);
 });
 
 test('on a page, its own entry in the catalog is marked as the current page', async ({ page }) => {
