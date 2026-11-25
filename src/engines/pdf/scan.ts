@@ -46,6 +46,9 @@ export interface PdfScan {
   /** Pictures compressed with JBIG2 or JPEG 2000. */
   jbig2: number;
   jpx: number;
+  /** Soft mask dictionaries (/S /Luminosity or /S /Alpha): drawing a page that uses one takes several page-sized
+   *  canvases, so drawing pages of such a PDF is estimated higher. */
+  softMasks: number;
 }
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -100,11 +103,13 @@ class Head implements Sink {
 /** Looks for page dictionaries in the decoded text of an object stream, across piece boundaries. */
 class PageCounter implements Sink {
   pages = 0;
+  softMasks = 0;
   signature = false;
   private tail = '';
   push(chunk: Uint8Array): void {
     const text = this.tail + latin1.decode(chunk);
     this.pages += countPages(text);
+    this.softMasks += countSoftMasks(text);
     if (/\/ByteRange|\/Type\s*\/Sig\b/.test(text)) this.signature = true;
     // Keep enough to see a key split between two pieces, without counting it twice.
     const cut = Math.max(0, text.length - 24);
@@ -114,6 +119,7 @@ class PageCounter implements Sink {
 }
 
 const countPages = (text: string) => (text.match(/\/Type\s*\/Page(?![A-Za-z0-9])/g) ?? []).length;
+const countSoftMasks = (text: string) => (text.match(/\/S\s*\/(?:Luminosity|Alpha)(?![A-Za-z0-9])/g) ?? []).length;
 
 /** The width and height in a JPEG's frame header, or null. */
 export function jpegSize(b: Uint8Array): { width: number; height: number } | null {
@@ -148,7 +154,7 @@ class Scanner {
   fed = 0;
   report: PdfScan = {
     version: null, encrypted: false, objects: 0, pages: 0, streams: 0, objectStreams: 0, decodedBytes: 0, textBytes: 0,
-    objectStreamBytes: 0, largestStream: 0, images: 0, largestImagePixels: 0, signatureHint: false, jbig2: 0, jpx: 0,
+    objectStreamBytes: 0, largestStream: 0, images: 0, largestImagePixels: 0, signatureHint: false, jbig2: 0, jpx: 0, softMasks: 0,
   };
   constructor(private b: Uint8Array, private L: PdfLimits) {}
 
@@ -198,6 +204,7 @@ class Scanner {
       const own = p + 4 * MB >= to ? text : text.slice(0, 4 * MB);
       this.report.objects += (own.match(/\d+\s+\d+\s+obj\b/g) ?? []).length;
       this.report.pages += countPages(own);
+      this.report.softMasks += countSoftMasks(own);
       if (/\/ByteRange|\/Type\s*\/Sig\b/.test(text)) this.report.signatureHint = true;
       for (const m of text.matchAll(/trailer\s*<</g)) {
         const d = this.readDict(p + (m.index ?? 0) + m[0].length - 2);
@@ -333,6 +340,7 @@ class Scanner {
     }
     if (pages) {
       r.pages += pages.pages;
+      r.softMasks += pages.softMasks;
       if (pages.signature) r.signatureHint = true;
     }
     if (headSink) {

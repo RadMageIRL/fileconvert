@@ -4,9 +4,8 @@
 import type { ToolDefinition } from '../app/tools';
 import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
-import { selectPages } from '../core/pageranges';
 import type { MergeReport } from '../engines/pdf/merge';
-import { allowance, checkWith, describeParts, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, chosenPages, describeParts, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
 export const tool: ToolDefinition = {
   id: 'extract-pdf-pages',
@@ -17,19 +16,19 @@ export const tool: ToolDefinition = {
   maxInputs: 1,
   ordered: false,
   options: [
-    { kind: 'text', key: 'pages', label: 'Pages to extract', value: '', placeholder: '1-3, 7, 10-', maxLength: 4000,
-      hint: 'In the order you list them; each page once. 10- means page 10 to the end.' },
+    { kind: 'pages', key: 'pages', label: 'Pages to extract', value: '', placeholder: '1-3, 7, 10-', maxLength: 4000, empty: 'none', mark: 'Extracted',
+      hint: 'In the order you list them; each page once. 10- means page 10 to the end. Or choose them in the page previews.' },
   ],
   action: 'Extract the pages',
   confirmLabel: 'Extract anyway; the signature will no longer be valid',
-  inspect: inspectPdf('Extracting pages'),
+  inspect: inspectPdf('Extracting pages', { sizes: true }),
   check(inputs, values) {
-    return checkWith(n => selectPages(String(values.pages), n))(inputs);
+    return checkWith(n => chosenPages(values.pages, n, false))(inputs);
   },
   async run(inputs, values, ctx) {
     const input = inputs[0];
     const n = pagesOfInput(inputs);
-    const pages = selectPages(String(values.pages), n);
+    const pages = chosenPages(values.pages, n, false);
     const r = await ctx.engines.pdf.run<{ parts: Array<{ bytes: Uint8Array; report: MergeReport }> }>('split', {
       file: input.file, name: input.name, parts: [pages.map(p => p - 1)], allowance: allowance(),
     }, { signal: ctx.signal, onProgress: ctx.progress });

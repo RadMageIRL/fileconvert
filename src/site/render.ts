@@ -58,7 +58,7 @@ export function searchTerms(p: Page): string {
 }
 
 /** The data attributes that say what a page does: its tool, its archive formats, or its pair. */
-const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"${p.serves ? ` data-serves="${p.serves.map(([a, b]) => `${a}>${b}`).join(' ')}"` : ''}` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
+const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"${p.serves ? ` data-serves="${p.serves.map(([a, b]) => `${a}>${b}`).join(' ')}"` : ''}${p.preset ? ` data-preset="${new URLSearchParams(p.preset as Record<string, string>).toString()}"` : ''}` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
 
 const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
 
@@ -99,7 +99,7 @@ export function formatsHtml(): string {
     card('Images', [[list(IMAGE_IN), list(IMAGE_OUT)], ['Animated GIF, WebP or PNG', 'GIF, WebP, MP4 or WebM, keeping the animation']], 'Resize, set quality, keep transparency where the format allows it. HEIC and SVG are read but not written; an SVG is drawn at the size you choose.'),
     card('Audio', [[list(AUDIO_IN), list(AUDIO_OUT)], ['Sound from a video', list(AUDIO_OUT)]], 'Choose bitrate, sample rate and channels. OGG output is Opus.'),
     card('Video', [[list(VIDEO_IN), list(VIDEO_OUT)]], 'Choose resolution and quality, or remove the sound. Uses your browser\'s video encoders, often on the graphics chip.'),
-    card('Documents', routes('document'), 'PDFs have real, selectable text; Markdown, HTML and DOCX keep their structure, not their look. Scanned PDFs need OCR, which is not done.'),
+    card('Documents', routes('document'), 'PDFs have real, selectable text; Markdown, HTML and DOCX keep their structure, not their look. PDF pages can also be saved as JPG or PNG pictures. Scanned PDFs need OCR, which is not done.'),
     card('Data', routes('data'), 'Nested data, encodings, worksheets, dates and spreadsheet formulas are handled explicitly.'),
     // Archives are unpacked, not converted, so this card has no "A to B" lines.
     card('Archives', [], 'ZIP, TAR, GZ and .tar.gz archives are unpacked: download the files inside, or convert them without adding them again. Archives are never converted into another archive format. Links, encrypted files and archives inside archives are listed, not opened.'),

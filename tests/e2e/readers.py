@@ -7,8 +7,9 @@ saved results, number formats, merged cells, sheet states); docx python-docx (pa
 formatting, links, tables and pictures); md mistune (CommonMark with GFM tables); mdzip zipfile, mistune and Pillow
 (a Markdown ZIP, extracted and its picture links followed); media zipfile (a DOCX's pictures); pdf qpdf, pypdf,
 Xpdf pdftotext and PDFium (a PDF's structure, text and rendered pages); pdfdeep qpdf, pypdf and PDFium (what a
-merge keeps: bookmarks, links, named destinations, form fields, layers, page boxes, renders). None of them shares
-code with the browser engines.
+merge keeps: bookmarks, links, named destinations, form fields, layers, page boxes, renders); render PDFium (pictures
+of PDF pages compared with its own rendering); pdfmeta qpdf, pypdf, Pillow and PDFium (what metadata a PDF holds, and
+what stays). None of them shares code with the browser engines.
 """
 
 import csv
@@ -983,6 +984,161 @@ def read_media(path):
     return {n: hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n.startswith('word/media/')}
 
 
+def render_compare(spec_path):
+    """Pictures of PDF pages compared with PDFium's rendering of the same pages. The spec (JSON) lists
+    {pdf, page, picture, dpi, transparent}; for each: both sizes, the mean difference in levels, the share of pixels
+    off by more than 48 levels, the same two after both are reduced 4 times, how much of each is ink, the format and
+    mode of the picture, and its alpha at the top left corner and at a point (when given)."""
+    import numpy as np
+    import pypdfium2 as pdfium
+    from PIL import Image
+    with open(spec_path, encoding='utf-8') as f:
+        spec = json.load(f)
+    docs = {}
+    out = []
+    for item in spec:
+        if item['pdf'] not in docs:
+            d = pdfium.PdfDocument(item['pdf'])
+            d.init_forms()
+            docs[item['pdf']] = d
+        page = docs[item['pdf']][item['page'] - 1]
+        transparent = item.get('transparent', False)
+        ref = page.render(scale=item['dpi'] / 72, may_draw_forms=True, fill_color=(255, 255, 255, 0 if transparent else 255)).to_pil()
+        got_raw = Image.open(item['picture'])
+        got_raw.load()
+        mode = 'RGBA' if transparent else 'RGB'
+        ref = ref.convert(mode)
+        got = got_raw.convert(mode)
+        w, h = min(ref.width, got.width), min(ref.height, got.height)
+        a = np.asarray(ref, dtype=np.int16)[:h, :w]
+        b = np.asarray(got, dtype=np.int16)[:h, :w]
+        if transparent:
+            # A transparent pixel's color does not show: colors are compared as they would be drawn over something.
+            a = np.concatenate([a[..., :3] * a[..., 3:] // 255, a[..., 3:]], axis=2)
+            b = np.concatenate([b[..., :3] * b[..., 3:] // 255, b[..., 3:]], axis=2)
+        d = np.abs(a - b)
+        k = 4 if min(w, h) >= 16 else 1
+        hh, ww = h // k * k, w // k * k
+
+        def red(x):
+            x = x[:hh, :ww].astype(np.float32)
+            return x.reshape(hh // k, k, ww // k, k, x.shape[2]).mean(axis=(1, 3))
+
+        rd = np.abs(red(a) - red(b))
+        r = {
+            'ref': [ref.width, ref.height], 'got': [got_raw.width, got_raw.height], 'format': got_raw.format, 'mode': got_raw.mode,
+            'mean': round(float(d.mean()), 3), 'off48': round(float((d.max(axis=2) > 48).mean()), 5),
+            'mean4': round(float(rd.mean()), 3), 'off4_32': round(float((rd.max(axis=2) > 32).mean()), 5),
+            'inkRef': round(float((a[..., :3].min(axis=2) < 200).mean()), 4), 'inkGot': round(float((b[..., :3].min(axis=2) < 200).mean()), 4),
+        }
+        if got_raw.mode in ('RGBA', 'LA'):
+            alpha = np.asarray(got_raw.convert('RGBA'))[..., 3]
+            r['alphaCorner'] = int(alpha[2, 2])
+            if 'point' in item:
+                x, y = item['point']
+                r['alphaAt'] = int(alpha[y, x])
+        if got_raw.format == 'JPEG':
+            r['cornerRgb'] = [int(v) for v in np.asarray(got_raw.convert('RGB'))[2, 2]]
+        out.append(r)
+    return out
+
+
+def jpeg_segments(b):
+    """The markers of a JPEG's header and scans, and whether data follows its end (its own walk)."""
+    if b[:2] != b'\xff\xd8':
+        return {'markers': [], 'trailing': -1}
+    p, marks = 2, []
+    while p + 1 < len(b):
+        if b[p] != 0xFF:
+            return {'markers': marks, 'trailing': -1}
+        m = b[p + 1]
+        if m == 0xFF:
+            p += 1
+            continue
+        if m == 0xD9:
+            return {'markers': marks + ['D9'], 'trailing': len(b) - p - 2}
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
+            p += 2
+            continue
+        n = (b[p + 2] << 8) | b[p + 3]
+        name = '%02X' % m
+        if 0xE0 <= m <= 0xEF:
+            name += ':' + b[p + 4:p + 4 + 12].split(b'\0')[0].decode('latin1', 'replace')
+        marks.append(name)
+        q = p + 2 + n
+        if m == 0xDA:
+            while q + 1 < len(b):
+                if b[q] == 0xFF and b[q + 1] not in (0x00, 0xFF) and not (0xD0 <= b[q + 1] <= 0xD7):
+                    break
+                q += 1
+        p = q
+    return {'markers': marks, 'trailing': -1}
+
+
+def read_pdf_meta(path):
+    """What a PDF holds of metadata, read with qpdf (every stream decoded, object streams undone), pypdf and PDFium:
+    the marker words found anywhere in its decoded bytes, its document information and XMP, its trailer identifier,
+    the segments of each JPEG picture and its decoded pixels, what stays (comments, bookmarks, links, form values,
+    attachments), qpdf's check and a hash of each page as PDFium draws it."""
+    import hashlib
+    import re
+    import subprocess
+    import pypdf
+    import pypdfium2 as pdfium
+    from PIL import Image
+    check = subprocess.run(['qpdf', '--check', path], capture_output=True, text=True)
+    # Marker words anywhere: qpdf's view with general filters undone (JPEG data left as it is, so its segments can be
+    # read), the file's own bytes (an older version, objects nothing uses), and every stream in them that inflates.
+    import zlib
+    qdf = subprocess.run(['qpdf', '--qdf', '--object-streams=disable', '--decode-level=generalized', path, '-'], capture_output=True)
+    raw = qdf.stdout
+    whole = open(path, 'rb').read()
+    texts = [raw, whole]
+    for m in re.finditer(rb'stream\r?\n', whole):
+        try:
+            texts.append(zlib.decompressobj().decompress(whole[m.end():m.end() + (64 << 20)]))
+        except zlib.error:
+            pass
+    pat = re.compile(rb'(?:MARK|KEEP)-[A-Z-]+-?\d*')
+    words = sorted(set(w.decode() for t in texts for w in pat.findall(t)))
+    r = pypdf.PdfReader(path)
+    info = r.trailer.get('/Info')
+    info = {str(k): str(v) for k, v in info.get_object().items()} if info is not None else None
+    root = r.trailer['/Root'].get_object()
+    file_id = [bytes(x.original_bytes if hasattr(x, 'original_bytes') else x).hex().upper() for x in r.trailer['/ID']] if '/ID' in r.trailer else None
+    jpegs = []
+    for page in r.pages:
+        xo = page['/Resources'].get('/XObject', {})
+        for k in xo:
+            o = xo[k].get_object()
+            if o.get('/Filter') == '/DCTDecode':
+                data = o._data
+                seg = jpeg_segments(data)
+                img = Image.open(io.BytesIO(data))
+                img.load()
+                seg['pixels'] = hashlib.sha256(img.convert('RGB').tobytes()).hexdigest()
+                seg['size'] = len(data)
+                jpegs.append(seg)
+    annots = []
+    for page in r.pages:
+        for a in page.get('/Annots', []) or []:
+            a = a.get_object()
+            annots.append({'subtype': str(a.get('/Subtype')), 'author': str(a['/T']) if '/T' in a else None, 'contents': str(a['/Contents']) if '/Contents' in a else None})
+    outline = [str(o.title) for o in r.outline if not isinstance(o, list)]
+    fields = {k: str(v.get('/V')) for k, v in (r.get_fields() or {}).items()}
+    attachments = sorted(r.attachments.keys())
+    pdf = pdfium.PdfDocument(path)
+    pdf.init_forms()
+    renders = [hashlib.sha256(pdf[i].render(scale=1, may_draw_forms=True).to_pil().convert('RGB').tobytes()).hexdigest() for i in range(len(pdf))]
+    return {
+        'qpdf': {'ok': check.returncode == 0 and 'No syntax or stream encoding errors' in check.stdout, 'out': (check.stdout + check.stderr)[-400:]},
+        'words': words, 'info': info, 'xmp': '/Metadata' in root, 'id': file_id, 'catalog': sorted(str(k) for k in root.keys()),
+        'jpegs': jpegs, 'annots': annots, 'outline': outline, 'fields': fields, 'attachments': attachments, 'renders': renders,
+        'pieceInfo': raw.count(b'/PieceInfo'), 'lastModified': raw.count(b'/LastModified'), 'thumb': raw.count(b'/Thumb'), 'metadataKeys': raw.count(b'/Metadata'),
+        'sha256': hashlib.sha256(open(path, 'rb').read()).hexdigest(),
+    }
+
+
 kind, path = sys.argv[1], sys.argv[2]
 sys.stdout.reconfigure(encoding='utf-8')
 if kind == 'csv':
@@ -1017,6 +1173,10 @@ elif kind == 'pdforder':
     result = read_pdf_order(path)
 elif kind == 'imagepdf':
     result = read_image_pdf(path)
+elif kind == 'render':
+    result = render_compare(path)
+elif kind == 'pdfmeta':
+    result = read_pdf_meta(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

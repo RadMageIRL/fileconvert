@@ -268,3 +268,36 @@ test('Images to PDF in WebKit: JPEG, PNG, TIFF and HEIC go in exactly; a WebP, w
   expect(r.pages[1].alphaExact).toBe(true);
   expect(w.outside).toEqual([]);
 });
+
+test('page previews, PDF to JPG and PNG, and Remove PDF metadata in WebKit: what needs a canvas in a worker says so; the rest works', async ({ page }) => {
+  const w = await openApp(page);
+  const ws = page.locator('#workspace');
+  const open = (id: string) => page.evaluate(t => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool(t), id);
+  // Previews are off with the reason; pages are still chosen in the grid, and the tool runs.
+  await open('delete-pdf-pages');
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await expect(ws.locator('.pg-note')).toHaveText('Previews are off for this PDF. This browser cannot draw PDF pages in the background: it has no OffscreenCanvas in workers. Current Chrome, Edge, Firefox and Safari (16.4 and later) have it. You can still choose pages here or by typing them.', { timeout: 30_000 });
+  await expect(ws.locator('.pg-tile .pg-ph')).toHaveText(['1', '2', '3']);
+  await ws.locator('.pg-tile').nth(1).click();
+  await expect(ws.locator('[data-key="opt-pages"]')).toHaveValue('2');
+  await ws.getByRole('button', { name: 'Delete the pages' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+  // PDF to JPG and PNG says why it cannot run, before anything starts.
+  await open('pdf-to-images');
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await expect(ws.locator('.ws-why')).toHaveText('This browser cannot draw PDF pages in the background: it has no OffscreenCanvas in workers. Current Chrome, Edge, Firefox and Safari (16.4 and later) have it.');
+  await expect(ws.getByRole('button', { name: 'Convert the pages' })).toBeDisabled();
+  // Metadata removal needs no canvas.
+  await open('remove-pdf-metadata');
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf-render/metadata.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Remove the metadata' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+  const bytes = await page.evaluate(async () => [...new Uint8Array(await (window as unknown as { __fileconvert: { workspace: { outputs: Array<{ blob: Blob }> } } }).__fileconvert.workspace.outputs[0].blob.arrayBuffer())]);
+  const meta = pyRead<{ qpdf: { ok: boolean }; words: string[] }>('pdfmeta', writeTemp(tempDir(), 'out.pdf', new Uint8Array(bytes)));
+  expect(meta.qpdf.ok).toBe(true);
+  expect(meta.words.filter(x => x.startsWith('MARK-'))).toEqual([]);
+  expect(w.outside).toEqual([]);
+});

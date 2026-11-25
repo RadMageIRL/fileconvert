@@ -44,14 +44,18 @@ serve({
     admit(estimate([workOf(bytes.length, scan)], 'text', { engine: p.allowance?.engine }), p.allowance, NEEDS.text, '');
     return { result: scan };
   },
-  /** A file added to a PDF tool: the guard, then the editing library reads it, for its pages and signature. */
-  async inspect(p: { file: Blob; allowance?: MemoryAllowance }, progress) {
+  /** A file added to a PDF tool: the guard, then the editing library reads it, for its pages and signature, and when
+   *  asked each page's size as shown (`sizes`) or the metadata it holds (`metadata`). */
+  async inspect(p: { file: Blob; allowance?: MemoryAllowance; sizes?: boolean; metadata?: boolean }, progress) {
     progress({ stage: 'Checking the PDF' });
     const s = await import('../engines/pdf/structure');
+    const L = await s.pdfLib();
     const bytes = await read(p.file, p.allowance, 'edit');
     const { doc, signature, scan } = await s.openPdf(bytes, alone(bytes, p.allowance));
     const work: PdfWork = workOf(bytes.length, scan);
-    return { result: { pages: s.pageRefs(doc, await s.pdfLib()).length, signature, work } };
+    const sizes = p.sizes ? s.pageSizes(doc, L) : undefined;
+    const metadata = p.metadata ? (await import('../engines/pdf/metadata')).findMetadata(doc, L) : undefined;
+    return { result: { pages: s.pageRefs(doc, L).length, signature, work, sizes, metadata } };
   },
   async keepPages(p: { file: Blob; order: number[]; allowance?: MemoryAllowance }, progress) {
     progress({ stage: 'Checking the PDF' });
@@ -62,6 +66,22 @@ serve({
     const report = s.keepPages(doc, await s.pdfLib(), p.order);
     const out = await s.savePdf(doc);
     return { result: { bytes: out, report, scan, signature }, transfer: buffersOf(out) };
+  },
+  /** The document's metadata removed (src/engines/pdf/metadata.ts), the file cleaned and written whole, and given a new
+   *  identifier made from its own bytes. */
+  async removeMetadata(p: { file: Blob; allowance?: MemoryAllowance }, progress) {
+    progress({ stage: 'Checking the PDF' });
+    const s = await import('../engines/pdf/structure');
+    const m = await import('../engines/pdf/metadata');
+    const bytes = await read(p.file, p.allowance, 'edit');
+    const { doc, signature } = await s.openPdf(bytes, alone(bytes, p.allowance));
+    const L = await s.pdfLib();
+    progress({ stage: 'Removing metadata' });
+    const report = m.removeMetadata(doc, L);
+    const clean = s.cleanDocument(doc, L, { pagesRemoved: 0, reordered: false });
+    progress({ stage: 'Writing the PDF' });
+    const out = await m.newFileId(await s.savePdf(doc));
+    return { result: { bytes: out, report, clean, signature }, transfer: buffersOf(out) };
   },
   /** Pages turned by 90, 180 or 270 degrees, in place. */
   async rotate(p: { file: Blob; pages: number[]; by: number; allowance?: MemoryAllowance }, progress) {

@@ -1,0 +1,112 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [10 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Length 60 >>
+stream
+0 g BT /F1 20 Tf 72 720 Td (Annotations on this page) Tj ET
+
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R /Annots [21 0 R 23 0 R 25 0 R 27 0 R 29 0 R 30 0 R] >>
+endobj
+20 0 obj
+<< /Length 29 /Type /XObject /Subtype /Form /BBox [0 0 200 100] /Resources << /Font << /F1 3 0 R >> >> >>
+stream
+0 0 1 RG 4 w 2 2 196 96 re S
+
+endstream
+endobj
+21 0 obj
+<< /Type /Annot /Subtype /Square /Rect [72 560 272 660] /C [0 0 1] /AP << /N 20 0 R >> /F 4 /T (Reviewer) /Contents (A square) >>
+endobj
+22 0 obj
+<< /Length 75 /Type /XObject /Subtype /Form /BBox [0 0 220 60] /Resources << /Font << /F1 3 0 R >> >> >>
+stream
+1 1 0.8 rg 0 0 220 60 re f 0 g BT /F1 16 Tf 8 22 Td (Free text note) Tj ET
+
+endstream
+endobj
+23 0 obj
+<< /Type /Annot /Subtype /FreeText /Rect [320 600 540 660] /DA (/F1 16 Tf 0 g) /AP << /N 22 0 R >> /F 4 /Contents (Free text note) >>
+endobj
+24 0 obj
+<< /Length 46 /Type /XObject /Subtype /Form /BBox [0 0 24 24] /Resources << /Font << /F1 3 0 R >> >> >>
+stream
+1 0.85 0 rg 0 0 24 24 re f 0 g 4 4 16 16 re S
+
+endstream
+endobj
+25 0 obj
+<< /Type /Annot /Subtype /Text /Rect [80 480 104 504] /AP << /N 24 0 R >> /F 4 /T (Reviewer) /Contents (A sticky note) >>
+endobj
+26 0 obj
+<< /Length 38 /Type /XObject /Subtype /Form /BBox [0 0 300 24] /Resources << /ExtGState << /Multiply << /BM /Multiply >> >> >> >>
+stream
+/Multiply gs 1 1 0 rg 0 0 300 24 re f
+
+endstream
+endobj
+27 0 obj
+<< /Type /Annot /Subtype /Highlight /Rect [68 712 368 736] /QuadPoints [68 736 368 736 68 712 368 712] /C [1 1 0] /AP << /N 26 0 R >> /F 4 >>
+endobj
+28 0 obj
+<< /Length 26 /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Resources << /Font << /F1 3 0 R >> >> >>
+stream
+1 0 0 rg 0 0 100 100 re f
+
+endstream
+endobj
+29 0 obj
+<< /Type /Annot /Subtype /Square /Rect [400 300 500 400] /AP << /N 28 0 R >> /F 2 >>
+endobj
+30 0 obj
+<< /Type /Annot /Subtype /Square /Rect [400 150 500 250] /AP << /N 28 0 R >> /F 32 >>
+endobj
+xref
+0 31
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000122 00000 n 
+0000000219 00000 n 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000329 00000 n 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000508 00000 n 
+0000000677 00000 n 
+0000000823 00000 n 
+0000001037 00000 n 
+0000001187 00000 n 
+0000001371 00000 n 
+0000001509 00000 n 
+0000001711 00000 n 
+0000001869 00000 n 
+0000002035 00000 n 
+0000002136 00000 n 
+trailer
+<< /Size 31 /Root 1 0 R >>
+startxref
+2238
+%%EOF

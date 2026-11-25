@@ -20,10 +20,17 @@ describe('the page list', () => {
     expect(PAGES.map(p => p.slug).sort()).toEqual([
       'aiff-to-mp3', 'avif-to-jpg', 'csv-to-json', 'delete-pdf-pages', 'docx-to-html', 'docx-to-markdown', 'extract-pdf-pages', 'extract-tar', 'extract-zip', 'flac-to-mp3', 'gif-to-mp4', 'gif-to-webp',
       'heic-to-jpg', 'heic-to-png', 'html-to-docx', 'html-to-markdown', 'images-to-pdf', 'images-to-tiff', 'jpg-to-pdf', 'jpg-to-png', 'json-to-csv', 'json-to-jsonl',
-      'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'merge-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'organize-pdf', 'pdf-to-text',
-      'png-to-ico', 'png-to-jpg', 'png-to-pdf', 'png-to-webp', 'remove-image-metadata', 'rotate-pdf', 'split-pdf', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
+      'json-to-xlsx', 'jsonl-to-csv', 'm4a-to-mp3', 'markdown-to-docx', 'markdown-to-pdf', 'merge-pdf', 'mkv-to-mp4', 'mov-to-mp4', 'mp4-to-gif', 'mp4-to-mp3', 'ods-to-csv', 'ods-to-xlsx', 'organize-pdf', 'pdf-to-jpg', 'pdf-to-png', 'pdf-to-text',
+      'png-to-ico', 'png-to-jpg', 'png-to-pdf', 'png-to-webp', 'remove-image-metadata', 'remove-pdf-metadata', 'rotate-pdf', 'split-pdf', 'svg-to-jpg', 'svg-to-png', 'ts-to-mp4', 'wav-to-mp3', 'webm-to-mp4', 'webp-to-gif', 'webp-to-jpg', 'webp-to-png',
       'xls-to-csv', 'xls-to-xlsx', 'xlsx-to-csv', 'xlsx-to-json', 'xml-to-csv', 'xml-to-xlsx', 'yaml-to-csv',
     ]);
+  });
+
+  test('a page about one use of a tool starts it with its options set: PDF to PNG starts with PNG, PDF to JPG with JPG', () => {
+    const tag = (slug: string) => /<html [^\n]*/.exec(renderPage(home, PAGES.find(p => p.slug === slug)!))![0];
+    expect(tag('pdf-to-png')).toContain('data-tool="pdf-to-images" data-serves="pdf>png" data-preset="format=png"');
+    expect(tag('pdf-to-jpg')).toContain('data-tool="pdf-to-images" data-serves="pdf>jpg" data-preset="format=jpg"');
+    expect(tag('remove-pdf-metadata')).not.toContain('data-preset');
   });
 
   test('an extraction page is the converter with its archive formats named, and the checks hold it to archives', () => {

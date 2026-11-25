@@ -13,6 +13,8 @@ export const TOOLS = {
   'delete-pdf-pages': { accepts: ['pdf'] },
   'organize-pdf': { accepts: ['pdf'] },
   'rotate-pdf': { accepts: ['pdf'] },
+  'pdf-to-images': { accepts: ['pdf'] },
+  'remove-pdf-metadata': { accepts: ['pdf'] },
 } as const satisfies Record<string, { accepts: readonly FormatId[] }>;
 
 export type ToolId = keyof typeof TOOLS;

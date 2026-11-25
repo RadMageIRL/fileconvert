@@ -79,7 +79,10 @@ export class Engines {
   data = new Pool(() => new Worker(new URL('../workers/data.worker.ts', import.meta.url), { type: 'module' }), 1);
   archive = new Pool(() => new Worker(new URL('../workers/zip.worker.ts', import.meta.url), { type: 'module' }), 1);
   pdf = new Pool(() => new Worker(new URL('../workers/pdf.worker.ts', import.meta.url), { type: 'module' }), 1);
-  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data, this.archive, this.pdf]; }
+  /** PDF pages drawn as pictures (PDF to JPG and PNG). Page previews start render workers of their own (newRenderWorker). */
+  render = new Pool(() => this.newRenderWorker(), 1);
+  newRenderWorker(): Worker { return new Worker(new URL('../workers/render.worker.ts', import.meta.url), { type: 'module' }); }
+  all(): Pool[] { return [this.image, this.media, this.inspect, this.document, this.data, this.archive, this.pdf, this.render]; }
 }
 
 /**

@@ -2,9 +2,10 @@
 // worker), the warning a signed PDF needs before anything changes it, and the wording of what a result kept and lost.
 
 import type { ToolDefinition, ToolInput } from '../app/tools';
-import { formatPages, parseRanges, pagesOf } from '../core/pageranges';
+import { chosenPages, formatPages, parseRanges, pagesOf } from '../core/pageranges';
 import { estimate, memoryAllowance, refusal, type MemoryAllowance, type PdfWork } from '../core/pdfmemory';
 import type { DroppedPart, MergeReport } from '../engines/pdf/merge';
+import type { MetadataReport } from '../engines/pdf/metadata';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
@@ -15,25 +16,41 @@ export function listNames(names: string[]): string {
   return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0] ?? '';
 }
 
+/** What the PDF worker's check of a file finds (src/workers/pdf.worker.ts, inspect). */
+export interface PdfInspection {
+  pages: number;
+  signature: SignatureInfo;
+  work: PdfWork;
+  sizes?: number[];
+  metadata?: MetadataReport;
+}
+
 /**
  * The check of each PDF as it is added: the guard and the editing library read it in the PDF worker (encrypted,
  * hostile and malformed files are refused with the reason), its pages are counted, and a digitally signed file raises
- * a warning that has to be accepted. `doing` says what the tool does to it: "Merging", "Splitting".
+ * a warning that has to be accepted. `doing` says what the tool does to it: "Merging", "Splitting"; a tool that only
+ * reads the file (`changes: false`) leaves its signature as it is. `sizes` asks for each page's size as shown (tools
+ * with page previews), `metadata` for what metadata it holds; `describe` adds to the note under the file.
  */
-export function inspectPdf(doing: string): NonNullable<ToolDefinition['inspect']> {
+export function inspectPdf(doing: string, o: { sizes?: boolean; metadata?: boolean; changes?: boolean; describe?: (r: PdfInspection) => string | undefined } = {}): NonNullable<ToolDefinition['inspect']> {
   return async (input, ctx) => {
-    const r = await ctx.engines.pdf.run<{ pages: number; signature: SignatureInfo; work: PdfWork }>('inspect', { file: input.file, allowance: allowance() }, { signal: ctx.signal });
+    const r = await ctx.engines.pdf.run<PdfInspection>('inspect', { file: input.file, allowance: allowance(), sizes: o.sizes, metadata: o.metadata }, { signal: ctx.signal });
+    const changes = o.changes !== false;
+    const signed = r.signature.signed ? (changes ? 'Digitally signed.' : 'Digitally signed; this tool does not change the file.') : undefined;
+    const note = [signed, o.describe?.(r)].filter(Boolean).join(' ') || undefined;
     return {
       pages: r.pages,
       work: r.work,
+      sizes: r.sizes,
       info: plural(r.pages, 'page'),
-      note: r.signature.signed ? 'Digitally signed.' : undefined,
-      confirm: r.signature.signed
+      note,
+      confirm: r.signature.signed && changes
         ? `${input.name} is digitally signed. ${doing} changes it, so its signature will no longer be valid: the result keeps the signature field and how it looks, but PDF readers will report the signature as broken.`
         : undefined,
     };
   };
 }
+
 
 /** What one PDF task may use in this browser, read when a task starts (src/core/pdfmemory.ts). Every PDF task in the
  *  worker gets it, since a worker is not told the device's memory. */
@@ -79,7 +96,7 @@ export function pageLabel(from: number, to: number, pages: number): string {
   return from === to ? `p${pad(from)}` : `p${pad(from)}-${pad(to)}`;
 }
 
-export { formatPages, parseRanges, pagesOf };
+export { chosenPages, formatPages, parseRanges, pagesOf };
 
 const DROPPED_NEW: Record<DroppedPart, string> = {
   tags: 'Accessibility tags are not kept; screen readers read the new files without them.',

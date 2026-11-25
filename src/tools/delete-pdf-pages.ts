@@ -4,9 +4,8 @@
 import type { ToolDefinition } from '../app/tools';
 import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
-import { selectPages } from '../core/pageranges';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
-import { allowance, checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, chosenPages, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
 export const tool: ToolDefinition = {
   id: 'delete-pdf-pages',
@@ -17,21 +16,21 @@ export const tool: ToolDefinition = {
   maxInputs: 1,
   ordered: false,
   options: [
-    { kind: 'text', key: 'pages', label: 'Pages to delete', value: '', placeholder: '2, 5-6', maxLength: 4000,
-      hint: 'Each page once; 10- means page 10 to the end. At least one page has to stay. This is not redaction.' },
+    { kind: 'pages', key: 'pages', label: 'Pages to delete', value: '', placeholder: '2, 5-6', maxLength: 4000, empty: 'none', mark: 'Removed',
+      hint: 'Each page once; 10- means page 10 to the end. Or choose them in the page previews. At least one page has to stay. This is not redaction.' },
   ],
   action: 'Delete the pages',
   confirmLabel: 'Delete anyway; the signature will no longer be valid',
-  inspect: inspectPdf('Deleting pages'),
+  inspect: inspectPdf('Deleting pages', { sizes: true }),
   check(inputs, values) {
     return checkWith(n => {
-      if (selectPages(String(values.pages), n).length === n) throw new Error('That is every page; at least one page has to stay.');
+      if (chosenPages(values.pages, n, false).length === n) throw new Error('That is every page; at least one page has to stay.');
     })(inputs);
   },
   async run(inputs, values, ctx) {
     const input = inputs[0];
     const n = pagesOfInput(inputs);
-    const removed = new Set(selectPages(String(values.pages), n));
+    const removed = new Set(chosenPages(values.pages, n, false));
     const order = Array.from({ length: n }, (_, i) => i).filter(i => !removed.has(i + 1));
     const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: CleanReport; signature: SignatureInfo }>('keepPages', { file: input.file, order, allowance: allowance() }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });

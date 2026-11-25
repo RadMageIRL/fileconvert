@@ -10,11 +10,13 @@ import { FORMATS } from '../core/formats';
 import { formatBytes } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
-import { checkOrder, formatOrder, parseOrder } from '../core/pageranges';
+import { checkOrder, chosenPages, formatOrder, formatPages, parseOrder } from '../core/pageranges';
+import { memoryAllowance } from '../core/pdfmemory';
 import { sniffBlob } from '../core/sniff';
 import { clear, h } from './dom';
 import type { Engines } from './jobs';
 import { CanceledError } from './pool';
+import { PageGrid, PreviewSession, TILE, type GridState } from './preview';
 import type { ToolDefinition, ToolInput, ToolOption, ToolValues } from './tools';
 
 interface Entry extends ToolInput {
@@ -35,7 +37,16 @@ export interface WorkspaceHost {
   zip(files: Array<{ name: string; blob: Blob }>): Promise<Blob>;
   save(blob: Blob, name: string): void;
   announce(message: string): void;
+  /** Where a run may write its results in the browser's private storage, or null where there is none. */
+  temp?(prefix: string): { session: string; prefix: string } | null;
+  /** Deletes results written to private storage: these names, and every name that starts with `prefix`. */
+  discard?(names: string[], prefix?: string): void;
+  /** The address of pdf.js's files in the app, for page previews. */
+  assets?: string;
 }
+
+/** Where a remembered choice is kept in this browser (localStorage). */
+const REMEMBER = 'fileconvert-choice-';
 
 type State = 'idle' | 'running' | 'done' | 'failed' | 'canceled';
 
@@ -49,7 +60,10 @@ export class Workspace {
   private error?: string;
   private warnings: string[] = [];
   private summary?: string;
-  private outputs: Array<{ name: string; blob: Blob; note?: string; details?: string[] }> = [];
+  private outputs: Array<{ name: string; blob: Blob; note?: string; details?: string[]; temp?: string }> = [];
+  /** The name prefix of the current run's results in private storage. */
+  private runPrefix = '';
+  private runs = 0;
   private controller: AbortController | null = null;
   private names = new NameRegistry();
   private dragId: number | null = null;
@@ -58,17 +72,36 @@ export class Workspace {
   private confirmFor = '';
   private list!: HTMLOListElement;
   private confirmBox!: HTMLElement;
-  /** The page-order option (reorder): its list, its text box, what the box shows, and the file and page count it was
-   *  made for. The order itself is the option's value, a list of pages; the box shows it as short text ("5000-1"), or
-   *  the text as typed. */
-  private order?: { opt: ToolOption; list: HTMLOListElement; text: HTMLInputElement; status: HTMLElement; shown: string; madeFor: string };
-  private dragPage: number | null = null;
+  /** The page option of a one-PDF tool, with its page previews: a page order (reorder), pages to choose (extract,
+   *  delete, rotate, PDF to JPG and PNG), or the pages shown with the file each goes to (split, no option). Its text box,
+   *  what the box shows, and the file and page count it was made for. An order is the option's value as a list of pages,
+   *  shown as short text ("5000-1"); chosen pages are a list too, or the text as typed. */
+  private pagesUi?: { opt?: ToolOption; grid: PageGrid; text?: HTMLInputElement; shown: string; madeFor: string };
+  /** The previews of the file in the tool, drawn in a worker of their own. */
+  private preview: { id: number; session: PreviewSession } | null = null;
   private runBox!: HTMLElement;
   private outBox!: HTMLElement;
   private picker!: HTMLInputElement;
 
-  constructor(private root: HTMLElement, readonly def: ToolDefinition, private host: WorkspaceHost) {
-    for (const o of def.options) this.values[o.key] = o.value;
+  /** `preset` sets options for a page about one use of the tool (PNG on the PDF to PNG page), over remembered choices. */
+  constructor(private root: HTMLElement, readonly def: ToolDefinition, private host: WorkspaceHost, preset: Record<string, string> = {}) {
+    for (const o of def.options) {
+      this.values[o.key] = o.value;
+      const kept = o.remember ? this.recall(o.remember) : null;
+      for (const v of [kept, preset[o.key]]) if (v != null && this.allowed(o, v)) this.values[o.key] = o.kind === 'number' ? Number(v) : o.kind === 'check' ? v === 'true' : v;
+    }
+  }
+
+  private recall(name: string): string | null {
+    try { return localStorage.getItem(REMEMBER + name); } catch { return null; }
+  }
+
+  /** Whether a stored or preset value is one the option can take. */
+  private allowed(o: ToolOption, v: string): boolean {
+    if (o.kind === 'select') return o.choices.some(([c]) => c === v);
+    if (o.kind === 'number') return Number.isFinite(Number(v)) && Number(v) >= o.min && Number(v) <= o.max;
+    if (o.kind === 'check') return v === 'true' || v === 'false';
+    return o.kind === 'text';
   }
 
   // ------------------------------------------------------------ state
@@ -124,6 +157,7 @@ export class Workspace {
           if (r.pages !== undefined) e.pages = r.pages;
           if (r.work) e.work = r.work;
           if (r.image) e.image = r.image;
+          if (r.sizes) e.sizes = r.sizes;
           if (r.note) e.notes.push(r.note);
           if (r.error) e.error = r.error;
           if (r.confirm) e.confirm = r.confirm;
@@ -171,6 +205,9 @@ export class Workspace {
 
   setValue(key: string, value: string | number | boolean): void {
     this.values[key] = value;
+    // A choice the person makes is remembered where the option asks for it (paper size); defaults never are.
+    const o = this.def.options.find(x => x.key === key);
+    if (o?.remember) { try { localStorage.setItem(REMEMBER + o.remember, String(value)); } catch { /* storage unavailable: kept for this visit */ } }
     this.changed();
   }
 
@@ -187,6 +224,8 @@ export class Workspace {
 
   private dropOutputs(): void {
     for (const o of this.outputs) this.names.release(o.name);
+    const temps = this.outputs.flatMap(o => (o.temp ? [o.temp] : []));
+    if (temps.length) this.host.discard?.(temps);
     this.outputs = [];
     this.warnings = [];
     this.summary = undefined;
@@ -194,17 +233,23 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image }) => ({ id, file, name, format, pages, work, image }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image, sizes }) => ({ id, file, name, format, pages, work, image, sizes }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;
     Object.assign(this, { state: 'running', error: undefined, fraction: undefined, stage: 'Starting' });
+    // The previews let their worker go while the tool runs, so the two do not hold the file in memory together.
+    this.preview?.session.suspend();
+    const prefix = `ws${Date.now().toString(36)}-${++this.runs}-`;
+    this.runPrefix = prefix;
     this.render();
     const current = () => this.controller === controller;
+    const leftovers = () => this.host.discard?.([], prefix);
     try {
       const r = await this.def.run(inputs, { ...this.values }, {
         signal: controller.signal,
         engines: this.host.engines,
+        temp: this.host.temp?.(prefix) ?? null,
         progress: p => {
           if (!current()) return;
           if (p.fraction !== undefined) this.fraction = p.fraction;
@@ -212,14 +257,15 @@ export class Workspace {
           this.renderRun();
         },
       });
-      if (!current()) return;
+      if (!current()) { leftovers(); return; }
       if (controller.signal.aborted) throw new CanceledError();
-      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob, note: o.note, details: o.details }));
+      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob, note: o.note, details: o.details, temp: o.temp }));
       this.warnings = r.warnings;
       this.summary = r.summary;
       this.state = 'done';
       this.host.announce(`${this.def.title}: ${this.outputs.length} ${this.outputs.length === 1 ? 'file is' : 'files are'} ready to download.`);
     } catch (e) {
+      leftovers();
       if (!current()) return;
       if (e instanceof CanceledError || controller.signal.aborted) {
         this.state = 'canceled';
@@ -242,6 +288,8 @@ export class Workspace {
     this.controller.abort();
     this.controller = null;
     this.state = 'canceled';
+    // A worker stopped halfway may have written some results; they are not offered, so they go.
+    if (this.runPrefix) this.host.discard?.([], this.runPrefix);
     this.render();
   }
 
@@ -249,6 +297,9 @@ export class Workspace {
     for (const e of this.entries) e.inspecting?.abort();
     this.cancel();
     this.dropOutputs();
+    this.preview?.session.dispose();
+    this.preview = null;
+    this.pagesUi?.grid.dispose();
     clear(this.root);
   }
 
@@ -287,6 +338,7 @@ export class Workspace {
         h('span', { class: 'drop-sub' }, `${this.acceptedLabels()}${this.def.maxInputs > 1 ? `, up to ${this.def.maxInputs} files` : ''}. You can also drop files on the page.`)),
       this.list,
       this.optionsBox(),
+      this.labelsBox(),
       this.confirmBox,
       this.runBox,
       this.outBox,
@@ -302,7 +354,10 @@ export class Workspace {
     const box = h('div', { class: 'ws-field' }, el);
     if (o.hint) {
       const id = `ws-hint-${o.key}`;
-      box.append(h('span', { class: 'ws-hint', id }, o.hint));
+      const hint = h('span', { class: 'ws-hint', id }, o.hint);
+      // A page option's hint is about its text box, so it goes under the box, above the page previews.
+      const grid = el.querySelector('.pg-box');
+      if (grid) grid.before(hint); else box.append(hint);
       el.querySelector('input, select')?.setAttribute('aria-describedby', id);
     }
     if (o.showIf) { box.dataset.showKey = o.showIf.key; box.dataset.showValue = ([] as string[]).concat(o.showIf.value).join('|'); }
@@ -311,7 +366,7 @@ export class Workspace {
 
   private fieldControl(o: ToolOption): HTMLElement {
     const disabledWhileRunning = (el: HTMLElement) => { el.dataset.lock = ''; return el; };
-    if (o.kind === 'order') return this.orderField(o);
+    if (o.kind === 'order' || o.kind === 'pages') return this.pagesField(o);
     if (o.kind === 'select') {
       const sel = h('select', { 'data-key': `opt-${o.key}` }) as HTMLSelectElement;
       for (const [v, l] of o.choices) sel.append(h('option', { value: v, selected: v === this.values[o.key] }, l));
@@ -332,7 +387,7 @@ export class Workspace {
       box.addEventListener('change', () => this.setValue(o.key, box.checked));
       return h('label', { class: 'field check' }, disabledWhileRunning(box), h('span', {}, o.label));
     }
-    const text = h('input', { type: 'text', value: String(this.values[o.key]), placeholder: o.placeholder, maxlength: o.maxLength, 'data-key': `opt-${o.key}` }) as HTMLInputElement;
+    const text = h('input', { type: 'text', value: String(this.values[o.key]), placeholder: (o as { placeholder?: string }).placeholder, maxlength: (o as { maxLength?: number }).maxLength, 'data-key': `opt-${o.key}` }) as HTMLInputElement;
     text.addEventListener('change', () => this.setValue(o.key, text.value));
     return h('label', { class: 'field' }, h('span', {}, o.label), disabledWhileRunning(text));
   }
@@ -342,50 +397,67 @@ export class Workspace {
     return h('fieldset', { class: 'ws-options' }, h('legend', {}, 'Options'), h('div', { class: 'fields' }, ...this.def.options.map(o => this.field(o))));
   }
 
-  // ------------------------------------------------------------ page order (reorder)
+  // ------------------------------------------------------------ pages of one PDF, with previews
 
-  private orderField(o: ToolOption): HTMLElement {
-    const text = h('input', { type: 'text', 'data-key': `opt-${o.key}`, 'data-lock': '', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
-    const list = h('ol', { class: 'ws-pages', 'aria-label': 'Pages, in their new order' }) as HTMLOListElement;
-    const status = h('span', { class: 'ws-hint', 'aria-live': 'polite' });
-    this.order = { opt: o, list, text, status, shown: '', madeFor: '' };
-    text.addEventListener('change', () => this.typeOrder(text.value.trim()));
-    const tools = h('div', { class: 'ws-page-tools' },
-      h('button', { type: 'button', class: 'small', 'data-key': 'order-reverse', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().reverse(), 'The order was reversed.') }, 'Reverse'),
-      h('button', { type: 'button', class: 'small', 'data-key': 'order-reset', 'data-lock': '', onclick: () => this.setOrder(this.currentOrder().sort((a, b) => a - b), 'The pages are back in their first order.') }, 'Reset'));
-    this.setupPageDrag(list);
-    return h('div', { class: 'field ws-order' },
+  /** The page option (an order, or pages to choose): its text box and its page grid. */
+  private pagesField(o: ToolOption): HTMLElement {
+    const order = o.kind === 'order';
+    const text = h('input', { type: 'text', 'data-key': `opt-${o.key}`, 'data-lock': '', autocomplete: 'off', spellcheck: 'false',
+      placeholder: o.kind === 'pages' ? o.placeholder : undefined, maxlength: o.kind === 'pages' ? o.maxLength : undefined }) as HTMLInputElement;
+    const grid = new PageGrid(order ? 'order' : 'select', order ? 'Pages, in their new order' : 'Pages', order ? {
+      move: (from, to) => this.movePage(from, to),
+      reverse: () => this.setOrder(this.currentOrder().reverse(), 'The order was reversed.'),
+      reset: () => this.setOrder(this.currentOrder().sort((a, b) => a - b), 'The pages are back in their first order.'),
+    } : {
+      toggle: (pages, on) => this.choosePages(pages, on),
+      all: () => this.chooseAll(true),
+      none: () => this.chooseAll(false),
+    });
+    this.pagesUi = { opt: o, grid, text, shown: '', madeFor: '' };
+    text.addEventListener('change', () => (order ? this.typeOrder(text.value.trim()) : this.typePages(text.value)));
+    return h('div', { class: `field ${order ? 'ws-order' : 'ws-pick'}` },
       h('label', { class: 'field' }, h('span', {}, o.label), text),
-      status, tools, list);
+      grid.el);
+  }
+
+  /** A tool that makes several files from one PDF (split) shows its pages with the file each goes to. */
+  private labelsBox(): HTMLElement {
+    if (!this.def.pageLabels || this.pagesUi || this.def.maxInputs !== 1) return h('div', { hidden: true });
+    const grid = new PageGrid('view', 'Pages, with the file each goes to', {});
+    this.pagesUi = { grid, shown: '', madeFor: '' };
+    return h('fieldset', { class: 'ws-options' }, h('legend', {}, 'Pages'), grid.el);
+  }
+
+  private pageCount(): number {
+    return this.accepted()[0]?.pages ?? 0;
   }
 
   /** The order as page numbers, or every page in order while the text does not hold a valid order. */
   private currentOrder(): number[] {
-    const n = this.accepted()[0]?.pages ?? 0;
+    const n = this.pageCount();
     try { return this.orderValue(n); } catch { return Array.from({ length: n }, (_, i) => i + 1); }
   }
 
   /** The option's order for a file of n pages: the list kept, or the text typed read as an order (which may throw). */
   private orderValue(n: number): number[] {
-    const v = this.values[this.order!.opt.key];
+    const v = this.values[this.pagesUi!.opt!.key];
     return Array.isArray(v) ? checkOrder(v, n) : parseOrder(String(v), n);
   }
 
   /** Text typed in the box: kept as the order when it is one (the box keeps the text as typed), otherwise kept as
    *  text, so the tool's check shows what is wrong with it. */
   private typeOrder(text: string): void {
-    const o = this.order!;
-    const n = this.accepted()[0]?.pages ?? 0;
-    o.shown = text;
+    const u = this.pagesUi!;
+    u.shown = text;
     let value: string | number[] = text;
-    try { value = parseOrder(text, n); } catch { /* the check says why */ }
-    this.values[o.opt.key] = value;
+    try { value = parseOrder(text, this.pageCount()); } catch { /* the check says why */ }
+    this.values[u.opt!.key] = value;
     this.changed();
   }
 
   private setOrder(order: number[], message?: string): void {
-    this.values[this.order!.opt.key] = order;
-    this.order!.shown = formatOrder(order);
+    this.values[this.pagesUi!.opt!.key] = order;
+    this.pagesUi!.shown = formatOrder(order);
     this.changed();
     if (message) this.host.announce(message);
   }
@@ -399,72 +471,120 @@ export class Workspace {
     this.setOrder(order, `Page ${p} moved to position ${to + 1} of ${order.length}.`);
   }
 
-  private renderOrder(): void {
-    const o = this.order;
-    if (!o) return;
-    const file = this.accepted()[0];
-    const n = file?.pages ?? 0;
-    // A new file (or a file with other pages) starts from its own order.
-    const madeFor = file ? `${file.id}:${n}` : '';
-    if (o.madeFor !== madeFor) {
-      o.madeFor = madeFor;
-      this.values[o.opt.key] = n ? Array.from({ length: n }, (_, i) => i + 1) : '';
-      o.shown = n ? `1-${n}` : '';
-    }
-    o.text.value = o.shown;
-    clear(o.list);
-    if (!n) { o.status.textContent = 'Add a PDF to see its pages.'; return; }
-    let order: number[] | null = null;
-    try { order = this.orderValue(n); } catch (e) { o.status.textContent = (e as Error).message; }
-    if (!order) return;
-    o.status.textContent = order.every((p, i) => p === i + 1) ? `${n.toLocaleString('en-US')} pages, in their first order.` : `${n.toLocaleString('en-US')} pages, in a new order.`;
-    const lock = this.running;
-    order.forEach((p, i) => {
-      o.list.append(h('li', { class: 'ws-page', draggable: lock ? null : 'true', 'data-page': p, 'data-pos': i },
-        h('span', { class: 'ws-pos', 'aria-hidden': 'true' }, String(i + 1)),
-        h('span', { class: 'ws-page-name' }, `Page ${p}`),
-        h('span', { class: 'job-actions' },
-          h('button', { type: 'button', class: 'small', 'data-key': `pg-up-${p}`, 'aria-label': `Move page ${p} up`, disabled: i === 0 || lock, onclick: () => this.movePage(i, i - 1) }, 'Up'),
-          h('button', { type: 'button', class: 'small', 'data-key': `pg-down-${p}`, 'aria-label': `Move page ${p} down`, disabled: i === order!.length - 1 || lock, onclick: () => this.movePage(i, i + 1) }, 'Down'))));
-    });
+  /** Whether an empty choice means every page (rotate, PDF to JPG and PNG) rather than none yet. */
+  private emptyAll(): boolean {
+    const o = this.pagesUi?.opt;
+    return o?.kind === 'pages' && o.empty === 'all';
   }
 
-  /** Dragging a page row within the list; the buttons and the text box do the same without a pointer. */
-  private setupPageDrag(list: HTMLOListElement): void {
-    const rowAt = (t: EventTarget | null) => (t as HTMLElement | null)?.closest?.<HTMLLIElement>('li.ws-page') ?? null;
-    const clearMarks = () => list.querySelectorAll('.drop-before, .drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
-    list.addEventListener('dragstart', e => {
-      const row = rowAt(e.target);
-      if (!row || this.running) return;
-      this.dragPage = Number(row.dataset.pos);
-      e.dataTransfer?.setData('text/plain', row.dataset.page!);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-      row.classList.add('dragging');
-    });
-    list.addEventListener('dragover', e => {
-      if (this.dragPage === null) return;
-      e.preventDefault();
-      clearMarks();
-      const row = rowAt(e.target);
-      if (!row) return;
-      const r = row.getBoundingClientRect();
-      row.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
-    });
-    list.addEventListener('drop', e => {
-      if (this.dragPage === null) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const from = this.dragPage;
-      this.dragPage = null;
-      clearMarks();
-      const row = rowAt(e.target);
-      if (!row) return this.render();
-      const r = row.getBoundingClientRect();
-      let to = Number(row.dataset.pos) + (e.clientY < r.top + r.height / 2 ? 0 : 1);
-      if (to > from) to--;
-      this.movePage(from, to);
-    });
-    list.addEventListener('dragend', () => { this.dragPage = null; clearMarks(); });
+  /** The chosen pages, or none while the text does not hold a valid choice. */
+  private chosen(): Set<number> {
+    const o = this.pagesUi!.opt!;
+    const v = this.values[o.key];
+    if (v === '' && !this.emptyAll()) return new Set();
+    try { return new Set(chosenPages(v, this.pageCount(), this.emptyAll())); } catch { return new Set(); }
+  }
+
+  private typePages(text: string): void {
+    const u = this.pagesUi!;
+    u.shown = text;
+    this.values[u.opt!.key] = text.trim();
+    this.changed();
+  }
+
+  /** Pages chosen or let go in the previews; the box shows the choice as text. */
+  private choosePages(pages: number[], on: boolean): void {
+    const u = this.pagesUi!;
+    const n = this.pageCount();
+    const set = this.chosen();
+    for (const p of pages) if (on) set.add(p); else set.delete(p);
+    const list = [...set].sort((a, b) => a - b);
+    const every = this.emptyAll() && list.length === n;
+    this.values[u.opt!.key] = every ? '' : list;
+    u.shown = every ? '' : formatPages(list);
+    this.changed();
+    this.host.announce(pages.length === 1 ? `Page ${pages[0]} ${on ? 'chosen' : 'no longer chosen'}; ${list.length} of ${n} chosen.` : `${list.length} of ${n} pages chosen.`);
+  }
+
+  private chooseAll(on: boolean): void {
+    const u = this.pagesUi!;
+    const n = this.pageCount();
+    if (on) {
+      this.values[u.opt!.key] = this.emptyAll() ? '' : Array.from({ length: n }, (_, i) => i + 1);
+      u.shown = this.emptyAll() ? '' : `1-${n}`;
+    } else {
+      this.values[u.opt!.key] = this.emptyAll() ? [] : '';
+      u.shown = '';
+    }
+    this.changed();
+    this.host.announce(on ? `All ${n} pages chosen.` : 'No pages chosen.');
+  }
+
+  /** The page grid and its previews, for the file now in the tool. */
+  private renderPages(): void {
+    const u = this.pagesUi;
+    if (!u) return;
+    const file = this.accepted()[0];
+    const n = file?.pages ?? 0;
+    // A new file (or a file with other pages) starts from its own order and from nothing chosen.
+    const madeFor = file ? `${file.id}:${n}` : '';
+    if (u.madeFor !== madeFor) {
+      u.madeFor = madeFor;
+      if (u.opt?.kind === 'order') {
+        this.values[u.opt.key] = n ? Array.from({ length: n }, (_, i) => i + 1) : '';
+        u.shown = n ? `1-${n}` : '';
+      } else if (u.opt) {
+        this.values[u.opt.key] = u.opt.value;
+        u.shown = String(u.opt.value);
+      }
+      this.syncPreview();
+    }
+    if (u.text) u.text.value = u.shown;
+    const fmt = (k: number) => k.toLocaleString('en-US');
+    const state: GridState = { pages: n, sizes: file?.sizes, order: [], locked: this.running, status: '' };
+    if (!n) {
+      state.status = 'Add a PDF to see its pages.';
+    } else if (u.opt?.kind === 'order') {
+      try {
+        state.order = this.orderValue(n);
+        state.status = state.order.every((p, i) => p === i + 1) ? `${fmt(n)} pages, in their first order.` : `${fmt(n)} pages, in a new order.`;
+      } catch (e) {
+        state.order = Array.from({ length: n }, (_, i) => i + 1);
+        state.status = (e as Error).message;
+      }
+    } else {
+      state.order = Array.from({ length: n }, (_, i) => i + 1);
+      if (u.opt?.kind === 'pages') {
+        const v = this.values[u.opt.key];
+        let status = '';
+        try { if (!(v === '' && !this.emptyAll())) chosenPages(v, n, this.emptyAll()); } catch (e) { status = (e as Error).message; }
+        const set = this.chosen();
+        state.selected = set;
+        state.mark = u.opt.mark;
+        if (u.opt.turnKey) state.turn = Number(this.values[u.opt.turnKey]) || 0;
+        state.status = status || (v === '' && this.emptyAll() ? `All ${fmt(n)} pages.` : set.size ? `${fmt(set.size)} of ${fmt(n)} pages chosen.` : `${fmt(n)} pages. Choose pages here or type them above.`);
+      } else {
+        state.labels = this.def.pageLabels?.(this.accepted(), this.values) ?? undefined;
+        state.status = `${fmt(n)} pages.`;
+      }
+    }
+    u.grid.update(state);
+  }
+
+  /** Starts previews for the file now in the tool, and stops those of a file that left it. */
+  private syncPreview(): void {
+    const u = this.pagesUi;
+    const file = this.accepted()[0];
+    const id = u && file?.pages && this.def.maxInputs === 1 ? file.id : null;
+    if ((this.preview?.id ?? null) === id) return;
+    this.preview?.session.dispose();
+    this.preview = null;
+    if (id === null || !u || !this.host.assets) { u?.grid.setSession(null); return; }
+    const side = Math.round(TILE * Math.min(2, Math.max(1, globalThis.devicePixelRatio || 1)));
+    const session = new PreviewSession(() => this.host.engines.newRenderWorker(), file!.file, this.host.assets, () => memoryAllowance(), side,
+      p => u.grid.pictureReady(p), () => u.grid.sessionChanged());
+    this.preview = { id, session };
+    u.grid.setSession(session);
   }
 
   /** Reordering with the mouse: rows are dragged within the list. Files dropped from outside go to add(). */
@@ -536,7 +656,7 @@ export class Workspace {
     }
     this.list.hidden = this.entries.length === 0;
     this.renderConfirm();
-    this.renderOrder();
+    this.renderPages();
     // Options that belong to one choice of another (split by ranges, or every N pages).
     for (const el of this.root.querySelectorAll<HTMLElement>('[data-show-key]')) el.hidden = !el.dataset.showValue!.split('|').includes(String(this.values[el.dataset.showKey!]));
     for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-lock]')) el.disabled = this.running;
@@ -580,6 +700,8 @@ export class Workspace {
           h('span', { class: 'job-info' }, this.stage ?? '')));
     } else {
       box.append(h('button', { type: 'button', class: 'primary', 'data-key': 'run', disabled: !!why, onclick: () => void this.run() }, this.def.action));
+      const plan = this.accepted().length && !this.entries.some(e => e.checking) ? this.def.plan?.(this.accepted(), this.values) : null;
+      if (plan) box.append(h('p', { class: 'ws-plan' }, plan));
       if (why && this.entries.length) box.append(h('p', { class: 'ws-why' }, why));
       if (this.state === 'canceled') box.append(h('p', { class: 'ws-state canceled' }, 'Canceled.'));
       if (this.state === 'failed' && this.error) box.append(h('div', { class: 'job-error' }, this.error));

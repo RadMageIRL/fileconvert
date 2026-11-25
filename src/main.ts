@@ -96,7 +96,9 @@ async function main(): Promise<void> {
   app.start();
   // A tool page (data-tool on /remove-image-metadata/) opens its tool in place of the converter.
   const tool = document.documentElement.dataset.tool;
-  if (tool && isToolId(tool)) await app.openTool(tool);
+  // A page about one use of a tool (data-preset="format=png" on /pdf-to-png/) sets that option.
+  const preset = Object.fromEntries(new URLSearchParams(document.documentElement.dataset.preset ?? ''));
+  if (tool && isToolId(tool)) await app.openTool(tool, preset);
   Object.defineProperty(window, '__fileconvert', { value: app, enumerable: false });
   document.documentElement.dataset.ready = 'true';
 }

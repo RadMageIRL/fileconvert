@@ -6,7 +6,16 @@ import { pageBySlug, PAGES } from './src/core/pages.ts';
 import { fillStatics, pageProblems, render404, renderPage, sitemapXml, stripMarkers } from './src/site/render.ts';
 import { CSP } from './tools/csp.mjs';
 
-const CMAPS = join('node_modules', 'pdfjs-dist', 'cmaps');
+const PDFJS = join('node_modules', 'pdfjs-dist');
+/** pdf.js's files for drawing pages, served from the app's folder: the standard fonts, the JPEG 2000 and JBIG2 decoders
+ *  and the color management module (WebAssembly), and its CMYK profile. Not the JavaScript sandbox (quickjs), which
+ *  runs PDF scripts, nor the decoders' JavaScript fallbacks, for browsers without WebAssembly. */
+const PDFJS_FILES: Record<string, RegExp> = {
+  cmaps: /^[\w.-]+\.bcmap$/,
+  standard_fonts: /^(Foxit\w+\.pfb|Liberation[\w-]+\.ttf)$/,
+  wasm: /^(openjpeg|jbig2|qcms_bg)\.wasm$/,
+  iccs: /^[\w.-]+\.icc$/,
+};
 
 /**
  * Adds the Content-Security-Policy to the built page as a meta tag, for hosts that cannot send headers
@@ -30,22 +39,27 @@ function contentSecurityPolicy(): Plugin {
 
 /**
  * pdf.js needs its character maps to read text from PDFs that use CID fonts (most Chinese, Japanese and
- * Korean PDFs). They are copied next to the app, served in development, and fetched only when a PDF needs one.
+ * Korean PDFs), and to draw pages the files in PDFJS_FILES. They are copied next to the app, served in development,
+ * and fetched only when a PDF needs one.
  */
 function pdfjsCmaps(): Plugin {
   return {
     name: 'fileconvert-pdfjs-cmaps',
     configureServer(server) {
-      server.middlewares.use('/pdfjs/cmaps/', (req, res, next) => {
-        const name = (req.url ?? '').replace(/^\/+/, '').split('?')[0];
-        if (!/^[\w.-]+\.bcmap$/.test(name)) return next();
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.end(readFileSync(join(CMAPS, name)));
-      });
+      for (const [dir, ok] of Object.entries(PDFJS_FILES)) {
+        server.middlewares.use(`/pdfjs/${dir}/`, (req, res, next) => {
+          const name = (req.url ?? '').replace(/^\/+/, '').split('?')[0];
+          if (!ok.test(name)) return next();
+          res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream');
+          res.end(readFileSync(join(PDFJS, dir, name)));
+        });
+      }
     },
     generateBundle() {
-      for (const name of readdirSync(CMAPS).filter(n => n.endsWith('.bcmap')).sort()) {
-        this.emitFile({ type: 'asset', fileName: `pdfjs/cmaps/${name}`, source: readFileSync(join(CMAPS, name)) });
+      for (const [dir, ok] of Object.entries(PDFJS_FILES)) {
+        for (const name of readdirSync(join(PDFJS, dir)).filter(n => ok.test(n)).sort()) {
+          this.emitFile({ type: 'asset', fileName: `pdfjs/${dir}/${name}`, source: readFileSync(join(PDFJS, dir, name)) });
+        }
       }
     },
   };

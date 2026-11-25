@@ -261,22 +261,41 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-options legend { padding: 0 8px; margin-left: 8px; font-weight: 600; }
 .ws-hint { color: var(--muted); font-size: .88rem; }
 .ws-field { display: grid; gap: 4px; min-width: 0; max-width: 34rem; }
-.ws-field:has(.ws-order) { max-width: none; flex: 1 1 100%; }
+.ws-field:has(.ws-order), .ws-field:has(.ws-pick) { max-width: none; flex: 1 1 100%; }
 .ws-options .fields > [hidden] { display: none; }
-.ws-order { flex: 1 1 100%; gap: 8px; }
+.ws-order, .ws-pick { flex: 1 1 100%; gap: 8px; }
 .ws-page-tools { display: flex; gap: 8px; flex-wrap: wrap; }
-.ws-pages { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 26rem; overflow-y: auto; }
-.ws-page { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-.ws-page[draggable="true"] { cursor: grab; }
-.ws-page.dragging { opacity: .5; }
-.ws-page.drop-before { box-shadow: 0 -3px 0 var(--accent); }
-.ws-page.drop-after { box-shadow: 0 3px 0 var(--accent); }
+/* The page grid (src/app/preview.ts): a tile per page, its preview drawn only near the screen. */
+.pg-box { display: grid; gap: 8px; min-width: 0; padding: 0 8px 8px; }
+.ws-order .pg-box, .ws-pick .pg-box { padding: 0; }
+.pg-box[hidden], .pg-note[hidden] { display: none; }
+.pg-note { margin: 0; color: var(--warn); }
+.pg-grid { list-style: none; margin: 0; padding: 4px; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; max-height: min(70vh, 34rem); overflow-y: auto; border-radius: 10px; }
+.pg-grid:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pg-tile { position: relative; display: grid; justify-items: center; align-content: start; gap: 4px; padding: 8px 6px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); content-visibility: auto; contain-intrinsic-size: auto 176px; min-width: 0; }
+.pg-thumb { width: 112px; height: 112px; display: grid; place-items: center; overflow: hidden; }
+.pg-thumb canvas { display: block; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.pg-ph { width: 78px; height: 102px; display: grid; place-items: center; border: 1px dashed var(--line-hi); border-radius: 4px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.pg-failed .pg-ph { border-style: solid; }
+.pg-num { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
+.pg-mark { font-size: .78rem; font-weight: 600; color: var(--accent); }
+.pg-mark:empty { display: none; }
+.pg-grid[role="listbox"] .pg-tile { cursor: pointer; user-select: none; }
+.pg-tile.chosen { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.pg-grid:focus-visible .pg-tile.pg-active { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pg-tile .job-actions { display: flex; gap: 6px; }
+.pg-pos { position: absolute; top: 4px; left: 6px; font-size: .8rem; }
+.pg-tile[draggable="true"] { cursor: grab; }
+.pg-tile.dragging { opacity: .5; }
+.pg-tile.drop-before { box-shadow: -4px 0 0 var(--accent); }
+.pg-tile.drop-after { box-shadow: 4px 0 0 var(--accent); }
 .ws-confirm { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--line)); border-radius: 14px; background: var(--card); }
 .ws-confirm-title { margin: 0; font-weight: 600; color: var(--warn); }
 .ws-confirm .job-notes { margin: 0; }
 .ws-run { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .ws-run .job-status { margin: 0; }
 .ws-why, .ws-state { margin: 0; color: var(--muted); font-size: .92rem; }
+.ws-plan { margin: 0; font-size: .92rem; flex: 1 1 100%; }
 .ws-state.canceled { color: var(--warn); }
 .ws-state.done { color: var(--ok); font-weight: 600; }
 .ws-out { display: grid; gap: 8px; justify-items: start; }

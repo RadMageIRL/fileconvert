@@ -32,7 +32,7 @@ const USE = {
   gifenc: 'GIF writing (image and media workers)',
   'gifuct-js': 'Animated GIF reading (image and media workers)',
   'js-binary-schema-parser': 'Part of gifuct-js',
-  'pdfjs-dist': 'Reading text from PDFs, and its character maps',
+  'pdfjs-dist': 'Reading text from PDFs, and drawing PDF pages as pictures (PDF to JPG and PNG, page previews), with its character maps, standard fonts, JPEG 2000 and JBIG2 decoders, color management module and CMYK color profile',
   pdfmake: 'Writing PDFs (document worker)',
   'html-to-pdfmake': 'Turning Markdown and HTML into PDF layout (page)',
   'markdown-it': 'Markdown rendering (page)',
@@ -60,6 +60,17 @@ const USE = {
 
 /** Code inside a package that keeps its own license: [what, license file in the package]. */
 const VENDORED = {
+  'pdfjs-dist': [
+    ['the Foxit standard fonts (Courier, Times, Symbol and Dingbats replacements), from PDFium, in standard_fonts', 'standard_fonts/LICENSE_FOXIT'],
+    ['the Liberation Sans fonts (Helvetica replacements) by Red Hat, in standard_fonts; GPL-2.0 with the font exception below; source at https://github.com/liberationfonts/liberation-fonts', 'standard_fonts/LICENSE_LIBERATION'],
+    ['OpenJPEG (JPEG 2000 decoding, openjpeg.wasm)', 'wasm/LICENSE_OPENJPEG'],
+    ['pdf.js OpenJPEG decoder build', 'wasm/LICENSE_PDFJS_OPENJPEG'],
+    ['the JBIG2 decoder from PDFium (jbig2.wasm)', 'wasm/LICENSE_JBIG2'],
+    ['pdf.js JBIG2 decoder build', 'wasm/LICENSE_PDFJS_JBIG2'],
+    ['qcms (color management, qcms_bg.wasm)', 'wasm/LICENSE_QCMS'],
+    ['pdf.js qcms build', 'wasm/LICENSE_PDFJS_QCMS'],
+    ['the CMYK color profile CGATS001Compat-v2-micro.icc, in iccs', 'iccs/LICENSE'],
+  ],
   '@cantoo/pdf-lib': [
     ['UPNG, PNG decoding (Photopea), vendored in packages/upng', 'src/packages/upng/LICENSE'],
     ['@pdf-lib/standard-fonts, the 14 standard font metrics (Andrew Dillon), vendored in packages/standard-fonts', 'src/packages/standard-fonts/LICENSE.md'],
@@ -105,6 +116,14 @@ BSD, Apache-2.0, SIL OFL 1.1, BlueOak) except these, which are weak copyleft:
   - libheif and libde265, inside libheif-js: GNU LGPL 3.0.
   - LAME, inside @mediabunny/mp3-encoder: GNU LGPL 2.0 or later.
   - FFmpeg's AAC encoder, inside @mediabunny/aac-encoder: GNU LGPL 2.1 or later.
+
+and these font files, shipped with pdfjs-dist and used only to draw PDF text in
+Helvetica that a PDF names without including it:
+
+  - Liberation Sans (four TrueType files): GNU GPL 2.0 with a font exception.
+    They are separate, unmodified files that FileConvert fetches only when a PDF
+    page needs them, so they can be replaced; their source is at
+    https://github.com/liberationfonts/liberation-fonts.
 
 The LGPL libraries are compiled to WebAssembly and shipped as separate files that
 FileConvert loads at run time, so they can be replaced with modified builds. Their

@@ -3,7 +3,7 @@
 
 import { ANIMATED_OUT, AUDIO_OUT, effectiveCategory, FORMATS, WORKBOOKS, type Category, type FormatId } from '../core/formats';
 import { formatBytes, LIMITS } from '../core/limits';
-import { listSession } from '../core/tempstore';
+import { deleteTempFile, deleteTempPrefix, listSession } from '../core/tempstore';
 import { $, clear, h } from './dom';
 import { Engines, Queue, type Job } from './jobs';
 import { Pool } from './pool';
@@ -75,20 +75,29 @@ export class App {
   }
 
   /** Opens one of FileConvert's tools by its id (a tool page does this; the tests too, before a tool has a page). */
-  async openTool(id: ToolId): Promise<Workspace> {
-    return this.openWorkspace(await loadTool(id));
+  /** `preset` sets options for a page about one use of the tool (data-preset on /pdf-to-png/). */
+  async openTool(id: ToolId, preset: Record<string, string> = {}): Promise<Workspace> {
+    return this.openWorkspace(await loadTool(id), preset);
   }
 
   /** Opens a tool in the workspace, in place of the converter. The workspace code loads on first use. */
-  async openWorkspace(def: ToolDefinition): Promise<Workspace> {
+  async openWorkspace(def: ToolDefinition, preset: Record<string, string> = {}): Promise<Workspace> {
     const { Workspace } = await import('./workspace');
     this.workspace?.dispose();
+    const session = this.session;
     const ws = new Workspace($('workspace'), def, {
       engines: this.engines,
       zip: files => this.zipBlob(files),
       save: (blob, name) => this.saveDownload(blob, name),
       announce: msg => this.announce(msg),
-    });
+      temp: prefix => (session ? { session, prefix } : null),
+      discard: (names, prefix) => {
+        if (!session) return;
+        for (const n of names) void deleteTempFile(session, n);
+        if (prefix) void deleteTempPrefix(session, prefix);
+      },
+      assets: new URL(`${document.documentElement.dataset.root ?? './'}pdfjs/`, document.baseURI).href,
+    }, preset);
     this.workspace = ws;
     $('drop').hidden = true;
     $('work').hidden = true;

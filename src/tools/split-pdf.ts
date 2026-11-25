@@ -32,8 +32,22 @@ export const tool: ToolDefinition = {
       hint: 'The last file has the pages that are left.' },
   ],
   action: 'Split the PDF',
+  pageLabels(inputs, values) {
+    const n = pagesOfInput(inputs);
+    if (!n) return null;
+    let parts: PageRange[];
+    try { parts = splitParts(values, n); } catch { return null; }
+    const files = new Map<number, number[]>();
+    parts.forEach((r, i) => { for (let p = r.from; p <= r.to; p++) files.set(p, [...(files.get(p) ?? []), i + 1]); });
+    const labels = new Map<number, string>();
+    for (let p = 1; p <= n; p++) {
+      const f = files.get(p);
+      labels.set(p, !f ? 'Left out' : f.length === 1 ? `File ${f[0]}` : `Files ${f.slice(0, 3).join(', ')}${f.length > 3 ? ' and more' : ''}`);
+    }
+    return labels;
+  },
   confirmLabel: 'Split anyway; the signature will no longer be valid',
-  inspect: inspectPdf('Splitting'),
+  inspect: inspectPdf('Splitting', { sizes: true }),
   check(inputs, values) {
     return checkWith(n => {
       const parts = splitParts(values, n);

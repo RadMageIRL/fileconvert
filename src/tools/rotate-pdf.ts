@@ -2,15 +2,13 @@
 // (src/engines/pdf/structure.ts, rotatePages). Only each page's rotation changes; readers turn its content, links,
 // notes and form fields with it.
 
-import type { ToolDefinition } from '../app/tools';
+import type { ToolDefinition, ToolValues } from '../app/tools';
 import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
-import { selectPages } from '../core/pageranges';
 import type { RotateReport, SignatureInfo } from '../engines/pdf/structure';
-import { allowance, checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, chosenPages, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
-const ALL = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
-const chosen = (text: unknown, n: number) => (String(text ?? '').trim() ? selectPages(String(text), n) : ALL(n));
+const chosen = (value: ToolValues[string], n: number) => chosenPages(value, n, true);
 const TURN: Record<string, string> = { 90: '90 degrees clockwise', 270: '90 degrees counterclockwise', 180: '180 degrees' };
 
 export const tool: ToolDefinition = {
@@ -23,12 +21,12 @@ export const tool: ToolDefinition = {
   ordered: false,
   options: [
     { kind: 'select', key: 'by', label: 'Turn', value: '90', choices: [['90', 'Clockwise, 90 degrees'], ['270', 'Counterclockwise, 90 degrees'], ['180', 'Upside down, 180 degrees']] },
-    { kind: 'text', key: 'pages', label: 'Pages to turn', value: '', placeholder: 'Every page', maxLength: 4000,
-      hint: 'Leave empty to turn every page, or list pages such as 1, 3-5. Each turn adds to the rotation a page already has.' },
+    { kind: 'pages', key: 'pages', label: 'Pages to turn', value: '', placeholder: 'Every page', maxLength: 4000, empty: 'all', mark: 'Turned', turnKey: 'by',
+      hint: 'Leave empty to turn every page, or list pages such as 1, 3-5, or choose them in the page previews. Each turn adds to the rotation a page already has.' },
   ],
   action: 'Rotate the pages',
   confirmLabel: 'Rotate anyway; the signature will no longer be valid',
-  inspect: inspectPdf('Rotating its pages'),
+  inspect: inspectPdf('Rotating its pages', { sizes: true }),
   check(inputs, values) {
     return checkWith(n => chosen(values.pages, n))(inputs);
   },

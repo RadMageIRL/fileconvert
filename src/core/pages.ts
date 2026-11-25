@@ -50,6 +50,8 @@ export interface ToolPage extends PageText {
   steps: [string, string, string];
   /** Conversions the tool does, for the search: asking for JPG to PDF finds a page that serves jpg > pdf. */
   serves?: ReadonlyArray<readonly [FormatId, FormatId]>;
+  /** Options the tool starts with on this page: the PDF to PNG page starts with PNG. */
+  preset?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -720,7 +722,7 @@ export const PAGES: readonly Page[] = [
     intro: 'Send only the chapter that matters, or break a long scan into parts. Each new PDF holds its own pages exactly as they were, and nothing of the others.',
     steps: [
       'Add your PDF. It is checked as it is added: its pages, whether it is digitally signed, and whether it is safe to open.',
-      'Choose how to split it: page ranges such as 1-3, 4-7, 8-, every few pages, or one file per page.',
+      'Choose how to split it: page ranges such as 1-3, 4-7, 8-, every few pages, or one file per page. The page previews show which file each page goes to.',
       'Split and download each file, or all of them as a ZIP. Names say which pages each holds, such as report-p04-07.pdf.',
     ],
     details: [
@@ -746,8 +748,8 @@ export const PAGES: readonly Page[] = [
     description: 'Extract the pages you choose from a PDF into a new one, in the order you list them, with their links and bookmarks. Done on your device.',
     intro: 'Take a signed page, a single invoice or a few slides out of a long PDF. The pages you list become a new PDF in that order, and the rest leave nothing behind.',
     steps: [
-      'Add your PDF. Its pages are counted as it is added.',
-      'List the pages, such as 1-3, 7, 10-. They come out in the order you write them, each once.',
+      'Add your PDF. Its pages are counted and shown as small previews.',
+      'Choose the pages: click previews, or list them, such as 1-3, 7, 10-. Listed pages come out in the order you write them, each once.',
       'Extract and download the new PDF.',
     ],
     details: [
@@ -772,8 +774,8 @@ export const PAGES: readonly Page[] = [
     description: 'Delete pages from a PDF and leave nothing of them in the file: no hidden text, pictures or old copies. Done in your browser; nothing is uploaded.',
     intro: 'Remove blank pages, a cover sheet or pages that should not be shared. Many tools only hide removed pages; here their content, pictures and everything that pointed only at them leave the file.',
     steps: [
-      'Add your PDF. Its pages are counted as it is added.',
-      'List the pages to delete, such as 2, 5-6. At least one page has to stay.',
+      'Add your PDF. Its pages are counted and shown as small previews.',
+      'Choose the pages to delete: click previews, or list them, such as 2, 5-6. At least one page has to stay.',
       'Delete and download. The result lists what went with the pages.',
     ],
     details: [
@@ -798,8 +800,8 @@ export const PAGES: readonly Page[] = [
     description: 'Reorder the pages of a PDF by dragging, with Up and Down, or by typing the order. Links and bookmarks follow their pages. Done in your browser.',
     intro: 'Fix a scan that came out of order or move an appendix to the end. Every page stays as it is; only the order changes, and links and bookmarks still lead to the right pages.',
     steps: [
-      'Add your PDF. Its pages are listed in order.',
-      'Move the pages: drag them, use Up and Down, or type the order, such as 3, 1, 2, 4-10.',
+      'Add your PDF. Its pages are shown in order as small previews.',
+      'Move the pages: drag the previews, use Up and Down, or type the order, such as 3, 1, 2, 4-10.',
       'Reorder and download the PDF.',
     ],
     details: [
@@ -823,8 +825,8 @@ export const PAGES: readonly Page[] = [
     description: 'Rotate every page of a PDF, or only the ones you choose, clockwise, counterclockwise or upside down. Nothing is redrawn or uploaded.',
     intro: 'Turn sideways scans upright or fix a page that came out upside down. Only each page\'s rotation changes, so its text, pictures, links and form fields turn with it.',
     steps: [
-      'Add your PDF. Its pages are counted as it is added.',
-      'Choose the turn, and the pages: leave the list empty for every page, or write pages such as 1, 3-5.',
+      'Add your PDF. Its pages are counted and shown as small previews.',
+      'Choose the turn, and the pages: click previews, write pages such as 1, 3-5, or leave the list empty for every page. The previews show the turn.',
       'Rotate and download the PDF.',
     ],
     details: [
@@ -838,6 +840,85 @@ export const PAGES: readonly Page[] = [
     ],
     related: ['organize-pdf', 'split-pdf', 'merge-pdf'],
     keywords: ['rotate', 'turn', 'flip', 'upright', 'sideways', 'landscape', 'portrait', 'pdf', 'document'],
+  },
+  {
+    kind: 'tool', slug: 'pdf-to-jpg', tool: 'pdf-to-images', preset: { format: 'jpg' }, category: 'document', common: 11,
+    name: 'PDF to JPG',
+    title: 'PDF to JPG: Pages as Pictures, Private | FileConvert',
+    blurb: 'PDF pages as JPG pictures',
+    description: 'Save PDF pages as JPG pictures at 72, 150, 300 dpi or your own resolution, every page or the ones you pick. Drawn in your browser, never uploaded.',
+    intro: 'Turn the pages of a PDF into pictures you can post, paste into a slide or send in a chat. Each page becomes one JPG, drawn the way a PDF reader shows it.',
+    steps: [
+      'Add your PDF. Its pages are counted and shown as small previews.',
+      'Choose the pages and the resolution: click previews, type pages such as 1-3, 7, or leave it empty for every page; 72, 150 or 300 dpi, or your own.',
+      'Convert and download each picture, or all of them as a ZIP.',
+    ],
+    details: [
+      'Each page is drawn by pdf.js on your device at exactly the size its resolution gives: a US Letter page at 150 dpi is 1,275 x 1,650 pixels, and the size is shown before you start.',
+      'The page is drawn from its crop box and turned by its rotation, as PDF readers show it, with comments, stamps and filled-in form fields.',
+      'JPG pictures have a white background and the quality you choose (90 unless you change it). For pictures without loss, use PDF to PNG.',
+      'Files are named after the PDF and the page, padded so they sort: report-p007.jpg. Pages are drawn one at a time, and the pictures are kept in the browser\'s private storage until you download them.',
+    ],
+    limits: [
+      'Nothing is drawn smaller to fit: a page that would be more than 100 megapixels, or work that needs more memory than the device can give, is refused before it starts, with the resolution that fits.',
+      'Fonts the PDF does not include are drawn with similar fonts, so such text can look a little different. Encrypted PDFs are not opened.',
+      'Needs a browser that draws in the background (OffscreenCanvas in workers): current Chrome, Edge, Firefox and Safari 16.4 or later. PDFs up to 500 MB and 5,000 pages.',
+    ],
+    related: ['pdf-to-png', 'images-to-pdf', 'extract-pdf-pages'],
+    keywords: ['jpeg', 'picture', 'pictures', 'image', 'images', 'page', 'pages', 'export', 'screenshot', 'dpi', 'resolution', 'pdf'],
+    serves: [['pdf', 'jpg']],
+  },
+  {
+    kind: 'tool', slug: 'pdf-to-png', tool: 'pdf-to-images', preset: { format: 'png' }, category: 'document',
+    name: 'PDF to PNG',
+    title: 'PDF to PNG, Lossless, Transparent Option | FileConvert',
+    blurb: 'PDF pages as lossless PNG',
+    description: 'Save PDF pages as lossless PNG pictures, with an optional transparent background, at the resolution you choose. Drawn in your browser, never uploaded.',
+    intro: 'PNG keeps every pixel of the drawn page, so text edges, line art and diagrams stay crisp. A transparent background is an option for pages you want to place on something else.',
+    steps: [
+      'Add your PDF. Its pages are counted and shown as small previews.',
+      'Choose the pages, the resolution and the background: white, or transparent where the page has nothing.',
+      'Convert and download each picture, or all of them as a ZIP.',
+    ],
+    details: [
+      'Each page is drawn by pdf.js on your device at exactly the size its resolution gives, from its crop box and turned by its rotation, and saved without loss.',
+      'Transparent background: what the page does not paint is left transparent. Pages that paint their own white background stay white, as they are drawn that way.',
+      'Comments, stamps and filled-in form fields are drawn as PDF readers show them.',
+      'Files are named after the PDF and the page, padded so they sort: report-p007.png. Pages are drawn one at a time.',
+    ],
+    limits: [
+      'PNG files are larger than JPG; a page of photos at 300 dpi can be tens of megabytes. Nothing is drawn smaller to fit: a page past 100 megapixels, or past the memory the device can give, is refused with the resolution that fits.',
+      'Fonts the PDF does not include are drawn with similar fonts. Encrypted PDFs are not opened. PDFs up to 500 MB and 5,000 pages.',
+    ],
+    related: ['pdf-to-jpg', 'png-to-pdf', 'pdf-to-text'],
+    keywords: ['picture', 'pictures', 'image', 'images', 'page', 'pages', 'lossless', 'transparent', 'export', 'dpi', 'resolution', 'pdf'],
+    serves: [['pdf', 'png']],
+  },
+  {
+    kind: 'tool', slug: 'remove-pdf-metadata', tool: 'remove-pdf-metadata', category: 'document', common: 12,
+    name: 'Remove PDF metadata',
+    title: 'Remove PDF Metadata: Author, Dates, XMP | FileConvert',
+    blurb: 'Author, dates and XMP out, pages kept',
+    description: 'Remove the author, title, dates, XMP and other hidden metadata from a PDF, and see what else it still holds. Done in your browser; nothing is uploaded.',
+    intro: 'A PDF often carries the name of whoever made it, the apps it went through and when, separately from what its pages show. This removes that metadata and keeps the document as it is.',
+    steps: [
+      'Add your PDF. It is checked as it is added, and the metadata it has is listed.',
+      'Remove the metadata. A digitally signed PDF asks first, since its signature will no longer be valid.',
+      'Download the result. It lists what was removed and what the document still holds.',
+    ],
+    details: [
+      'Removed: the document information (title, author, subject, keywords, the creating app and producer, creation and modification dates, custom fields) and the XMP metadata of the document and of its pages, pictures and fonts.',
+      'Also removed: application data stored with pages (an editor\'s private copy of what it made), page thumbnails, web capture information, and EXIF, GPS, XMP, IPTC and comments inside JPEG pictures, without touching the pictures themselves.',
+      'The file is written whole with a new file identifier, so earlier versions saved inside it, and parts nothing uses, are not kept.',
+      'Pages, comments, bookmarks, links, form fields and their values, attachments and layers are kept as they are.',
+    ],
+    limits: [
+      'This does not make a document anonymous. Names and other details can still be in its text, pictures, comments, attachments, form fields and digital signatures; the result says which of these the PDF has.',
+      'A PDF/A or PDF/UA file no longer conforms, as both need XMP metadata. Removing metadata from a signed PDF invalidates its signature.',
+      'Encrypted PDFs are not opened. Metadata inside JPEG 2000 pictures is not removed. PDFs up to 500 MB and 5,000 pages.',
+    ],
+    related: ['remove-image-metadata', 'delete-pdf-pages', 'merge-pdf'],
+    keywords: ['metadata', 'author', 'privacy', 'exif', 'xmp', 'properties', 'clean', 'strip', 'scrub', 'hidden', 'pdf', 'document'],
   },
   {
     slug: 'markdown-to-pdf', from: 'md', to: 'pdf', category: 'document',

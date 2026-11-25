@@ -110,7 +110,7 @@ describe('the estimate', () => {
     const s = scanPdf(fx('merge-b-objstm.pdf'));
     expect(s.objectStreamBytes).toBeGreaterThan(0);
     expect(s.textBytes).toBeGreaterThan(0);
-    expect(workOf(1234, s)).toEqual({ bytes: 1234, parsed: s.textBytes + s.objectStreamBytes, objects: s.objects, pages: s.pages, largest: s.largestStream });
+    expect(workOf(1234, s)).toEqual({ bytes: 1234, parsed: s.textBytes + s.objectStreamBytes, objects: s.objects, pages: s.pages, largest: s.largestStream, imagePixels: s.largestImagePixels, softMasks: s.softMasks > 0 });
   });
 });
 

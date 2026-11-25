@@ -31,7 +31,7 @@ export const tool: ToolDefinition = {
   ],
   action: 'Reorder the pages',
   confirmLabel: 'Reorder anyway; the signature will no longer be valid',
-  inspect: inspectPdf('Reordering its pages'),
+  inspect: inspectPdf('Reordering its pages', { sizes: true }),
   check(inputs, values) {
     return checkWith(n => {
       if (orderOf(values.order, n).every((p, i) => p === i + 1)) throw new Error('The pages are in their first order; move some to reorder them.');

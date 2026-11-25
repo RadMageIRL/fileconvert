@@ -37,7 +37,9 @@ async function add(page: Page, paths: string[]): Promise<void> {
 /** Runs the tool and saves every result, through the ZIP when there are several. */
 async function runAndSave(page: Page, info: TestInfo, action: string): Promise<Array<{ name: string; path: string }>> {
   await ws(page).getByRole('button', { name: action }).click();
-  await expect(ws(page).locator('.ws-state.done')).toBeVisible({ timeout: 120_000 });
+  // Polled twice a second: checking visibility on every frame of a page that shows 5,000 page tiles kept Firefox and the
+  // phone setup from showing the result within two minutes, although the run itself takes about a second there.
+  await expect.poll(() => ws(page).locator('.ws-state.done').count(), { timeout: 120_000, intervals: [500] }).toBe(1);
   const buttons = ws(page).locator('.ws-out button', { hasText: /^Download (?!all)/ });
   const n = await buttons.count();
   if (n === 1) {
@@ -136,7 +138,7 @@ test('extract pages in the order written: the pages left out leave nothing behin
   const pages = ws(page).getByLabel('Pages to extract');
   // The hint is the field's description, not part of its name.
   await expect(pages).toHaveAccessibleName('Pages to extract');
-  await expect(pages).toHaveAccessibleDescription('In the order you list them; each page once. 10- means page 10 to the end.');
+  await expect(pages).toHaveAccessibleDescription('In the order you list them; each page once. 10- means page 10 to the end. Or choose them in the page previews.');
   await pages.fill('1-3, 2');
   await pages.press('Tab');
   await expect(ws(page).locator('.ws-why')).toHaveText('Page 2 is listed more than once; list each page once.');
@@ -211,13 +213,15 @@ test('reorder pages with the keyboard, by dragging, or as text: links, bookmarks
   await text.fill('2, 3, 1');
   await text.press('Tab');
   await expect(rows).toHaveText(['Page 2', 'Page 3', 'Page 1']);
-  // Dragging (a pointer and HTML drag and drop): page 1 to the top.
+  // Dragging (a pointer and HTML drag and drop) in the page grid, where pages flow in rows: the left half of a page
+  // drops before it, the right half after it. Page 1 to the start.
   if (browserName !== 'webkit' && !test.info().project.use.hasTouch) {
-    await rows.nth(2).dragTo(rows.nth(0), { targetPosition: { x: 10, y: 2 } });
+    const tiles = ws(page).locator('.ws-page');
+    await tiles.nth(2).dragTo(tiles.nth(0), { targetPosition: { x: 4, y: 20 } });
     await expect(rows).toHaveText(['Page 1', 'Page 2', 'Page 3']);
-    // And downward: the first page below the last.
-    const box = (await rows.nth(2).boundingBox())!;
-    await rows.nth(0).dragTo(rows.nth(2), { targetPosition: { x: 10, y: box.height - 2 } });
+    // And onward: the first page after the last.
+    const box = (await tiles.nth(2).boundingBox())!;
+    await tiles.nth(0).dragTo(tiles.nth(2), { targetPosition: { x: box.width - 4, y: 20 } });
     await expect(rows).toHaveText(['Page 2', 'Page 3', 'Page 1']);
     await text.fill('2, 3, 1');
     await text.press('Tab');

@@ -90,6 +90,22 @@ export const LIMITS = {
     other: { base: 320 * MB, byte: 4.5, parsed: 48, page: 64 * 1024, stream: 4 },
   },
   /**
+   * Drawing PDF pages as pictures with pdf.js in the render worker (src/core/pdfmemory.ts, estimateRender): PDF to JPG
+   * and PNG, and page previews. A base; per byte of the file, per byte parsed, per page pdf.js keeps (up to 50) and per
+   * page drawn (Firefox frees what each page used later than Chrome); per byte of the largest stream; per pixel of the
+   * largest picture in the file (decoded whole when its page is drawn: Chrome holds it several times over, as pdf.js's
+   * bitmap and the smaller copies it draws from); per pixel of the page being drawn (`canvas`, or `masked` where the file
+   * has soft masks, which take several page-sized canvases); and per byte of results held in memory where the browser has
+   * no private storage for them. Fitted to peaks measured twice in Chrome and in Firefox, each set at least 10% above
+   * every peak in its browser (local/PHASE2-TOOLKIT-v0.2.0.md). WebKit as Playwright runs it cannot draw in a worker, so
+   * it was not measured: 'other' is 1.5 times the higher of Chrome and Firefox, part by part, and the base is higher.
+   */
+  pdfRenderMemory: {
+    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, canvas: 8, masked: 36, held: 1.5 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, canvas: 8, masked: 36, held: 4 },
+    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, canvas: 12, masked: 54, held: 6 },
+  },
+  /**
    * Images to PDF (src/engines/pdf/images.ts): pictures in one PDF, and what the PDF may hold in all. Pictures are read
    * one at a time; each is the same size limit as any image (imageBytes, imagePixels, imageSide), and the pages, with
    * a multi-page TIFF's, are no more than pdfPages.

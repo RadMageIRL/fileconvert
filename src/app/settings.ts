@@ -1,6 +1,7 @@
 // Conversion settings, one group per category, remembered in this browser (localStorage) as a convenience.
 // Nothing about files is stored, only these choices.
 
+import { defaultPaper } from '../core/paper';
 import { DEFAULT_DATA_OPTIONS, type DataOptions } from '../engines/data/options';
 import type { ResizeMode } from '../engines/image/convert';
 import type { QualityLevel } from 'mediabunny';
@@ -13,10 +14,6 @@ export interface Settings {
   data: Omit<DataOptions, 'sheet'>;
 }
 
-const usLetter = () => {
-  const lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
-  return /^(en-(US|CA|PH)|es-(MX|US|CO|VE|PR|GT|CL)|fr-CA)$/i.test(lang);
-};
 
 export function defaultSettings(): Settings {
   const { sheet: _sheet, ...data } = DEFAULT_DATA_OPTIONS;
@@ -25,7 +22,7 @@ export function defaultSettings(): Settings {
     image: { quality: 85, resize: { mode: 'none' }, background: '#ffffff', ico: 'favicon', tiffCompression: 'none', tiffPages: 'all', svgSize: 'original' },
     audio: { bitrate: 0, sampleRate: 0, channels: 0 },
     video: { maxHeight: 0, quality: 'original', removeAudio: false, gifWidth: 480, gifFps: 10 },
-    document: { pageSize: usLetter() ? 'LETTER' : 'A4', fontSize: 10, mdPictures: 'embed' },
+    document: { pageSize: defaultPaper() === 'letter' ? 'LETTER' : 'A4', fontSize: 10, mdPictures: 'embed' },
     data,
   };
 }

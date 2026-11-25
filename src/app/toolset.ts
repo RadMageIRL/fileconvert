@@ -14,5 +14,7 @@ export async function loadTool(id: ToolId): Promise<ToolDefinition> {
     case 'delete-pdf-pages': return (await import('../tools/delete-pdf-pages')).tool;
     case 'organize-pdf': return (await import('../tools/organize-pdf')).tool;
     case 'rotate-pdf': return (await import('../tools/rotate-pdf')).tool;
+    case 'pdf-to-images': return (await import('../tools/pdf-to-images')).tool;
+    case 'remove-pdf-metadata': return (await import('../tools/remove-pdf-metadata')).tool;
   }
 }

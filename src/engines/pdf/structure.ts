@@ -19,6 +19,7 @@
 // that identify someone.
 
 import type { PDFArray as PDFArrayT, PDFDict as PDFDictT, PDFDocument as PDFDocumentT, PDFRef as PDFRefT } from '@cantoo/pdf-lib';
+import { shownSize } from '../../core/pdfrender';
 import { usedResources, type ResourceKind } from './content';
 import { ENCRYPTED_MESSAGE, scanPdf, type PdfScan } from './scan';
 
@@ -166,6 +167,38 @@ const INHERITABLE = ['Resources', 'MediaBox', 'CropBox', 'Rotate'];
 const KINDS: ResourceKind[] = ['Font', 'XObject', 'ExtGState', 'Shading', 'ColorSpace', 'Pattern', 'Properties'];
 
 /** The page dictionaries of the page tree, in order, as references (a page tree that loops is refused). */
+/**
+ * Each page's size as it is shown, in points, as one flat list [w1, h1, w2, h2, ...]: its crop box within its media box
+ * (both inherited from the page tree when the page has none), turned by its rotation and scaled by its UserUnit, read
+ * the way pdf.js reads them (src/core/pdfrender.ts, shownSize). PDF to JPG and PNG and the page previews use it before
+ * anything is drawn.
+ */
+export function pageSizes(doc: PDFDocumentT, L: Lib): number[] {
+  const { PDFName, PDFDict, PDFArray, PDFNumber } = L;
+  const N = (s: string) => PDFName.of(s);
+  const inherited = (page: PDFDictT, key: string): unknown => {
+    let d: PDFDictT | undefined = page;
+    for (let depth = 0; d && depth < 64; depth++) {
+      const v = d.lookup(N(key));
+      if (v !== undefined) return v;
+      const up: unknown = d.lookup(N('Parent'));
+      d = up instanceof PDFDict ? up : undefined;
+    }
+    return undefined;
+  };
+  const num = (v: unknown) => (v instanceof PDFNumber ? v.asNumber() : NaN);
+  const box = (v: unknown) => (v instanceof PDFArray && v.size() === 4 ? [0, 1, 2, 3].map(i => num(v.lookup(i))) : null);
+  const out: number[] = [];
+  for (const ref of pageRefs(doc, L)) {
+    const page = doc.context.lookup(ref, PDFDict);
+    const rotate = num(inherited(page, 'Rotate'));
+    const unit = num(page.lookup(N('UserUnit')));
+    const s = shownSize(box(inherited(page, 'MediaBox')), box(inherited(page, 'CropBox')), Number.isFinite(rotate) ? rotate : 0, Number.isFinite(unit) ? unit : 1);
+    out.push(s.w, s.h);
+  }
+  return out;
+}
+
 export function pageRefs(doc: PDFDocumentT, L: Lib): PDFRefT[] {
   const { PDFName, PDFDict, PDFArray, PDFRef } = L;
   const out: PDFRefT[] = [];

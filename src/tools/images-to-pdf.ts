@@ -9,15 +9,11 @@ import type { ToolDefinition, ToolValues } from '../app/tools';
 import { formatBytes, LIMITS } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { estimateImages, refusal, type ImageWork } from '../core/pdfmemory';
+import { defaultPaper } from '../core/paper';
 import { MAX_MARGIN, type ImagePageOptions } from '../engines/pdf/imagelayout';
 import type { ImagePdfResult, PictureCheck, PictureReport } from '../engines/pdf/images';
 import { allowance, listNames, plural } from './pdf-common';
 
-/** Letter where it is the usual paper (the Americas that use it, and the Philippines), A4 everywhere else. */
-function defaultSize(): 'a4' | 'letter' {
-  const lang = globalThis.navigator?.language ?? '';
-  return /-(US|CA|MX|PH|CL|CO|VE|PR|GT|CR|PA|DO|SV|NI|HN)$/i.test(lang) ? 'letter' : 'a4';
-}
 
 const PAPER = ['a4', 'letter'] as const;
 const NEEDS_ONE = 'This picture needs';
@@ -111,8 +107,8 @@ export const tool: ToolDefinition = {
   maxInputs: LIMITS.imagePdfFiles,
   ordered: true,
   options: [
-    { kind: 'select', key: 'size', label: 'Page size', value: defaultSize(), choices: [['a4', 'A4 (210 x 297 mm)'], ['letter', 'US Letter (8.5 x 11 in)'], ['picture', 'Same as each picture']],
-      hint: 'Same as each picture makes each page the size of its picture, from the resolution it gives (96 pixels per inch if none).' },
+    { kind: 'select', key: 'size', label: 'Page size', value: defaultPaper(), remember: 'paper', choices: [['a4', 'A4 (210 x 297 mm)'], ['letter', 'US Letter (8.5 x 11 in)'], ['picture', 'Same as each picture']],
+      hint: 'Starts at the usual paper for the language and region set in this browser, or at the size you chose last. Same as each picture makes each page the size of its picture, from the resolution it gives (96 pixels per inch if none).' },
     { kind: 'select', key: 'orientation', label: 'Orientation', value: 'auto', choices: [['auto', 'Automatic (landscape for wide pictures)'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], showIf: { key: 'size', value: PAPER } },
     { kind: 'select', key: 'fit', label: 'Placement', value: 'fit', choices: [['fit', 'Fit the whole picture (nothing cut off)'], ['fill', 'Fill the page (cuts off edges)']], showIf: { key: 'size', value: PAPER },
       hint: 'Fill covers the page inside the margin, cutting off what does not fit; the result says how much.' },

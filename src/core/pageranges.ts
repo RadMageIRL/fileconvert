@@ -106,6 +106,32 @@ export function checkOrder(order: readonly number[], pages: number): number[] {
   return order.slice();
 }
 
+/**
+ * The pages a 'pages' option chooses, from 1, in order: the list kept from the page previews, or the text typed. Empty
+ * text is every page when `emptyAll`, otherwise the parser's message; an empty list chooses nothing, which is refused.
+ */
+export function chosenPages(value: string | number | boolean | readonly number[] | undefined, n: number, emptyAll: boolean): number[] {
+  if (Array.isArray(value)) {
+    if (!value.length) throw new Error('Choose at least one page.');
+    return checkSelection(value, n);
+  }
+  const text = String(value ?? '').trim();
+  if (!text && emptyAll) return Array.from({ length: n }, (_, i) => i + 1);
+  return selectPages(text, n);
+}
+
+/** Pages chosen in the page previews, kept as a list: each page once and within the PDF, in the order kept. An empty
+ *  list chooses nothing. */
+export function checkSelection(list: readonly number[], pages: number): number[] {
+  const seen = new Uint8Array(pages + 1);
+  for (const p of list) {
+    if (!Number.isInteger(p) || p < 1 || p > pages) throw new Error(`There is no page ${fmt(p)}; the PDF has ${pagesWord(pages)}.`);
+    if (seen[p]) throw new Error(`Page ${fmt(p)} is listed more than once; list each page once.`);
+    seen[p] = 1;
+  }
+  return list.slice();
+}
+
 /** Pages written as short ranges, in their order: [1, 2, 3, 7, 9, 10] is "1-3, 7, 9-10". Only runs that go up are
  *  joined, so the text is a valid selection for every tool. */
 export function formatPages(list: readonly number[]): string {

@@ -301,3 +301,30 @@ test('at 320 pixels the options and the list fit', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(0);
   await expect(ws(page).getByRole('button', { name: 'Make the PDF' })).toBeEnabled();
 });
+
+// The paper a size choice starts with comes from the browser's language settings only (src/core/paper.ts): Letter where
+// the region uses it, A4 elsewhere and where no region is set. A size chosen is remembered in this browser over that.
+for (const [locale, paper] of [['en-US', 'letter'], ['es-MX', 'letter'], ['de-DE', 'a4'], ['en-GB', 'a4'], ['en', 'a4']] as const) {
+  test.describe(`paper size for ${locale}`, () => {
+    test.use({ locale });
+    test(`${locale} starts on ${paper === 'a4' ? 'A4' : 'US Letter'}${locale === 'en-US' ? '; a size chosen is remembered over it, and only a choice is stored' : ''}`, async ({ page }) => {
+      await openApp(page);
+      await openTool(page);
+      const sel = ws(page).locator('[data-key="opt-size"]');
+      await expect(sel).toHaveValue(paper);
+      if (locale !== 'en-US') return;
+      // Opening the tool stores nothing; choosing a size does, and it comes back after a reload.
+      expect(await page.evaluate(() => localStorage.getItem('fileconvert-choice-paper'))).toBeNull();
+      await sel.selectOption('a4');
+      expect(await page.evaluate(() => localStorage.getItem('fileconvert-choice-paper'))).toBe('a4');
+      await page.reload();
+      await expect(page.locator('html[data-ready="true"]')).toBeAttached();
+      await openTool(page);
+      await expect(ws(page).locator('[data-key="opt-size"]')).toHaveValue('a4');
+      // A stored value the option does not have is ignored.
+      await page.evaluate(() => localStorage.setItem('fileconvert-choice-paper', 'tabloid'));
+      await openTool(page);
+      await expect(ws(page).locator('[data-key="opt-size"]')).toHaveValue('letter');
+    });
+  });
+}

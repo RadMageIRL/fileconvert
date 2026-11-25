@@ -16,6 +16,9 @@ import { formatBytes, LIMITS, LimitError } from './limits';
 
 const GB = 1024 * 1024 * 1024;
 
+/** Pages pdf.js keeps after drawing them before the render worker has it let them all go (src/engines/pdf/render.ts). */
+export const RENDER_KEPT_PAGES = 50;
+
 /** What the guard counted in one PDF, the part of it that decides its memory. */
 export interface PdfWork {
   bytes: number;
@@ -27,6 +30,10 @@ export interface PdfWork {
   /** The largest stream once decoded. Page content is decoded one stream at a time, by pdf.js to read text and by the
    *  cleanup to see what a page uses, so only the largest of all counts. */
   largest?: number;
+  /** Pixels of the largest picture in the file, which drawing a page that shows it decodes whole. */
+  imagePixels?: number;
+  /** The file has soft masks, whose drawing takes several page-sized canvases. */
+  softMasks?: boolean;
 }
 
 /** Where the allowance came from: the device memory the browser reports, or an assumption where it reports none. */
@@ -103,8 +110,8 @@ export function memoryAllowance(env: MemoryEnv = readMemoryEnv()): MemoryAllowan
 }
 
 /** The work in one PDF, from what its guard pass counted. */
-export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number }): PdfWork {
-  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream };
+export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number; largestImagePixels?: number; softMasks?: number }): PdfWork {
+  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream, imagePixels: scan.largestImagePixels ?? 0, softMasks: (scan.softMasks ?? 0) > 0 };
 }
 
 const sumOf = (works: readonly PdfWork[], k: 'bytes' | 'parsed' | 'objects' | 'pages') => works.reduce((n, w) => n + w[k], 0);
@@ -130,6 +137,24 @@ export function estimate(works: readonly PdfWork[], kind: 'edit' | 'text', more:
   const H = LIMITS.pdfHeapMemory;
   const heap = H.parsed * sumOf(works, 'parsed') + H.page * sumOf(works, 'pages') + H.output * outputs;
   return { total: Math.ceil(total), heap: Math.ceil(heap) };
+}
+
+/**
+ * The memory drawing pages of one PDF as pictures needs, at most (PDF to JPG and PNG, page previews): pdf.js reading the
+ * file, as for text, and keeping up to 50 pages it has drawn (`page`, per page of the file up to that), and what each
+ * page drawn leaves until it is collected (`drawn`, per page drawn: `more.drawn`); the largest
+ * picture in it, decoded whole when a page that shows it is drawn (`image`, per pixel: its samples, the bitmap pdf.js
+ * makes of them and the smaller copies it draws from); the page being drawn (`canvas`, per pixel of the picture made: the
+ * canvas, a transparency group's and the encoder's copy; `masked` instead where the file has soft masks, which take
+ * several more page-sized canvases); and the results held in memory (`held`, per byte: none when they are written to the
+ * browser's private storage). Pages are drawn one at a time and let go before the next, so only the largest counts.
+ */
+export function estimateRender(work: PdfWork, pagePixels: number, more: { held?: number; engine?: MemoryEngine; drawn?: number } = {}): MemoryEstimate {
+  const F = LIMITS.pdfRenderMemory[more.engine ?? 'other'];
+  const total = F.base + F.byte * work.bytes + F.parsed * work.parsed + F.page * Math.min(work.pages, RENDER_KEPT_PAGES) + F.drawn * (more.drawn ?? 0) + F.stream * (work.largest ?? 0)
+    + F.image * (work.imagePixels ?? 0) + (work.softMasks ? F.masked : F.canvas) * pagePixels + F.held * (more.held ?? 0);
+  const H = LIMITS.pdfHeapMemory;
+  return { total: Math.ceil(total), heap: Math.ceil(H.parsed * work.parsed + H.page * work.pages) };
 }
 
 /** What one picture costs Images to PDF, from its header (src/engines/pdf/imageinfo.ts), before it is decoded. */
@@ -171,8 +196,8 @@ export function estimateImageCheck(bytes: number, engine: MemoryEngine = 'other'
 }
 
 /** The check before any reading: the size alone, against the allowance (the cheapest part of the estimate). */
-export function estimateFromSize(bytes: number, kind: 'edit' | 'text', engine: MemoryEngine = 'other'): MemoryEstimate {
-  const per = kind === 'edit' ? LIMITS.pdfEditMemory[engine] : LIMITS.pdfTextMemory[engine];
+export function estimateFromSize(bytes: number, kind: 'edit' | 'text' | 'render', engine: MemoryEngine = 'other'): MemoryEstimate {
+  const per = kind === 'edit' ? LIMITS.pdfEditMemory[engine] : kind === 'text' ? LIMITS.pdfTextMemory[engine] : LIMITS.pdfRenderMemory[engine];
   return { total: Math.ceil(per.base + per.byte * bytes), heap: 0 };
 }
 
