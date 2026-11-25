@@ -227,6 +227,25 @@ describe('ordinary PDFs with many small streams', () => {
     expect(scan.streams).toBe(N);
     expect(performance.now() - t).toBeLessThan(5000);
   });
+
+  test('a thousand small JPEG pictures pass: each picture header is read from the picture only', () => {
+    // A picture's header was read from the first 256 KB after its start, past its own end, so a manual with thousands
+    // of small JPEG pictures (a 209 MB software manual has 9,268) counted the bytes after each one as work and was
+    // refused as far more work to read than its size suggests.
+    const enc = new TextEncoder();
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, ...new Uint8Array(200), 0xff, 0xd9]);
+    const N = 1000;
+    const parts: Uint8Array[] = [enc.encode('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\nendobj\n')];
+    for (let i = 0; i < N; i++) {
+      parts.push(enc.encode(`${10 + i} 0 obj\n<< /Type /XObject /Subtype /Image /Width 32 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`), jpeg, enc.encode('\nendstream\nendobj\n'));
+    }
+    parts.push(enc.encode(`trailer\n<< /Size ${10 + N} /Root 1 0 R >>\n%%EOF\n`));
+    const bytes = cat(...parts);
+    expect(bytes.length).toBeLessThan(400_000);
+    const scan = scanPdf(bytes);
+    expect(scan.images).toBe(N);
+    expect(scan.largestImagePixels).toBe(32 * 16);
+  });
 });
 
 describe('the resources a content stream uses', () => {

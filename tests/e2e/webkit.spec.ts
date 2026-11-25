@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
 import { MD_SAMPLE, addFiles, convert, cspViolations, documentsSetting, expectDone, fx, openApp, pyRead, row, tempDir, writeTemp } from './helpers';
+import { giantArray, pictures } from './pdfgen';
 
 // Playwright's WebKit on Windows is not Safari: it has no OffscreenCanvas and no WebCodecs. These tests
 // check that FileConvert does what it can there and explains clearly what it cannot. Downloads are read
@@ -182,14 +184,59 @@ test('Split and rotate in WebKit: the page tools check, work and offer their res
   expect(w.outside).toEqual([]);
 });
 
-test('the merge memory allowance in WebKit: no device memory reported, so 1 GB', async ({ page }) => {
+test('the PDF memory allowance in WebKit: no device memory and no heap limit reported, so 2 GB is assumed for a computer', async ({ page }) => {
   await openApp(page);
   await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('merge-pdf'));
   expect(await page.evaluate(() => (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null)).toBeNull();
-  const check = (sizes: number[]) => page.evaluate(list => {
+  expect(await page.evaluate(() => (performance as Performance & { memory?: unknown }).memory ?? null)).toBeNull();
+  const { estimate } = await import('../../src/core/pdfmemory');
+  const MB = 1048576;
+  const w = (bytes: number) => ({ bytes, parsed: 0, objects: 0, pages: 1 });
+  let lo = 0, hi = 1024 * MB;
+  while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); if (estimate([w(mid), w(mid)], 'edit').total <= 2048 * MB) lo = mid; else hi = mid; }
+  const check = (bytes: number) => page.evaluate(b => {
     const app = (window as unknown as { __fileconvert: { workspace: { def: { check(i: unknown[], v: unknown): string | null } } } }).__fileconvert;
-    return app.workspace.def.check(list.map(size => ({ file: { size }, pages: 1 })), {});
-  }, sizes);
-  expect(await check([512 * 1048576, 512 * 1048576])).toBeNull();
-  expect(await check([512 * 1048576, 512 * 1048576 + 1])).toMatch(/^Together these files are/);
+    const one = { file: { size: 1 }, pages: 1, work: { bytes: b, parsed: 0, objects: 0, pages: 1 } };
+    return app.workspace.def.check([one, one], {});
+  }, bytes);
+  expect(await check(lo)).toBeNull();
+  expect(await check(hi)).toMatch(/^Together these files need about .* of memory, more than the 2\.00 GB FileConvert lets one task use in a browser that does not say how much memory the device has, so it was not started\. Merge fewer files at a time\. Chrome and Edge say how much memory the device has, so FileConvert may allow more there\.$/);
+});
+
+test('WebKit: a 100 KB PDF that would become 50 million objects is refused as it is added; a small one is then edited', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('rotate-pdf'));
+  const ws = page.locator('#workspace');
+  const bomb = `${tempDir()}/tiny-bomb.pdf`;
+  writeFileSync(bomb, giantArray(50));
+  await ws.locator('input[type=file]').setInputFiles([bomb]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await expect(ws.locator('.ws-item .job-error')).toHaveText(/^This PDF needs about [\d.]+ GB of memory, more than the 2\.00 GB FileConvert lets one task use in a browser that does not say how much memory the device has, so it was not started\. Chrome and Edge say how much memory the device has, so FileConvert may allow more there\.$/);
+  await ws.getByRole('button', { name: 'Remove tiny-bomb.pdf' }).click();
+  await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Rotate the pages' }).click();
+  await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+});
+
+test('WebKit on an iPhone or iPad: no device memory reported, so a phone or tablet with 2 GB is assumed, and 1 GB allowed', async ({ browser }) => {
+  for (const ua of [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    // An iPad asks for desktop sites, so it says it is a Mac; it has a touch screen.
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+  ]) {
+    const context = await browser.newContext({ userAgent: ua, hasTouch: true, isMobile: false });
+    const page = await context.newPage();
+    if (!/iPhone/.test(ua)) await page.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }); Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5 }); });
+    await openApp(page);
+    await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('rotate-pdf'));
+    const ws = page.locator('#workspace');
+    // 250 MB of pictures: within the 2 GB assumed for a computer, not the 1 GB for a phone or tablet.
+    const scan = `${tempDir()}/scan-250mb.pdf`;
+    writeFileSync(scan, pictures(10, 25));
+    await ws.locator('input[type=file]').setInputFiles([scan]);
+    await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 120_000 });
+    await expect(ws.locator('.ws-item .job-error')).toHaveText(/^This PDF needs about [\d.]+ GB of memory, more than the 1\.00 GB FileConvert lets one task use on a phone or tablet whose browser does not say how much memory it has, so it was not started\. Chrome and Edge say how much memory the device has, so FileConvert may allow more there\.$/);
+    await context.close();
+  }
 });

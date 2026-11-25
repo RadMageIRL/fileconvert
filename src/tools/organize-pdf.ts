@@ -7,7 +7,7 @@ import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { parseOrder } from '../core/pageranges';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
-import { checkWith, describeEdit, inspectPdf, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, describeEdit, inspectPdf, pagesOfInput, plural } from './pdf-common';
 
 export const tool: ToolDefinition = {
   id: 'organize-pdf',
@@ -27,13 +27,13 @@ export const tool: ToolDefinition = {
   check(inputs, values) {
     return checkWith(n => {
       if (parseOrder(String(values.order), n).every((p, i) => p === i + 1)) throw new Error('The pages are in their first order; move some to reorder them.');
-    })(inputs);
+    }, n => ({ listed: n }))(inputs);
   },
   async run(inputs, values, ctx) {
     const input = inputs[0];
     const n = pagesOfInput(inputs);
     const order = parseOrder(String(values.order), n);
-    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: CleanReport; signature: SignatureInfo }>('keepPages', { file: input.file, order: order.map(p => p - 1) }, { signal: ctx.signal, onProgress: ctx.progress });
+    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: CleanReport; signature: SignatureInfo }>('keepPages', { file: input.file, order: order.map(p => p - 1), allowance: allowance() }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
     const d = describeEdit(r.report, r.signature.signed, false);
     const moved = order.filter((p, i) => p !== i + 1).length;

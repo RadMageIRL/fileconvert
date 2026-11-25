@@ -7,7 +7,7 @@ import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { selectPages } from '../core/pageranges';
 import type { RotateReport, SignatureInfo } from '../engines/pdf/structure';
-import { checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
 const ALL = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 const chosen = (text: unknown, n: number) => (String(text ?? '').trim() ? selectPages(String(text), n) : ALL(n));
@@ -37,7 +37,7 @@ export const tool: ToolDefinition = {
     const n = pagesOfInput(inputs);
     const pages = chosen(values.pages, n);
     const by = Number(values.by);
-    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: RotateReport; signature: SignatureInfo }>('rotate', { file: input.file, pages: pages.map(p => p - 1), by }, { signal: ctx.signal, onProgress: ctx.progress });
+    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: RotateReport; signature: SignatureInfo }>('rotate', { file: input.file, pages: pages.map(p => p - 1), by, allowance: allowance() }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
     const d = describeEdit(r.report.clean, r.signature.signed, false);
     if (r.report.invalid) d.warnings.push(`${plural(r.report.invalid, 'page')} had a rotation that is not a quarter turn, which PDF readers ignore; ${r.report.invalid === 1 ? 'it was' : 'they were'} turned from upright.`);

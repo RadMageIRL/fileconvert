@@ -4,6 +4,7 @@
 // names and the downloads. A tool only says what it accepts and how to run, so every tool behaves the same way.
 
 import type { FormatId } from '../core/formats';
+import type { PdfWork } from '../core/pdfmemory';
 import type { Engines } from './jobs';
 
 /** A file in the workspace that the tool accepts. */
@@ -15,6 +16,8 @@ export interface ToolInput {
   format: FormatId;
   /** Pages, when the tool's inspect found them (PDF tools). */
   pages?: number;
+  /** What the PDF guard counted in the file, for the memory admission check (PDF tools). */
+  work?: PdfWork;
 }
 
 /** What a tool's inspect found about one file. */
@@ -22,6 +25,8 @@ export interface ToolInspection {
   /** Added to the file's line: "12 pages". */
   info?: string;
   pages?: number;
+  /** What the PDF guard counted (PDF tools). */
+  work?: PdfWork;
   /** Shown under the file. */
   note?: string;
   /** Why the tool cannot use the file; it stays listed but is never passed to the tool. */

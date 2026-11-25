@@ -120,6 +120,7 @@ export class Workspace {
           const r = await this.def.inspect({ id: e.id, file, name: e.name, format: e.format }, { signal: ac.signal, engines: this.host.engines });
           if (r.info) e.info += `, ${r.info}`;
           if (r.pages !== undefined) e.pages = r.pages;
+          if (r.work) e.work = r.work;
           if (r.note) e.notes.push(r.note);
           if (r.error) e.error = r.error;
           if (r.confirm) e.confirm = r.confirm;
@@ -190,7 +191,7 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages }) => ({ id, file, name, format, pages }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work }) => ({ id, file, name, format, pages, work }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;

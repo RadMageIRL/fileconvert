@@ -3,6 +3,7 @@
 
 import type { ToolDefinition, ToolInput } from '../app/tools';
 import { formatPages, parseRanges, pagesOf } from '../core/pageranges';
+import { estimate, memoryAllowance, refusal, type MemoryAllowance, type PdfWork } from '../core/pdfmemory';
 import type { DroppedPart, MergeReport } from '../engines/pdf/merge';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
 
@@ -21,9 +22,10 @@ export function listNames(names: string[]): string {
  */
 export function inspectPdf(doing: string): NonNullable<ToolDefinition['inspect']> {
   return async (input, ctx) => {
-    const r = await ctx.engines.pdf.run<{ pages: number; signature: SignatureInfo }>('inspect', { file: input.file }, { signal: ctx.signal });
+    const r = await ctx.engines.pdf.run<{ pages: number; signature: SignatureInfo; work: PdfWork }>('inspect', { file: input.file, allowance: allowance() }, { signal: ctx.signal });
     return {
       pages: r.pages,
+      work: r.work,
       info: plural(r.pages, 'page'),
       note: r.signature.signed ? 'Digitally signed.' : undefined,
       confirm: r.signature.signed
@@ -33,17 +35,40 @@ export function inspectPdf(doing: string): NonNullable<ToolDefinition['inspect']
   };
 }
 
+/** What one PDF task may use in this browser, read when a task starts (src/core/pdfmemory.ts). Every PDF task in the
+ *  worker gets it, since a worker is not told the device's memory. */
+export function allowance(): MemoryAllowance {
+  return memoryAllowance();
+}
+
+/**
+ * The memory admission check of a tool, from what each file's check counted: null, or why the tool cannot run. `outputs`
+ * is the number of files the tool makes; `extraOutput` the bytes they hold beyond the input (split: overlapping parts
+ * each get their own copy of their pages). The worker checks again with what it finds, before it reads or copies.
+ */
+export function memoryCheck(inputs: readonly ToolInput[], more: { outputs?: number; extraOutput?: number; listed?: number } = {}, needs = 'This PDF needs', advice = ''): string | null {
+  const works = inputs.map(i => i.work).filter((w): w is PdfWork => !!w);
+  if (!works.length) return null;
+  const a = allowance();
+  return refusal(estimate(works, 'edit', { ...more, engine: a.engine }), a, needs, advice);
+}
+
 /** The pages of the one file a page tool takes, once its check has counted them. */
 export function pagesOfInput(inputs: readonly ToolInput[]): number {
   return inputs[0]?.pages ?? 0;
 }
 
-/** A tool's check that reads a page selection: the parser's message, or null. */
-export function checkWith(read: (n: number) => unknown): (inputs: readonly ToolInput[]) => string | null {
+/** What a page tool's run makes, for its memory check (`memoryCheck`), from the page count. */
+export interface MemoryNeed { outputs?: number; extraOutput?: number; listed?: number; needs?: string; advice?: string }
+
+/** A tool's check that reads a page selection: the parser's message, then the memory check, or null. */
+export function checkWith(read: (n: number) => unknown, memory: (n: number) => MemoryNeed = () => ({})): (inputs: readonly ToolInput[]) => string | null {
   return inputs => {
     const n = pagesOfInput(inputs);
     if (!n) return 'Checking the file.';
-    try { read(n); return null; } catch (e) { return (e as Error).message; }
+    try { read(n); } catch (e) { return (e as Error).message; }
+    const m = memory(n);
+    return memoryCheck(inputs, m, m.needs, m.advice);
   };
 }
 

@@ -560,7 +560,10 @@ export class Queue {
     if (from === 'pdf' && to === 'txt') {
       // The guard reads the file first, in the PDF worker: pdf.js never sees a file that would make it use far more
       // memory than its size suggests, or one that is encrypted.
-      const scan = await this.engines.pdf.run<PdfScan>('scan', { file: job.file }, { onProgress, signal });
+      // It also refuses, before pdf.js reads anything, a PDF whose text would take more memory to read than this
+      // browser can give one task (src/core/pdfmemory.ts).
+      const { memoryAllowance } = await import('../core/pdfmemory');
+      const scan = await this.engines.pdf.run<PdfScan>('scan', { file: job.file, allowance: memoryAllowance() }, { onProgress, signal });
       if (signal.aborted) throw new CanceledError();
       const { pdfToText } = await import('../engines/document/pdf-text');
       const handle = pdfToText(job.file, (fraction, stage) => onProgress({ fraction, stage }), scan);

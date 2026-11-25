@@ -6,7 +6,7 @@ import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { selectPages } from '../core/pageranges';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
-import { checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, describeEdit, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
 export const tool: ToolDefinition = {
   id: 'delete-pdf-pages',
@@ -33,7 +33,7 @@ export const tool: ToolDefinition = {
     const n = pagesOfInput(inputs);
     const removed = new Set(selectPages(String(values.pages), n));
     const order = Array.from({ length: n }, (_, i) => i).filter(i => !removed.has(i + 1));
-    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: CleanReport; signature: SignatureInfo }>('keepPages', { file: input.file, order }, { signal: ctx.signal, onProgress: ctx.progress });
+    const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: CleanReport; signature: SignatureInfo }>('keepPages', { file: input.file, order, allowance: allowance() }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
     const d = describeEdit(r.report, r.signature.signed, true);
     return {

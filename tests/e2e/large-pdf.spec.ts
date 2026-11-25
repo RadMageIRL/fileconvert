@@ -4,7 +4,7 @@
 // generated into the system temp folder on first use.
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, statSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
@@ -158,4 +158,52 @@ test('memory by structure: image-heavy, form-heavy and many-page PDFs, merged an
     await r.context.close();
     expect(failed, c.what).toBe(0);
   }
+});
+
+// Chrome with its JavaScript heap capped at 96 MB, a stand-in for a device with little memory. Before the memory
+// admission check, merging two form-heavy PDFs here ran the PDF worker out of heap, and Chrome stopped the whole page
+// from responding: Cancel could not be pressed and it never recovered. Now each file is refused as it is added, the
+// page keeps answering, a run that fits can be canceled, and a small merge completes.
+test('a 96 MB heap: form-heavy PDFs are refused as they are added instead of freezing the page; cancel and a small merge still work', async ({ baseURL }) => {
+  test.setTimeout(600_000);
+  const profile = mkdtempSync(join(tmpdir(), 'fc-profile-'));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', baseURL, args: ['--js-flags=--max-old-space-size=96'] });
+  const page = context.pages()[0] ?? await context.newPage();
+  await openApp(page);
+  expect(await page.evaluate(() => (performance as Performance & { memory: { jsHeapSizeLimit: number } }).memory.jsHeapSizeLimit)).toBeLessThan(300 * MB);
+  await page.evaluate(() => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool('merge-pdf'));
+  const ws = page.locator('#workspace');
+  const f = forms();
+  const g = join(DIR, 'forms-20000-copy.pdf');
+  if (!existsSync(g)) copyFileSync(f, g);
+  const t = Date.now();
+  await ws.locator('input[type=file]').setInputFiles([f, g]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 120_000 });
+  expect(Date.now() - t).toBeLessThan(60_000);
+  await expect(ws.locator('.ws-item .job-error')).toHaveCount(2);
+  await expect(ws.locator('.ws-item .job-error').first()).toHaveText(/^This PDF needs about [\d.]+ MB of the browser's working memory for its objects and pages, more than the [\d.]+ MB this browser gives one task, so it was not started\.$/);
+  // The page answers at once.
+  const t2 = Date.now();
+  expect(await page.evaluate(() => 1 + 1)).toBe(2);
+  expect(Date.now() - t2).toBeLessThan(2_000);
+  while (await ws.getByRole('button', { name: /^Remove / }).count()) await ws.getByRole('button', { name: /^Remove / }).first().click();
+  // A merge that fits (two 400 MB picture files are bytes, not objects) can be canceled while it runs.
+  const p = pictures();
+  const q = join(DIR, 'pictures-400mb-copy.pdf');
+  if (!existsSync(q)) copyFileSync(p, q);
+  await ws.locator('input[type=file]').setInputFiles([p, q]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 300_000 });
+  await expect(ws.locator('.ws-item .job-error')).toHaveCount(0);
+  await ws.getByRole('button', { name: 'Merge PDFs' }).click();
+  await expect(ws.locator('.ws-run .job-info')).toContainText('Adding', { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ws.locator('.ws-state.canceled')).toHaveText('Canceled.');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __fileconvert: { engines: { pdf: { active: number } } } }).__fileconvert.engines.pdf.active)).toBe(0);
+  while (await ws.getByRole('button', { name: /^Remove / }).count()) await ws.getByRole('button', { name: /^Remove / }).first().click();
+  await ws.locator('input[type=file]').setInputFiles([join('tests', 'fixtures', 'pdf', 'merge-a.pdf'), join('tests', 'fixtures', 'pdf', 'merge-b.pdf')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Merge PDFs' }).click();
+  await expect(ws.locator('.ws-state.done')).toHaveText(/^Done: 1 file/, { timeout: 120_000 });
+  record(`96 MB heap: two form-heavy PDFs refused as added in ${((Date.now() - t) / 1000).toFixed(1)} s in all, a picture merge canceled, a small merge done`);
+  await context.close();
 });

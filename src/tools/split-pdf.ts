@@ -7,7 +7,7 @@ import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { everyN, parseRanges, type PageRange } from '../core/pageranges';
 import type { MergeReport } from '../engines/pdf/merge';
-import { checkWith, describeParts, inspectPdf, pageLabel, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, describeParts, inspectPdf, pageLabel, pagesOfInput, plural } from './pdf-common';
 
 /** The parts the options ask for, as page ranges (1-based). */
 export function splitParts(values: Record<string, string | number | boolean>, pages: number): PageRange[] {
@@ -38,6 +38,17 @@ export const tool: ToolDefinition = {
     return checkWith(n => {
       const parts = splitParts(values, n);
       if (values.mode === 'ranges' && parts.length === 1 && parts[0].from === 1 && parts[0].to === n) throw new Error('That range is the whole PDF; give at least two ranges, or a smaller one.');
+    }, n => {
+      // Overlapping ranges copy their pages into each file: at least this much more than the PDF itself is written.
+      const parts = splitParts(values, n);
+      const taken = parts.reduce((k, r) => k + r.to - r.from + 1, 0);
+      const bytes = inputs[0]?.file.size ?? 0;
+      return {
+        outputs: parts.length,
+        extraOutput: Math.max(0, Math.round(bytes * (taken / n - 1))),
+        needs: parts.length > 1 ? `Splitting it this way makes ${plural(parts.length, 'file')}, which needs` : 'This PDF needs',
+        advice: parts.length > 1 ? 'Split it into fewer parts.' : '',
+      };
     })(inputs);
   },
   async run(inputs, values, ctx) {
@@ -46,6 +57,7 @@ export const tool: ToolDefinition = {
     const ranges = splitParts(values, n);
     const r = await ctx.engines.pdf.run<{ parts: Array<{ bytes: Uint8Array; report: MergeReport }> }>('split', {
       file: input.file, name: input.name, parts: ranges.map(x => Array.from({ length: x.to - x.from + 1 }, (_, i) => x.from - 1 + i)),
+      allowance: allowance(),
     }, { signal: ctx.signal, onProgress: ctx.progress });
     const base = safeBase(input.name);
     const outputs = r.parts.map((p, i) => {

@@ -6,7 +6,7 @@ import { formatBytes } from '../core/limits';
 import { safeBase } from '../core/naming';
 import { selectPages } from '../core/pageranges';
 import type { MergeReport } from '../engines/pdf/merge';
-import { checkWith, describeParts, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { allowance, checkWith, describeParts, inspectPdf, pagesNote, pagesOfInput, plural } from './pdf-common';
 
 export const tool: ToolDefinition = {
   id: 'extract-pdf-pages',
@@ -31,7 +31,7 @@ export const tool: ToolDefinition = {
     const n = pagesOfInput(inputs);
     const pages = selectPages(String(values.pages), n);
     const r = await ctx.engines.pdf.run<{ parts: Array<{ bytes: Uint8Array; report: MergeReport }> }>('split', {
-      file: input.file, name: input.name, parts: [pages.map(p => p - 1)],
+      file: input.file, name: input.name, parts: [pages.map(p => p - 1)], allowance: allowance(),
     }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.parts[0].bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
     const d = describeParts([r.parts[0].report]);

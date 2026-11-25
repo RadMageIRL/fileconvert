@@ -48,7 +48,47 @@ export const LIMITS = {
    */
   pdfMergeFiles: 200,
   pdfMergeBytes: 1024 * MB,
-  pdfMergeBytesPerDeviceGB: 128 * MB,
+  /**
+   * The memory admission check for PDF work (src/core/pdfmemory.ts): every PDF task is refused before it starts when
+   * its estimate is more than one task may use. One task may use half the memory the browser reports for the device,
+   * or, where it reports none (Firefox, Safari), what half of a modest device would be: 2 GB on a computer (4 GB
+   * assumed), 1 GB on a phone or tablet (2 GB assumed); 4 GB at most. Where the browser reports its JavaScript heap
+   * limit (Chrome, Edge), the part of the estimate that lives in that heap is held to 3/4 of it, less a reserve for
+   * the page and the code.
+   */
+  pdfMemoryDeviceShare: 0.5,
+  pdfMemoryAssumedComputer: 2048 * MB,
+  pdfMemoryAssumedPhone: 1024 * MB,
+  pdfMemoryCeiling: 4096 * MB,
+  pdfHeapReserve: 120 * MB,
+  pdfHeapShare: 0.9,
+  /**
+   * The part of an estimate that has to fit in the JavaScript heap at once, for the check against the heap limit Chrome
+   * and Edge report (less the reserve, which Chrome adds to its limit for the young generation: a 128 MB heap reads as
+   * 239 MB): per byte parsed into objects, per page and per file made. Fitted to where Chrome, its heap capped, stopped
+   * responding: the densest file measured, 9.5 MB of empty dictionaries, froze a 192 MB heap and completed in 256 MB.
+   */
+  pdfHeapMemory: { parsed: 32, page: 16 * 1024, output: 16 * 1024 },
+  /**
+   * The estimate, from what the PDF guard counted, for each engine (src/core/pdfmemory.ts, MemoryEngine): a base for the
+   * code and the worker; then per byte of the file; per byte parsed into objects (dictionaries, arrays, the decoded
+   * object streams: the densest, empty dictionaries, cost Chrome about 30 times their bytes and WebKit more); per page;
+   * per byte of the largest stream once decoded (page content is decoded one stream at a time). For the editing tools
+   * also: per file made, per page shown in the reorder tool's page list, and per byte the new files hold beyond the
+   * input (split copies the pictures and fonts its pages share into every part, and the result is held twice while it
+   * is handed to the page). Objects are counted but not priced: the bytes parsed cover them. Each set is above every
+   * peak measured in its browser, by 10% at least (local/PHASE2-MEMORY-v0.2.0.md). Text is pdf.js reading text.
+   */
+  pdfEditMemory: {
+    v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 64 * 1024, list: 96 * 1024, copy: 2.5 },
+    other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5 },
+  },
+  pdfTextMemory: {
+    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 48 * 1024, stream: 3.5 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, stream: 3.5 },
+    other: { base: 320 * MB, byte: 4.5, parsed: 48, page: 64 * 1024, stream: 4 },
+  },
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,

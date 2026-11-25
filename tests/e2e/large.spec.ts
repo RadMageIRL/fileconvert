@@ -292,10 +292,11 @@ test('an ordinary 2,036-page PDF with 2.3 GB of compressed data passes the guard
   expect(firstPages).not.toContain('LARGE-MARK-00002');
 });
 
-// Merge PDFs near its 1 GB limit, through the workspace: the ordinary large PDF twice and 400 MB of incompressible
-// pictures (4,112 pages, about 860 MB), with every browser process's memory sampled while the files are checked and
-// while they are merged.
-test('Merge PDFs: about 860 MB and 4,112 pages in three files merge through the workspace, memory measured', async ({ baseURL }, info) => {
+// Merge PDFs near what the memory check allows on this computer (4 GB for one task, the most on any device): the ordinary
+// large PDF and 400 MB of incompressible pictures (2,076 pages, about 630 MB), with every browser process's memory
+// sampled while the files are checked and while they are merged. With the ordinary PDF a second time (about 860 MB and
+// 4,112 pages, which merged in 2.1 to 2.7 GB more before the check), the estimate passes 4 GB, so it is refused first.
+test('Merge PDFs: about 630 MB and 2,076 pages merge through the workspace, memory measured; 860 MB is refused before it starts', async ({ baseURL }, info) => {
   test.setTimeout(1_800_000);
   const { chromium } = await import('@playwright/test');
   const { copyFileSync, mkdtempSync } = await import('node:fs');
@@ -319,7 +320,7 @@ test('Merge PDFs: about 860 MB and 4,112 pages in three files merge through the 
     'out += b"trailer\\n<< /Size %d /Root 1 0 R >>\\nstartxref\\n%d\\n%%%%EOF\\n" % (size, x)',
     'open(sys.argv[1], "wb").write(out)',
   ].join('\n'), p], { timeout: 900_000 }));
-  const total = [big, pics, copy].reduce((n, f) => n + statSync(f).size, 0);
+  const total = [big, pics].reduce((n, f) => n + statSync(f).size, 0);
   const profile = mkdtempSync(join(tmpdir(), 'fc-profile-'));
   const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', baseURL, acceptDownloads: true });
   const page = context.pages()[0] ?? await context.newPage();
@@ -334,6 +335,11 @@ test('Merge PDFs: about 860 MB and 4,112 pages in three files merge through the 
   await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 600_000 });
   const checkSecs = (Date.now() - t) / 1000, checkRise = peak - base;
   await expect(ws.locator('.ws-item.rejected')).toHaveCount(0);
+  // All three: refused before the merge starts, with the estimate and the allowance.
+  await expect(ws.locator('.ws-why')).toHaveText(/^Together these files need about 4\.\d+ GB of memory, more than the 4\.00 GB FileConvert lets one task use on this device \(half of the \d+ GB of memory the browser reports\), so it was not started\. Merge fewer files at a time\.$/);
+  await expect(ws.getByRole('button', { name: 'Merge PDFs' })).toBeDisabled();
+  await ws.getByRole('button', { name: 'Remove ordinary-large-again.pdf' }).click();
+  await expect(ws.locator('.ws-why')).toHaveCount(0);
   peak = await browserMemory(profile);
   const before = peak;
   const lag = await watchLag(page);
@@ -348,11 +354,10 @@ test('Merge PDFs: about 860 MB and 4,112 pages in three files merge through the 
   const out = info.outputPath('merged-large.pdf');
   await dl.saveAs(out);
   await context.close();
-  record(`Merge PDFs (${(total / 1048576).toFixed(0)} MB in 3 files, 4,112 pages): checked as added in ${checkSecs.toFixed(1)} s, browser memory +${checkRise.toFixed(0)} MB; merged in ${mergeSecs.toFixed(1)} s, +${mergeRise.toFixed(0)} MB over the ${(before - base).toFixed(0)} MB the page held, ${(statSync(out).size / 1048576).toFixed(0)} MB out, worst main-thread gap ${lagMs} ms`);
+  record(`Merge PDFs (${(total / 1048576).toFixed(0)} MB in 2 files, 2,076 pages; 3 files refused first): checked as added in ${checkSecs.toFixed(1)} s, browser memory +${checkRise.toFixed(0)} MB; merged in ${mergeSecs.toFixed(1)} s, +${mergeRise.toFixed(0)} MB over the ${(before - base).toFixed(0)} MB the page held, ${(statSync(out).size / 1048576).toFixed(0)} MB out, worst main-thread gap ${lagMs} ms`);
   expect(execFileSync('qpdf', ['--check', out], { encoding: 'utf8', maxBuffer: 64 << 20 })).toContain('No syntax or stream encoding errors found');
-  expect(execFileSync('qpdf', ['--show-npages', out], { encoding: 'utf8' }).trim()).toBe('4112');
+  expect(execFileSync('qpdf', ['--show-npages', out], { encoding: 'utf8' }).trim()).toBe('2076');
   expect(execFileSync('pdftotext', ['-f', '1', '-l', '1', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-00001');
-  expect(execFileSync('pdftotext', ['-f', '2077', '-l', '2077', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-00001');
-  expect(execFileSync('pdftotext', ['-f', '4112', '-l', '4112', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-02036');
+  expect(execFileSync('pdftotext', ['-f', '2036', '-l', '2036', out, '-'], { encoding: 'utf8' })).toContain('LARGE-MARK-02036');
   expect(lagMs).toBeLessThan(500);
 });

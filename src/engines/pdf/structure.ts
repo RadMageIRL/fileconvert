@@ -64,10 +64,15 @@ export interface OpenPdf {
   signature: SignatureInfo;
 }
 
-/** Checks a PDF with the guard, then loads it for editing. Encrypted PDFs are refused (v0.2.0 does not decrypt). */
-export async function openPdf(bytes: Uint8Array): Promise<OpenPdf> {
+/**
+ * Checks a PDF with the guard, then loads it for editing. Encrypted PDFs are refused (v0.2.0 does not decrypt).
+ * `admit` sees what the guard counted before the editing library reads anything, and throws to refuse the file (the
+ * memory admission check, src/core/pdfmemory.ts).
+ */
+export async function openPdf(bytes: Uint8Array, admit?: (scan: PdfScan) => void): Promise<OpenPdf> {
   const scan = scanPdf(bytes);
   if (scan.encrypted) throw new Error(ENCRYPTED_MESSAGE);
+  admit?.(scan);
   const L = await pdfLib();
   let doc: PDFDocumentT;
   try {
@@ -108,6 +113,53 @@ export function signatureInfo(doc: PDFDocumentT, L: Lib): SignatureInfo {
   };
   if (af) walk(af.lookup(PDFName.of('Fields')), undefined, 0);
   return { signed: signedFields > 0 || certified, signedFields, certified };
+}
+
+/**
+ * About how many bytes new files made of these parts of a document hold together (split, extract): for each part,
+ * the page dictionaries and everything they reach (contents, resources, pictures, fonts, annotations, form fields),
+ * each object once per part, since every new file gets its own copy of what its pages share. Links to other pages
+ * and back to the page tree are not followed. Counting stops once the total passes `stop`. Nothing is copied.
+ */
+export function partBytes(doc: PDFDocumentT, L: Lib, parts: readonly (readonly number[])[], stop = Infinity): number {
+  const { PDFDict, PDFArray, PDFRef, PDFRawStream, PDFName } = L;
+  const refs = pageRefs(doc, L);
+  const pages = new Set(refs.map(String));
+  const skip = new Set([PDFName.of('Parent'), PDFName.of('P')]);
+  let total = 0;
+  for (const part of parts) {
+    const seen = new Set<string>();
+    const stack: unknown[] = [];
+    for (const i of part) {
+      const ref = refs[i];
+      if (!ref || seen.has(String(ref))) continue;
+      seen.add(String(ref));
+      const page = doc.context.lookup(ref);
+      if (!page) continue;
+      total += page.sizeInBytes();
+      stack.push(page);
+    }
+    while (stack.length) {
+      const v = stack.pop();
+      if (v instanceof PDFRef) {
+        const key = String(v);
+        if (seen.has(key) || pages.has(key)) continue;
+        seen.add(key);
+        const o = doc.context.lookup(v);
+        if (!o) continue;
+        total += o instanceof PDFRawStream ? o.dict.sizeInBytes() + o.getContentsSize() + 18 : o.sizeInBytes();
+        stack.push(o);
+      } else if (v instanceof PDFRawStream) {
+        stack.push(v.dict);
+      } else if (v instanceof PDFDict) {
+        for (const [k, x] of v.entries()) if (!skip.has(k)) stack.push(x);
+      } else if (v instanceof PDFArray) {
+        for (let i = 0; i < v.size(); i++) stack.push(v.get(i));
+      }
+    }
+    if (total > stop) return total;
+  }
+  return total;
 }
 
 const INHERITABLE = ['Resources', 'MediaBox', 'CropBox', 'Rotate'];

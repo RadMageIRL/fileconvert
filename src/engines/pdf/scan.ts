@@ -33,6 +33,11 @@ export interface PdfScan {
   objectStreams: number;
   /** Bytes all expanding filters produce together, intermediate stages included. */
   decodedBytes: number;
+  /** Bytes outside stream data (object headers, dictionaries, arrays, the cross-reference table): what a PDF library
+   *  parses into objects when it loads the file. */
+  textBytes: number;
+  /** Bytes the object streams decode to, which a PDF library also parses into objects. */
+  objectStreamBytes: number;
   largestStream: number;
   images: number;
   largestImagePixels: number;
@@ -142,8 +147,8 @@ class Scanner {
   objectStreamBytes = 0;
   fed = 0;
   report: PdfScan = {
-    version: null, encrypted: false, objects: 0, pages: 0, streams: 0, objectStreams: 0, decodedBytes: 0,
-    largestStream: 0, images: 0, largestImagePixels: 0, signatureHint: false, jbig2: 0, jpx: 0,
+    version: null, encrypted: false, objects: 0, pages: 0, streams: 0, objectStreams: 0, decodedBytes: 0, textBytes: 0,
+    objectStreamBytes: 0, largestStream: 0, images: 0, largestImagePixels: 0, signatureHint: false, jbig2: 0, jpx: 0,
   };
   constructor(private b: Uint8Array, private L: PdfLimits) {}
 
@@ -177,6 +182,7 @@ class Scanner {
     }
     this.examineText(text, b.length);
     this.report.decodedBytes = this.decoded;
+    this.report.objectStreamBytes = this.objectStreamBytes;
     if (this.report.objects > this.L.pdfObjects) throw new LimitError(`This PDF has ${this.report.objects.toLocaleString('en-US')} objects; the limit is ${this.L.pdfObjects.toLocaleString('en-US')}.`);
     if (this.report.pages > this.L.pdfPages) throw new LimitError(`This PDF has ${this.report.pages.toLocaleString('en-US')} pages; the limit is ${this.L.pdfPages.toLocaleString('en-US')}.`);
     return this.report;
@@ -185,6 +191,7 @@ class Scanner {
   /** Text between streams: object headers, page dictionaries, trailers. */
   private examineText(from: number, to: number): void {
     if (to <= from) return;
+    this.report.textBytes += to - from;
     // Large text regions are read in pieces that overlap a little, so a key is never cut in two.
     for (let p = from; p < to; p += 4 * MB) {
       const text = latin1.decode(this.b.subarray(p, Math.min(to, p + 4 * MB + 32)));
@@ -306,7 +313,9 @@ class Scanner {
       // Feed from the data's start until the first stage reaches its own end of data.
       const first = stages[0];
       const sink: Sink = first ?? headSink!;
-      const stop = first ? b.length : Math.min(b.length, start + 256 * 1024);
+      // A picture's header is read from its own data only: reading on past a small picture counted the bytes after
+      // it as work, so a manual with thousands of small JPEG pictures was refused as too much work to read.
+      const stop = first ? b.length : Math.min(end, start + 256 * 1024);
       // Pieces grow from 256 bytes to 64 KB: a short stream is not fed (and its feeding counted) far past its own end,
       // which made a file of thousands of small streams look like far more work than it is, while a long stream is
       // soon read 64 KB at a time. The work limit below is unchanged.

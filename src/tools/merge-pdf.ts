@@ -5,16 +5,9 @@
 import type { ToolDefinition, ToolInput } from '../app/tools';
 import { formatBytes, LIMITS } from '../core/limits';
 import type { DroppedPart, MergeFile, MergeReport } from '../engines/pdf/merge';
-import { inspectPdf, listNames, plural } from './pdf-common';
+import { allowance, inspectPdf, listNames, memoryCheck, plural } from './pdf-common';
 
 export { listNames };
-
-/** How much the files may weigh together: the fixed limit, lower on a device that says it has little memory. */
-export function mergeBudget(deviceMemory = (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory): { bytes: number; device: boolean } {
-  if (!deviceMemory || !Number.isFinite(deviceMemory) || deviceMemory <= 0) return { bytes: LIMITS.pdfMergeBytes, device: false };
-  const bytes = Math.min(LIMITS.pdfMergeBytes, Math.floor(deviceMemory * LIMITS.pdfMergeBytesPerDeviceGB));
-  return { bytes, device: bytes < LIMITS.pdfMergeBytes };
-}
 
 const DROPPED: Record<DroppedPart, (files: string, pages: number) => string> = {
   tags: f => `Accessibility tags are not kept (${f}); screen readers read the merged pages without them.`,
@@ -88,15 +81,14 @@ export const tool: ToolDefinition = {
       return `Together these files have ${pages.toLocaleString('en-US')} pages; a merged PDF can have up to ${LIMITS.pdfPages.toLocaleString('en-US')}. Merge fewer files at a time.`;
     }
     const bytes = inputs.reduce((n, i) => n + i.file.size, 0);
-    const budget = mergeBudget();
-    if (bytes > budget.bytes) {
-      return `Together these files are ${formatBytes(bytes)}; FileConvert merges up to ${formatBytes(budget.bytes)} at a time${budget.device ? ' on this device' : ''}, so the browser does not run out of memory. Merge fewer files at a time.`;
+    if (bytes > LIMITS.pdfMergeBytes) {
+      return `Together these files are ${formatBytes(bytes)}; FileConvert merges up to ${formatBytes(LIMITS.pdfMergeBytes)} at a time. Merge fewer files at a time.`;
     }
-    return null;
+    return memoryCheck(inputs, {}, 'Together these files need', 'Merge fewer files at a time.');
   },
   async run(inputs, _values, ctx) {
     const r = await ctx.engines.pdf.run<{ bytes: Uint8Array; report: MergeReport }>('merge', {
-      files: inputs.map(i => ({ file: i.file, name: i.name })),
+      files: inputs.map(i => ({ file: i.file, name: i.name })), allowance: allowance(),
     }, { signal: ctx.signal, onProgress: ctx.progress });
     const blob = new Blob([r.bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
     const d = describeMerge(r.report);

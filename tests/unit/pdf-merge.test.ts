@@ -304,14 +304,21 @@ describe('merge helpers', () => {
 
 
 describe('Merge PDFs tool', () => {
-  test('the memory budget: 1 GB, or 128 MB for each gigabyte a device reports, whichever is less', async () => {
-    const { mergeBudget } = await import('../../src/tools/merge-pdf');
+  test('the check: pages first, then the size of all files, then the memory all of them need together', async () => {
+    const { tool } = await import('../../src/tools/merge-pdf');
+    const { estimate, memoryAllowance } = await import('../../src/core/pdfmemory');
     const MB = 1024 * 1024;
-    expect(mergeBudget(undefined)).toEqual({ bytes: 1024 * MB, device: false });
-    expect(mergeBudget(8)).toEqual({ bytes: 1024 * MB, device: false });
-    expect(mergeBudget(4)).toEqual({ bytes: 512 * MB, device: true });
-    expect(mergeBudget(0.5)).toEqual({ bytes: 64 * MB, device: true });
-    expect(mergeBudget(Number.NaN)).toEqual({ bytes: 1024 * MB, device: false });
+    const input = (size: number, pages: number, parsed = 0) => ({ id: 1, name: 'a.pdf', format: 'pdf' as const, file: { size } as File, pages, work: { bytes: size, parsed, objects: 0, pages } });
+    expect(tool.check!([input(MB, 3000), input(MB, 2001)], {})).toMatch(/^Together these files have 5,001 pages/);
+    expect(tool.check!([input(600 * MB, 1), input(500 * MB, 1)], {})).toMatch(/^Together these files are 1\.07 GB; FileConvert merges up to 1\.00 GB at a time/);
+    // Node reports no device memory, so the allowance is the one assumed for a computer.
+    const a = memoryAllowance();
+    expect(a.basis).toBe('computer');
+    const fits = (parsed: number) => estimate([input(MB, 10, parsed).work, input(MB, 10, parsed).work], 'edit').total <= a.total;
+    let lo = 0, hi = 100 * MB;
+    while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); if (fits(mid)) lo = mid; else hi = mid; }
+    expect(tool.check!([input(MB, 10, lo), input(MB, 10, lo)], {})).toBeNull();
+    expect(tool.check!([input(MB, 10, hi), input(MB, 10, hi)], {})).toMatch(/^Together these files need about .* of memory, more than the 2\.00 GB FileConvert lets one task use in a browser that does not say how much memory the device has, so it was not started\. Merge fewer files at a time\. Chrome and Edge say how much memory the device has, so FileConvert may allow more there\.$/);
   });
 
   test('names are listed in plain words, at most five', async () => {
