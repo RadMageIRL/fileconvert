@@ -122,18 +122,24 @@ describe('the estimate', () => {
     expect(s.objectStreamBytes).toBeGreaterThan(0);
     expect(s.textBytes).toBeGreaterThan(0);
     expect(workOf(1234, s)).toEqual({ bytes: 1234, parsed: s.textBytes + s.objectStreamBytes, objects: s.objects, pages: s.pages, largest: s.largestStream, imagePixels: s.largestImagePixels, jpxPixels: s.largestJpxPixels, content: s.contentBytes, fonts: s.fontBytes, softMasks: s.softMasks > 0,
-      pageContent: Math.min(s.contentBytes, s.largestContent * s.maxContents), pageRaw: Math.min(s.rawContent, s.largestRawContent * s.maxContents), expanded: s.formExpansion * Math.min(1, 50 / Math.max(1, s.pages)), expandedText: s.textFormExpansion * Math.min(1, 50 / Math.max(1, s.pages)) });
+      pageContent: Math.min(s.contentBytes, s.largestContent * s.maxContents), pageRaw: Math.min(s.rawContent, s.largestRawContent * s.maxContents), expanded: s.formExpansion, expandedText: s.textFormExpansion, annotations: s.annotExpansion, formFonts: s.formFontBytes, maskDraws: s.maskDraws,
+      expandedEdit: s.editFormExpansion * Math.min(1, 50 / Math.max(1, s.pages)) });
   });
 
   test('one page is bounded by its largest stream times the most streams a page has; forms by the 50 pages pdf.js keeps', () => {
     const s = scanPdf(fx('merge-b-objstm.pdf'));
-    const w = workOf(1000, { ...s, contentBytes: 9e6, largestContent: 1e6, rawContent: 20e6, largestRawContent: 5e6, maxContents: 3, formExpansion: 1e6, pages: 100 });
+    const w = workOf(1000, { ...s, contentBytes: 9e6, largestContent: 1e6, rawContent: 20e6, largestRawContent: 5e6, maxContents: 3, formExpansion: 1e6, annotExpansion: 2e6, editFormExpansion: 1e6, textFormExpansion: 0.25e6, pages: 100 });
     expect(w.pageContent).toBe(3e6);
     expect(w.pageRaw).toBe(15e6);
-    expect(w.expanded).toBe(0.5e6);
+    // The guard holds drawing's and reading's form expansion to the 50 costliest pages itself; editing's is spread.
+    expect(w.expanded).toBe(1e6);
+    expect(w.expandedText).toBe(0.25e6);
+    expect(w.annotations).toBe(2e6);
+    expect(w.expandedEdit).toBe(0.5e6);
+    expect(workOf(1000, { ...s, formExpansion: 1e6, editFormExpansion: 3e6, pages: 100 }).expandedEdit).toBe(1.5e6);
     // Never more than all the content, and a short file counts all of its forms.
     expect(workOf(1000, { ...s, contentBytes: 2e6, largestContent: 1e6, maxContents: 3, formExpansion: 1e6, pages: 4 }).pageContent).toBe(2e6);
-    expect(workOf(1000, { ...s, formExpansion: 1e6, pages: 4 }).expanded).toBe(1e6);
+    expect(workOf(1000, { ...s, editFormExpansion: 1e6, pages: 4 }).expandedEdit).toBe(1e6);
   });
 
   test('page content and embedded fonts are counted apart, once decoded: the cleanup reads all content, pdf.js converts every font', () => {
@@ -156,15 +162,22 @@ describe('the estimate', () => {
     expect(T.content).toBeGreaterThan(E.content);
     expect(estimate([{ ...w, fonts: 1e6 }], 'edit', { engine: 'v8' }).total).toBe(estimate([{ ...w, fonts: 0 }], 'edit', { engine: 'v8' }).total);
     // One page at a time: of several files, the largest page counts, not the sum.
-    // Reading text counts forms that hold text; editing counts every form (both read through each Do).
+    // Reading text counts forms that hold text, through forms inside forms; editing counts every form once (the cleanup
+    // reads each form once); neither counts annotations, which only drawing reads.
     for (const [kind, F] of [['text', T], ['edit', E]] as const) {
-      const big = { ...w, pageContent: 2e6, pageRaw: 3e6, expanded: 4e6, expandedText: 4e6 };
-      const none = { ...w, pageContent: 0, pageRaw: 0, expanded: 0, expandedText: 0 };
+      const big = { ...w, pageContent: 2e6, pageRaw: 3e6, expanded: 4e6, expandedText: 4e6, expandedEdit: 4e6 };
+      const none = { ...w, pageContent: 0, pageRaw: 0, expanded: 0, expandedText: 0, expandedEdit: 0 };
       const one = estimate([big], kind, { engine: 'v8' }).total - estimate([none], kind, { engine: 'v8' }).total;
       expect(Math.abs(one - (F.pageContent * 2e6 + F.raw * 3e6 + F.expanded * 4e6)), kind).toBeLessThanOrEqual(1);
-      const two = estimate([big, { ...w, pageContent: 1e6, pageRaw: 1e6, expanded: 1e6, expandedText: 1e6 }], kind, { engine: 'v8' }).total;
+      const two = estimate([big, { ...w, pageContent: 1e6, pageRaw: 1e6, expanded: 1e6, expandedText: 1e6, expandedEdit: 1e6 }], kind, { engine: 'v8' }).total;
       expect(two - estimate([big, none], kind, { engine: 'v8' }).total, kind).toBe(0);
+      expect(estimate([{ ...big, annotations: 9e9 }], kind, { engine: 'v8' }).total, kind).toBe(estimate([big], kind, { engine: 'v8' }).total);
     }
+    // Fonts written out in full in forms are read again for text, at a small figure; editing does not read them.
+    expect(estimate([{ ...w, formFonts: 1e8 }], 'text', { engine: 'v8' }).total - estimate([{ ...w, formFonts: 0 }], 'text', { engine: 'v8' }).total).toBe(T.fontLoad * 1e8);
+    expect(estimate([{ ...w, formFonts: 1e8 }], 'edit', { engine: 'v8' }).total).toBe(estimate([{ ...w, formFonts: 0 }], 'edit', { engine: 'v8' }).total);
+    // Editing does not multiply what forms draw: the nested expansion alone does not move its estimate.
+    expect(estimate([{ ...w, expanded: 9e9, expandedText: 9e9, expandedEdit: 0 }], 'edit', { engine: 'gecko' }).total).toBe(estimate([{ ...w, expanded: 0, expandedText: 0, expandedEdit: 0 }], 'edit', { engine: 'gecko' }).total);
     const drawingForms = { ...w, expanded: 4e6, expandedText: 0 };
     expect(estimate([drawingForms], 'text', { engine: 'v8' }).total - estimate([{ ...w, expanded: 0, expandedText: 0 }], 'text', { engine: 'v8' }).total).toBe(T.formRead * 4e6);
     expect(T.formRead).toBeLessThan(T.expanded);

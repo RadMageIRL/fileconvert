@@ -90,7 +90,11 @@ export const LIMITS = {
    * decoded stream, even a stream of zeros that holds no operator), and per byte of content that forms make a reader
    * read again (`expanded`: for each name a Do draws, its uses times the largest form it names; for text, forms that hold
    * text, and `formRead` for forms that only draw, whose operators text extraction reads and lets go). Each is half again
-   * above what the check needed, and was checked on further unseen files.
+   * above what the check needed, and was checked on further unseen files. The check of forms drawn inside forms (RC 3,
+   * local/eval-9) made the expansion follow forms inside forms level by level, and the soft masks, patterns and shadings
+   * forms use, and added `fontLoad` for text: per byte of font programs a form's resources write out in full, which
+   * text extraction reads again each time the form is drawn; half again above the most measured (0.24 in Chrome, 0.11
+   * in Firefox), and checked on further unseen files.
    */
   pdfEditMemory: {
     v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5, content: 31, pageContent: 32, raw: 4, expanded: 0 },
@@ -98,9 +102,9 @@ export const LIMITS = {
     other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5, content: 47, pageContent: 93, raw: 6, expanded: 1.25 },
   },
   pdfTextMemory: {
-    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 68 * 1024, stream: 3.5, font: 7, content: 50, pageContent: 162, raw: 4.25, expanded: 79.25, formRead: 3 },
-    gecko: { base: 256 * MB, byte: 7, parsed: 40, page: 120 * 1024, stream: 3.5, font: 0, content: 69, pageContent: 30, raw: 4, expanded: 34, formRead: 3 },
-    other: { base: 320 * MB, byte: 10.5, parsed: 48, page: 180 * 1024, stream: 4, font: 11, content: 104, pageContent: 243, raw: 6.5, expanded: 119, formRead: 4.5 },
+    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 68 * 1024, stream: 3.5, font: 7, content: 50, pageContent: 162, raw: 4.25, expanded: 79.25, formRead: 3, fontLoad: 0.35 },
+    gecko: { base: 256 * MB, byte: 7, parsed: 40, page: 120 * 1024, stream: 3.5, font: 0, content: 69, pageContent: 30, raw: 4, expanded: 34, formRead: 3, fontLoad: 0.16 },
+    other: { base: 320 * MB, byte: 10.5, parsed: 48, page: 180 * 1024, stream: 4, font: 11, content: 104, pageContent: 243, raw: 6.5, expanded: 119, formRead: 4.5, fontLoad: 0.525 },
   },
   /**
    * Drawing PDF pages as pictures with pdf.js in the render worker (src/core/pdfmemory.ts, estimateRender): PDF to JPG
@@ -118,13 +122,21 @@ export const LIMITS = {
    * once decoded (fitted before fonts; in Firefox it explained what fonts seemed to cost). They were checked again
    * on further unseen files. The check of large content streams added the same three one-page terms as for text
    * (`pageContent`, `raw`, `expanded`: a small form drawn 95,000 times took Chrome 2 GB to draw), half again above
-   * what it needed. WebKit as Playwright runs it cannot draw in a worker, so it was not
+   * what it needed. The check of forms drawn inside forms (RC 3) added `fontLoad`, per byte of font programs pdf.js
+   * loads again while drawing forms (the guard's formFontBytes: a font written out in full in a form's resources is
+   * loaded each time the form is drawn; 3,600 such loads took 5 GB in Chrome and Firefox alike), set at 2.5, above the
+   * 2.2 and 2.3 measured; and `maskDraw`, per pixel of the picture made for each soft mask set on the costliest page
+   * after the first (pdf.js draws each into page-sized canvases: 3,000 on one page took Chrome 12 GB at 72 dpi, 7.7 per
+   * pixel each, while Firefox needed nothing more on one page), set at 10 for Chrome, counted for the costliest page
+   * and the page before it (Chrome still held the masks of the page before). Both were checked on further unseen files;
+   * the last check found Firefox needing 2 for many pages of a few masks each, so its figure was then raised to 3 (that
+   * raise was not checked again). WebKit as Playwright runs it cannot draw in a worker, so it was not
    * measured: 'other' is 1.5 times the higher of Chrome and Firefox, part by part, and the base is higher.
    */
   pdfRenderMemory: {
-    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, jpx: 50, drawnImage: 2.75, canvas: 8, masked: 36, held: 1.5, font: 52, content: 26, pageContent: 154.25, raw: 4, expanded: 79.25 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, jpx: 22, drawnImage: 0.75, canvas: 8, masked: 36, held: 4, font: 0, content: 76, pageContent: 0, raw: 4, expanded: 34 },
-    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, jpx: 75, drawnImage: 4.25, canvas: 12, masked: 54, held: 6, font: 78, content: 114, pageContent: 231.5, raw: 6, expanded: 119 },
+    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, jpx: 50, drawnImage: 2.75, canvas: 8, masked: 36, held: 1.5, font: 52, content: 26, pageContent: 154.25, raw: 4, expanded: 79.25, fontLoad: 2.5, maskDraw: 10 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, jpx: 22, drawnImage: 0.75, canvas: 8, masked: 36, held: 4, font: 0, content: 76, pageContent: 0, raw: 4, expanded: 34, fontLoad: 2.5, maskDraw: 3 },
+    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, jpx: 75, drawnImage: 4.25, canvas: 12, masked: 54, held: 6, font: 78, content: 114, pageContent: 231.5, raw: 6, expanded: 119, fontLoad: 3.75, maskDraw: 15 },
   },
   /**
    * Images to PDF (src/engines/pdf/images.ts): pictures in one PDF, and what the PDF may hold in all. Pictures are read

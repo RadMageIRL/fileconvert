@@ -12,6 +12,15 @@ export type PdfValue =
 export interface PdfDict { [key: string]: PdfValue }
 
 const WS = new Set([0, 9, 10, 12, 13, 32]);
+/** Raw characters of a name kept: enough for 127 once #xx escapes are decoded. */
+const NAME_RAW = 384;
+
+/**
+ * A name as readers compare it: #xx escapes decoded, cut to 127 characters (the standard's limit). pdf.js reads longer
+ * names whole; names that share their first 127 characters are taken as one here, so a name is never missed.
+ */
+export const normName = (raw: string): string =>
+  (raw.includes('#') ? raw.replace(/#([0-9a-fA-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16))) : raw).slice(0, 127);
 const DELIM = new Set([40, 41, 60, 62, 91, 93, 123, 125, 47, 37]);
 
 export class PdfSyntaxError extends Error {}
@@ -31,10 +40,11 @@ export class ObjReader {
     }
   }
 
-  private word(): string {
+  /** The next word, of which the first `keep` characters are kept. */
+  private word(keep = 64): string {
     const start = this.pos;
     while (this.pos < this.end && !WS.has(this.b[this.pos]) && !DELIM.has(this.b[this.pos])) this.pos++;
-    return String.fromCharCode(...this.b.subarray(start, Math.min(this.pos, start + 64)));
+    return String.fromCharCode(...this.b.subarray(start, Math.min(this.pos, start + keep)));
   }
 
   /** Reads one value. Nested arrays and dictionaries deeper than `maxDepth` are refused. */
@@ -46,12 +56,12 @@ export class ObjReader {
     const c = b[this.pos];
     if (c === 47) { // name
       this.pos++;
-      const raw = this.word();
-      return { name: raw.replace(/#([0-9a-fA-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16))) };
+      return { name: normName(this.word(NAME_RAW)) };
     }
     if (c === 60 && b[this.pos + 1] === 60) { // dictionary
       this.pos += 2;
-      const d: PdfDict = {};
+      // No prototype: a key such as /__proto__ is a key like any other.
+      const d: PdfDict = Object.create(null) as PdfDict;
       for (;;) {
         this.skip();
         if (this.pos >= this.end) throw new PdfSyntaxError('unterminated dictionary');
@@ -93,12 +103,12 @@ export class ObjReader {
     if (w === 'false') return false;
     if (w === 'null') return null;
     if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(w)) {
-      // An integer followed by an integer and R is a reference.
-      if (/^\d+$/.test(w)) {
+      // Two whole numbers followed by R are a reference, as pdf.js reads them (+12 and 12.0 included).
+      if (Number.isInteger(Number(w)) && Number(w) >= 0) {
         const save = this.pos;
         this.skip();
         const g = this.word();
-        if (/^\d+$/.test(g)) {
+        if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(g) && Number.isInteger(Number(g))) {
           this.skip();
           if (this.b[this.pos] === 82 && (this.pos + 1 >= this.end || WS.has(this.b[this.pos + 1]) || DELIM.has(this.b[this.pos + 1]))) {
             this.pos++;
