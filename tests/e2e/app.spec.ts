@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { MD_SAMPLE, PYTHON, addFiles, convert, convertAllTo, cspViolations, download, downloadZip, expectDone, fx, openApp, row } from './helpers';
@@ -277,4 +278,29 @@ test('temporary files of a tab that closed without cleaning up are deleted when 
   expect(after).toHaveLength(1);
   expect(after).not.toContain(before[0]);
   await context.close();
+});
+
+test('text results in the batch ZIP are deflated and read back exactly by Python, as each one downloads alone', async ({ page }, info) => {
+  await openApp(page);
+  // Large, repetitive JSON: text the ZIP deflates (src/core/zipdeflate.ts).
+  const rows = Array.from({ length: 4000 }, (_, i) => ({ id: i, name: `item ${i % 37}`, price: (i * 1.25).toFixed(2), note: 'the same words again and again' }));
+  const files = [0, 1, 2].map(k => ({ name: `list${k}.json`, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(rows.slice(k * 100))) }));
+  await page.locator('#picker').setInputFiles(files);
+  await expect(page.locator('li.job')).toHaveCount(3);
+  await convertAllTo(page, 'CSV');
+  await expect(page.locator('li.job.done')).toHaveCount(3);
+  const zip = await downloadZip(page, info);
+  const singles: Record<string, string> = {};
+  for (const k of [0, 1, 2]) singles[`list${k}.csv`] = readFileSync((await download(page, `list${k}.json`, info)).path, 'utf8');
+  const py = execFileSync(PYTHON, ['-I', '-c', [
+    'import json, sys, zipfile',
+    'z = zipfile.ZipFile(sys.argv[1])',
+    'print(json.dumps({i.filename: [i.compress_type, z.read(i).decode("utf-8")] for i in z.infolist()}))',
+  ].join('\n'), zip.path], { encoding: 'utf8', maxBuffer: 64 << 20 });
+  const read = JSON.parse(py) as Record<string, [number, string]>;
+  expect(Object.keys(read).sort()).toEqual(['list0.csv', 'list1.csv', 'list2.csv']);
+  for (const [name, [method, text]] of Object.entries(read)) {
+    expect(method, name).toBe(8);
+    expect(text, name).toBe(singles[name]);
+  }
 });

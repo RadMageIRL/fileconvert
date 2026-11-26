@@ -1,8 +1,9 @@
 // Builds the batch ZIP. Already-compressed results (pictures, audio, video, PDF, XLSX) are stored as they
-// are; text results are deflated. The archive streams into a temporary private file when the browser has
+// are; text results are deflated by the browser's own zlib (src/core/zipdeflate.ts). The archive streams into a temporary private file when the browser has
 // one, so a large batch does not have to fit in memory twice.
 
-import { Zip, ZipDeflate, ZipPassThrough } from 'fflate';
+import { Zip, ZipPassThrough } from 'fflate';
+import { NativeDeflate } from '../core/zipdeflate';
 import { LIMITS } from '../core/limits';
 import { serve } from '../core/rpc';
 import { createTempFile } from '../core/tempstore';
@@ -60,7 +61,7 @@ serve({
       sink.write(chunk);
     });
     for (const f of p.files) {
-      const entry = TEXT.test(f.name) ? new ZipDeflate(f.name, { level: 6 }) : new ZipPassThrough(f.name);
+      const entry = TEXT.test(f.name) ? new NativeDeflate(f.name) : new ZipPassThrough(f.name);
       zip.add(entry);
       const reader = f.blob.stream().getReader();
       for (;;) {
@@ -72,6 +73,9 @@ serve({
         if (failure) throw failure;
       }
       entry.push(new Uint8Array(0), true);
+      // The next entry starts once this one's compressed data is all in the ZIP.
+      if (entry instanceof NativeDeflate) await entry.done();
+      if (failure) throw failure;
       done++;
     }
     zip.end();
