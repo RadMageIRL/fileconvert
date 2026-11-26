@@ -258,9 +258,13 @@ describe('removing PDF metadata', () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
     const id = /\/ID \[ <([0-9A-F]{32})> <([0-9A-F]{32})> \]/.exec(latin1(a))!;
     expect(id[1]).toBe(id[2]);
-    // SHA-256 of the file with the placeholder in place of the identifier, its first 16 bytes.
-    const placeholder = latin1(a).replaceAll(id[1], '0'.repeat(32));
-    const digest = Buffer.from(await crypto.subtle.digest('SHA-256', Buffer.from(placeholder, 'latin1'))).subarray(0, 16).toString('hex').toUpperCase();
+    // SHA-256 of the file with the placeholder in place of the identifier, its first 16 bytes. The placeholder is put
+    // back byte for byte: Node decodes 'latin1' as windows-1252 since 24.x, so a text round trip changes bytes 0x80 to
+    // 0x9F (the runner's Node 24.22.3 does; 24.11.1 did not).
+    const placeholder = Buffer.from(a);
+    const idBytes = Buffer.from(id[1], 'ascii'), zeros = Buffer.from('0'.repeat(32), 'ascii');
+    for (let i = placeholder.indexOf(idBytes); i >= 0; i = placeholder.indexOf(idBytes, i + idBytes.length)) zeros.copy(placeholder, i);
+    const digest = Buffer.from(await crypto.subtle.digest('SHA-256', placeholder)).subarray(0, 16).toString('hex').toUpperCase();
     expect(id[1]).toBe(digest);
     expect(latin1(a)).not.toContain('4D41524B2D4F4C442D49442D30303031');
   });
