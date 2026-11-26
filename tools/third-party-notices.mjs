@@ -71,6 +71,7 @@ const VENDORED = {
     ['qcms (color management, qcms_bg.wasm)', 'wasm/LICENSE_QCMS'],
     ['pdf.js qcms build', 'wasm/LICENSE_PDFJS_QCMS'],
     ['the CMYK color profile CGATS001Compat-v2-micro.icc, in iccs', 'iccs/LICENSE'],
+    ['the Adobe CMap files (character maps for Chinese, Japanese and Korean text in PDFs), in cmaps', 'cmaps/LICENSE'],
   ],
   '@jsquash/jpeg': [
     ['the MozJPEG (libjpeg-turbo) license roll-up, for mozjpeg_enc.wasm and mozjpeg_dec.wasm', 'codec/LICENSE.codec.md'],
