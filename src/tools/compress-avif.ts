@@ -17,6 +17,7 @@ export const tool: ToolDefinition = {
   minInputs: 1,
   maxInputs: LIMITS.imageOptFiles,
   ordered: false,
+  compare: true,
   options: [
     { kind: 'select', key: 'mode', label: 'How', value: 'lossy', choices: MODES,
       hint: 'AVIF encoding is slow: a large picture can take a minute, and to a file size tries several qualities.' },
@@ -39,11 +40,11 @@ export const tool: ToolDefinition = {
       const big = inputs.find(i => i.picture && i.picture.width * i.picture.height > AVIF_TARGET_PIXELS);
       if (big) return `${big.name} is more than ${AVIF_TARGET_PIXELS / 1e6} megapixels; to a file size works up to that, since each try is a full AVIF encode. Choose a quality instead.`;
     }
-    return memoryCheck(inputs, () => ({ op: 'avif' }), values.measure === true && values.mode !== 'lossless');
+    return memoryCheck(inputs, () => ({ op: values.mode === 'lossless' ? 'avif-lossless' : 'avif' }), values.measure === true && values.mode !== 'lossless');
   },
   async run(inputs, values, ctx) {
     const mode = values.mode === 'target' || values.mode === 'lossless' ? values.mode : 'lossy';
     const options = { mode, quality: Math.max(1, Math.min(100, Math.round(Number(values.quality) || 60))), targetBytes: targetBytes(values) ?? undefined, removeMetadata: values.metadata === 'remove', measure: values.measure === true && mode !== 'lossless' } as const;
-    return runOptimize(inputs, ctx, () => ({ op: 'avif', task: { op: 'avif', options } }));
+    return runOptimize(inputs, ctx, () => ({ op: mode === 'lossless' ? 'avif-lossless' : 'avif', task: { op: 'avif', options } }));
   },
 };

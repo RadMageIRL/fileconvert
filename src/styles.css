@@ -376,6 +376,10 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-file { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 /* Above the phone rule for .outputs buttons: a result's button is never wider than its card. */
 .ws-out .ws-file > button { max-width: 100%; }
+.ws-compare { margin: 4px 0 0; display: grid; gap: 6px; width: 100%; }
+.cmp-frame { position: relative; display: grid; max-width: 100%; background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0 / 16px 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cmp-frame img { grid-area: 1 / 1; display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; }
+.ws-compare input[type=range] { width: 100%; }
 .ws-out .job-notes { overflow-wrap: anywhere; }
 .ws-out .outputs:has(.ws-file) { flex-direction: column; width: 100%; }
 html[data-tool] #drop, html[data-tool] #work { display: none; }

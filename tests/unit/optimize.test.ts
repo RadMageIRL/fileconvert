@@ -2,14 +2,17 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { crc32 } from '../../src/core/crc32';
 import { estimateOptimize } from '../../src/core/imagememory';
+import { LIMITS } from '../../src/core/limits';
+import type { ToolInput } from '../../src/app/tools';
+import { memoryCheck } from '../../src/tools/optimize-common';
 import { readPng } from '../../src/engines/pdf/imageinfo';
 import { decodePng } from '../../src/engines/pdf/pngdecode';
 import { addIcc, avifFacts, patchNclx } from '../../src/engines/image/avifopt';
-import { wasmFiles } from '../../src/engines/image/codecs';
+import { avifDecode, mozjpegEncode, wasmFiles } from '../../src/engines/image/codecs';
 import { JpegCoefError, optimalTable, readJpegCoefficients, sameCoefficients, writeJpegCoefficients } from '../../src/engines/image/jpegcoef';
 import { compressJpeg, jpegFacts, optimizeJpegLossless, shiftMpf, uprightExif } from '../../src/engines/image/jpegopt';
 import { exifFacts } from '../../src/engines/image/metadata';
-import { resizeTarget } from '../../src/engines/image/optimize';
+import { optimizeImage, resizeTarget } from '../../src/engines/image/optimize';
 import { compressPng, pngFingerprint, readPngFile } from '../../src/engines/image/pngopt';
 import { rgbaRows, writePng } from '../../src/engines/image/pngwrite';
 import { orient, resample } from '../../src/engines/image/resample';
@@ -27,6 +30,7 @@ beforeAll(() => {
   wasmFiles.oxipng = wasm('@jsquash/oxipng/codec/pkg/squoosh_oxipng_bg.wasm');
   wasmFiles.mozjpegDec = wasm('@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm');
   wasmFiles.mozjpegEnc = wasm('@jsquash/jpeg/codec/enc/mozjpeg_enc.wasm');
+  wasmFiles.avifDec = wasm('@jsquash/avif/codec/dec/avif_dec.wasm');
 });
 
 describe('lossless JPEG optimization (coefficients)', () => {
@@ -62,6 +66,18 @@ describe('lossless JPEG optimization (coefficients)', () => {
     expect(() => readJpegCoefficients(twelve)).toThrow('This JPEG has 12-bit samples; lossless optimization supports 8-bit JPEG only.');
   });
 
+  test('a DC value that adds up past what 8-bit JPEG holds, and a scan cut short before its end marker, are refused', () => {
+    // One component: blocks follow each other in scan order, so each difference stays small while the sum passes 2047.
+    const p = readJpegCoefficients(O('gray.jpg'));
+    const c = p.frame.comps[0];
+    c.coef[0] = 2000; c.coef[64] = 2547; c.coef[128] = 1000;
+    expect(() => readJpegCoefficients(writeJpegCoefficients(p.frame, [], false))).toThrow('This JPEG holds values outside what 8-bit JPEG allows; it may be damaged.');
+    const b = O('photo.jpg');
+    const sos = b.lastIndexOf(0xda, b.length - 3) - 1;
+    const cut = Uint8Array.from([...b.subarray(0, sos + Math.floor((b.length - sos) / 2)), 0xff, 0xd9]);
+    expect(() => readJpegCoefficients(cut)).toThrow('This JPEG is damaged or cut short, so it cannot be optimized without loss.');
+  });
+
   test('optimal Huffman tables are complete prefix codes of at most 16 bits, one code point reserved', () => {
     const freq = new Int32Array(256);
     for (let i = 0; i < 256; i++) freq[i] = i % 7 === 0 ? 1 : Math.floor(1e6 / (i + 1));
@@ -73,6 +89,24 @@ describe('lossless JPEG optimization (coefficients)', () => {
     expect(kraft + 2 ** -16).toBeLessThanOrEqual(1);
     // A table no symbol uses still has one code.
     expect(optimalTable(new Int32Array(256)).values.length).toBe(1);
+  });
+
+  test('frequencies that would make codes up to 30 bits long (powers of two) are folded into 16, every symbol kept', () => {
+    const freq = new Int32Array(256);
+    for (let i = 0; i < 30; i++) freq[i] = 2 ** i;
+    const t = optimalTable(freq);
+    expect(t.counts.length).toBe(16);
+    expect([...t.values].sort((x, y) => x - y)).toEqual([...Array(30).keys()]);
+    let kraft = 0;
+    t.counts.forEach((n, i) => { kraft += n / 2 ** (i + 1); });
+    expect(kraft + 2 ** -16).toBeLessThanOrEqual(1);
+    // The most frequent symbol still has the shortest code, the least frequent the longest.
+    const len: number[] = [];
+    let at = 0;
+    t.counts.forEach((n, i) => { for (let k = 0; k < n; k++) len[t.values[at++]] = i + 1; });
+    expect(len[29]).toBe(Math.min(...len));
+    expect(len[0]).toBe(16);
+    expect(len.every(n => n >= 1 && n <= 16)).toBe(true);
   });
 
   test('the whole tool: lossless, every segment kept, the MPF index still points at the second picture', async () => {
@@ -131,6 +165,14 @@ describe('MozJPEG compression', () => {
     expect(same.bytes).toBe(b);
   });
 
+  test('a quality that would not make the file smaller gives back the original, unchanged', async () => {
+    const b = O('photo.jpg');
+    const r = await compressJpeg(b, { quality: 100, progressive: true, removeMetadata: false, fit: null, measure: false }, env, noop);
+    expect(r.original).toBe(true);
+    expect(r.bytes).toBe(b);
+    expect(r.notes).toEqual(['At quality 100 the file would not be smaller, so it was kept as it was.']);
+  });
+
   test('the orientation and the other EXIF details are carried, the pixels not turned; the fit is in the upright orientation', async () => {
     const b = O('exif-icc.jpg');
     const r = await compressJpeg(b, { quality: 80, progressive: true, removeMetadata: false, fit: { width: 60, height: 200 }, measure: false }, env, noop);
@@ -161,6 +203,31 @@ describe('Compress PNG', () => {
     rgba[4 * 1234 + 1] ^= 1;
     const changed = await writePng(rgbaRows(rgba, L.info.width, L.info.height));
     expect(pngFingerprint(changed, readPngFile(changed)).join()).not.toBe(fp);
+  });
+
+  test('a change of transparency alone changes the fingerprint', async () => {
+    // More colors than a palette holds, so both are written as RGBA (color type 6), and as gray with alpha (type 4).
+    const w = 40, h = 30;
+    const d = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) { d[4 * i] = i % 256; d[4 * i + 1] = (i >> 2) % 256; d[4 * i + 2] = (i * 7) % 256; d[4 * i + 3] = 100 + (i % 100); }
+    const a = await writePng(rgbaRows(d, w, h));
+    d[4 * 77 + 3] ^= 1;
+    const b = await writePng(rgbaRows(d, w, h));
+    expect([a[25], b[25]]).toEqual([6, 6]);
+    expect(pngFingerprint(a, readPngFile(a))).not.toEqual(pngFingerprint(b, readPngFile(b)));
+    for (let i = 0; i < w * h; i++) d[4 * i + 1] = d[4 * i + 2] = d[4 * i];
+    const ga = await writePng(rgbaRows(d, w, h));
+    d[4 * 77 + 3] ^= 1;
+    const gb = await writePng(rgbaRows(d, w, h));
+    expect([ga[25], gb[25]]).toEqual([4, 4]);
+    expect(pngFingerprint(ga, readPngFile(ga))).not.toEqual(pngFingerprint(gb, readPngFile(gb)));
+  });
+
+  test('a PNG compressed already is given back unchanged when nothing smaller comes out', async () => {
+    const once = await compressPng(O('rgb.png'), { level: 2, removeMetadata: false, keep16: true }, noop);
+    const twice = await compressPng(once.bytes, { level: 2, removeMetadata: false, keep16: true }, noop);
+    expect(twice.original).toBe(true);
+    expect(twice.bytes).toBe(once.bytes);
   });
 
   test.each(['rgb.png', 'rgba.png', 'palette.png', 'rgb16-8.png', 'rgb16.png', 'gray-rgb-icc.png', 'meta.png', 'interlaced.png', 'animated.png'])('%s: the same picture, smaller or the same', async f => {
@@ -197,6 +264,17 @@ describe('the PNG writer, resampling and SSIM', () => {
         expect(c).toBe(d[4 * i]);
       }
     }
+  });
+
+  test('a reduction averages all it covers: a one-pixel checkerboard made a third the size is an even gray', () => {
+    // At a third, each result pixel's center falls on a source pixel; a window not widened for the reduction would
+    // take that pixel alone, giving black and white again.
+    const w = 60, h = 60;
+    const d = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = (x + y) % 2 ? 255 : 0; d.set([v, v, v, 255], 4 * (y * w + x)); }
+    const r = resample({ data: d, width: w, height: h }, 20, 20);
+    // Away from the edges, where the window is cut.
+    for (let y = 3; y < 17; y++) for (let x = 3; x < 17; x++) expect(Math.abs(r.data[4 * (y * 20 + x)] - 127.5), `${x},${y}`).toBeLessThan(12);
   });
 
   test('a flat picture stays flat; transparent edges do not darken; 16 bits stay 16 bits', () => {
@@ -282,7 +360,7 @@ describe('WebP and AVIF boxes', () => {
     expect(avifFacts(O('animated.avif')).animated).toBe(true);
   });
 
-  test('an ICC profile added to an AVIF: the boxes still read, the profile is there, and the item data still lines up', () => {
+  test('an ICC profile added to an AVIF: the boxes still read, the profile is there, and the item data still lines up', async () => {
     const b = O('photo.avif');
     const icc = avifFacts(O('icc.avif')).icc!;
     const out = addIcc(b, icc)!;
@@ -293,6 +371,9 @@ describe('WebP and AVIF boxes', () => {
     // The coded picture (the mdat payload) is the same bytes, moved.
     const mdat = (x: Uint8Array) => x.subarray(findAscii(x, 'mdat') + 4);
     expect(Buffer.compare(Buffer.from(mdat(out)), Buffer.from(mdat(b)))).toBe(0);
+    // libavif finds the picture where the moved offsets say.
+    const pic = await avifDecode(out, 8);
+    expect([pic.width, pic.height]).toEqual([128, 96]);
     const p = out.slice();
     expect(patchNclx(p, 12, 13)).toBe(true);
     expect(avifFacts(p).nclx).toMatchObject({ primaries: 12, transfer: 13 });
@@ -302,13 +383,76 @@ describe('WebP and AVIF boxes', () => {
 describe('memory estimates', () => {
   test('grow with the picture, and the figures for unknown browsers are the highest', () => {
     const w = { bytes: 5e6, width: 4000, height: 3000, raw: 36e6, bits: 8, coefficients: 1.5 };
-    for (const op of ['png', 'jpeg-lossless', 'jpeg', 'webp', 'webp-lossless', 'avif', 'resize'] as const) {
+    for (const op of ['png', 'jpeg-lossless', 'jpeg', 'webp', 'webp-lossless', 'avif', 'avif-lossless', 'resize'] as const) {
       const small = estimateOptimize(op, { ...w, width: 1000, height: 750, raw: 2.25e6 }, { engine: 'v8' }).total;
       expect(estimateOptimize(op, w, { engine: 'v8' }).total, op).toBeGreaterThan(small);
       expect(estimateOptimize(op, w, { engine: 'other' }).total, op).toBeGreaterThanOrEqual(estimateOptimize(op, w, { engine: 'gecko' }).total);
       expect(estimateOptimize(op, w, { engine: 'other' }).total, op).toBeGreaterThanOrEqual(estimateOptimize(op, w, { engine: 'v8' }).total);
     }
     expect(estimateOptimize('jpeg', w, { engine: 'v8', measure: true }).total).toBeGreaterThan(estimateOptimize('jpeg', w, { engine: 'v8' }).total);
+    expect(estimateOptimize('avif', { ...w, bits: 10 }, { engine: 'v8' }).total).toBeGreaterThan(estimateOptimize('avif', w, { engine: 'v8' }).total);
+  });
+
+  test('a later picture of a batch adds the results held and what each picture before it may leave, per file and pixel', () => {
+    const w = { bytes: 5e6, width: 4000, height: 3000, raw: 36e6, bits: 8, coefficients: 1.5 };
+    for (const engine of ['v8', 'gecko', 'other'] as const) {
+      const F = LIMITS.imageOptMemory[engine];
+      const alone = estimateOptimize('jpeg', w, { engine }).total;
+      const later = estimateOptimize('jpeg', w, { engine, held: 1e7, before: { files: 20, pixels: 240e6 } }).total;
+      expect(Math.abs(later - alone - (F.held * 1e7 + F.perFile * 20 + F.perPixel * 240e6)), engine).toBeLessThanOrEqual(1);
+      expect(F.perFile, engine).toBeGreaterThan(0);
+      expect(F.perPixel, engine).toBeGreaterThan(0);
+    }
+  });
+
+  test('Resize images counts the encoder of the format it writes, and the largest when that is not known', () => {
+    const w = { bytes: 5e6, width: 4000, height: 3000, raw: 36e6, bits: 8, coefficients: 1.5 };
+    const out = 1920 * 1440;
+    for (const engine of ['v8', 'gecko', 'other'] as const) {
+      const F = LIMITS.imageOptMemory[engine];
+      const to = (t?: 'jpg' | 'png' | 'webp' | 'avif' | 'gif') => estimateOptimize('resize', w, { engine, outPixels: out, to: t }).total;
+      expect(Math.abs(to('jpg') - to('png') - (F.mozjpeg - F.encode) * out), engine).toBeLessThanOrEqual(1);
+      expect(Math.abs(to('avif') - to('webp') - (F.avif - F.webp) * out), engine).toBeLessThanOrEqual(1);
+      expect(to('gif'), engine).toBe(to('png'));
+      for (const t of ['jpg', 'png', 'webp', 'avif'] as const) expect(to(), `${engine} ${t}`).toBeGreaterThanOrEqual(to(t));
+    }
+  });
+});
+
+describe('the check before a run', () => {
+  test('a batch too large together is refused at the picture where it stops fitting, saying how many fit at a time', () => {
+    // In Node the allowance is the 2 GB assumed for a computer, with the figures for unknown browsers.
+    const picture = { bytes: 5e6, width: 4000, height: 3000, raw: 48e6, bits: 8, coefficients: 1.5 };
+    const input = (i: number): ToolInput => ({ id: i, name: `photo-${i + 1}.jpg`, format: 'jpg', file: new File([new Uint8Array(16)], `photo-${i + 1}.jpg`), picture });
+    const inputs = Array.from({ length: 400 }, (_, i) => input(i));
+    const why = memoryCheck(inputs, () => ({ op: 'jpeg' }), false)!;
+    const m = /^After the ([\d,]+) pictures before it, photo-(\d+)\.jpg needs about [\d.]+ GB of memory, .* Run at most \1 at a time\./.exec(why);
+    expect(m, why).not.toBeNull();
+    const k = Number(m![1].replace(/,/g, ''));
+    expect(Number(m![2])).toBe(k + 1);
+    expect(memoryCheck(inputs.slice(0, k), () => ({ op: 'jpeg' }), false)).toBeNull();
+    // A picture too large on its own is named, with the advice to take it out.
+    const huge = { ...input(0), picture: { ...picture, width: 40000, height: 2500 } };
+    expect(memoryCheck([input(1), huge], () => ({ op: 'jpeg' }), false)).toMatch(/^photo-1\.jpg needs about .* Take it out, or try a smaller picture\./);
+  });
+});
+
+describe('workers', () => {
+  test('a worker is let go after a picture of 2 megapixels or more, so the next starts with nothing; kept after a small one', async () => {
+    const big = await mozjpegEncode(new Uint8ClampedArray(1500 * 1400 * 4).fill(128), 1500, 1400, { quality: 50, progressive: false, subsample: 2, gray: false });
+    const task = { op: 'jpeg-lossless', options: { progressive: true, removeMetadata: false } } as const;
+    expect((await optimizeImage(big, 'jpg', task, noop)).retire).toBe(true);
+    expect((await optimizeImage(O('photo.jpg'), 'jpg', task, noop)).retire).toBe(false);
+  });
+
+  test('Compress PNG lets its worker go from half a megapixel (oxipng keeps its memory); small pictures keep it', async () => {
+    const w = 800, h = 700;
+    const d = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) d.set([i % 251, (i >> 3) % 256, 90, 255], 4 * i);
+    const png = await writePng(rgbaRows(d, w, h));
+    const task = { op: 'png', options: { level: 1, removeMetadata: false, keep16: true } } as const;
+    expect((await optimizeImage(png, 'png', task, noop)).retire).toBe(true);
+    expect((await optimizeImage(O('rgb.png'), 'png', task, noop)).retire).toBe(false);
   });
 });
 

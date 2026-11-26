@@ -132,16 +132,23 @@ export const LIMITS = {
   /**
    * The image optimization tools (src/core/imagememory.ts, estimateOptimize), for each engine: a base for the worker and
    * its codecs; per byte of the file (read, copied into the codec, the result); for Compress PNG per byte of decoded
-   * samples (oxipng keeps the picture and its filtered trials, about nine times its samples); for lossless JPEG per DCT
-   * coefficient (the coefficients read, and read again from the result to check it); for MozJPEG, libwebp and libavif per
-   * pixel (the decoded picture, a copy, and the encoder's working memory; AVIF twice that at 10 and 12 bits); per pixel for
-   * the similarity measure (the result decoded again); for Resize images per pixel decoded and per pixel of the result;
-   * and per byte of the results the page holds.
+   * samples (oxipng keeps the picture and its filtered trials); for lossless JPEG per DCT coefficient (the coefficients
+   * read, and read again from the result to check it); for MozJPEG, libwebp and libavif per pixel, lossy and lossless
+   * apart (the decoded picture, a copy, and the encoder's working memory; AVIF twice that at 10 and 12 bits); per pixel
+   * for the similarity measure (the result decoded again); for Resize images per pixel decoded, then its result
+   * format's encoder per pixel of the result (PNG, GIF and BMP: `encode`); per byte of the results the page holds; and
+   * for each picture before in a batch, per picture and per pixel of it (memory the browser frees late).
+   *
+   * Fitted to peaks measured in Chrome (v8), Firefox (gecko) and WebKit as Playwright runs it on Windows: 36 single-file
+   * workloads in three passes (one in WebKit), 16 of them run three more times, and 12 batches of up to 150 photos
+   * (local/eval-7/mem), each figure the smallest that puts every estimate at least 10% above the highest peak seen (the
+   * same work in Chrome sometimes peaks about half again higher). 'other' (Safari and browsers not told apart) is 1.5
+   * times the higher of v8 and gecko for each part, and never below what WebKit needed.
    */
   imageOptMemory: {
-    v8: { base: 96 * MB, byte: 4, png: 12, coefficient: 4.5, mozjpeg: 32, webp: 24, webpLossless: 48, avif: 48, measure: 10, decode: 14, encode: 32, held: 1.25 },
-    gecko: { base: 160 * MB, byte: 4, png: 12, coefficient: 4.5, mozjpeg: 32, webp: 24, webpLossless: 48, avif: 48, measure: 10, decode: 14, encode: 32, held: 1.5 },
-    other: { base: 240 * MB, byte: 6, png: 18, coefficient: 7, mozjpeg: 48, webp: 36, webpLossless: 72, avif: 72, measure: 15, decode: 21, encode: 48, held: 2 },
+    v8: { base: 96 * MB, byte: 4, png: 27, coefficient: 9.5, mozjpeg: 41, webp: 21, webpLossless: 43, avif: 90, avifLossless: 139, measure: 3, decode: 8.25, encode: 30, held: 1, perFile: 1.5 * MB, perPixel: 0.08 },
+    gecko: { base: 112 * MB, byte: 4, png: 31, coefficient: 9, mozjpeg: 26, webp: 18, webpLossless: 42, avif: 84, avifLossless: 130, measure: 5, decode: 10.5, encode: 34, held: 1, perFile: 2 * MB, perPixel: 0.22 },
+    other: { base: 176 * MB, byte: 6, png: 64, coefficient: 14.25, mozjpeg: 62, webp: 32, webpLossless: 65, avif: 135, avifLossless: 209, measure: 18.5, decode: 15.75, encode: 51, held: 1.5, perFile: 10.5 * MB, perPixel: 0.33 },
   },
   /** Image optimization: files at once in one tool. */
   imageOptFiles: 500,

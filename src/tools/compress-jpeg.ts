@@ -38,6 +38,7 @@ export const tool: ToolDefinition = {
   minInputs: 1,
   maxInputs: LIMITS.imageOptFiles,
   ordered: false,
+  compare: true,
   options: [
     { kind: 'select', key: 'mode', label: 'How', value: 'quality', choices: MODES,
       hint: 'Lossless makes files a few percent smaller with no change at all. The others compress again with MozJPEG, which is much smaller and loses some detail.' },

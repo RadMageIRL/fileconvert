@@ -287,6 +287,7 @@ export async function compressPng(b: Uint8Array, o: PngOptions, progress: (stage
   if (out.length >= input.length) { out = input; res = inFile; }
   if (why && out !== b) notes.push(why);
   const original = out === b;
+  if (original) notes.push('No smaller way of storing these pixels was found.');
   const changes: string[] = [];
   if (!original) {
     if (stored(src.layout) !== stored(res.layout)) changes.push(`Stored as ${stored(res.layout)}, was ${stored(src.layout)}; no pixel changed.`);

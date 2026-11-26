@@ -261,6 +261,7 @@ export async function optimizeJpegLossless(b: Uint8Array, o: { progressive: bool
     changes.push(o.progressive ? 'Written as a progressive JPEG (it appears gradually while it loads) with Huffman tables made for this picture.' : 'Written as a baseline JPEG with Huffman tables made for this picture.');
     if (parsed.restarts) changes.push('Restart markers removed (they only help a damaged file recover).');
   }
+  if (out === b) notes.push('Without loss, the file would not be smaller.');
   return { bytes: out, original: out === b, width: frame.width, height: frame.height, progressive: smaller ? o.progressive : frame.progressive, changes, removed: s.removed, kept: s.kept, notes };
 }
 

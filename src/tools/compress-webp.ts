@@ -22,6 +22,7 @@ export const tool: ToolDefinition = {
   minInputs: 1,
   maxInputs: LIMITS.imageOptFiles,
   ordered: false,
+  compare: true,
   options: [
     { kind: 'select', key: 'mode', label: 'How', value: 'auto', choices: MODES,
       hint: 'Lossy WebP is much smaller and loses some detail; lossless keeps every pixel and suits screenshots, drawings and text.' },

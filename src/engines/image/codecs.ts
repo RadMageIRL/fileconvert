@@ -44,6 +44,22 @@ export async function oxipngMemory(): Promise<number> {
 /** Past this much codec memory the worker is retired after its task, so a later task starts small. */
 export const RETIRE_BYTES = 256 * 1024 * 1024;
 
+/**
+ * From this many pixels the worker is retired after its task whatever its codecs hold. A picture's decoded pixels and
+ * the buffers made from them are garbage once its result is sent, but the collector frees them late: measured in
+ * Chrome, the next 12-megapixel JPEG of a batch started with most of the last one's memory still taken, so a batch rose
+ * to half again a single file's peak. A new worker starts with nothing, for tens of milliseconds against seconds of
+ * work; small pictures keep their worker, where that cost would count and the leftovers are small.
+ */
+export const RETIRE_PIXELS = 2_000_000;
+
+/**
+ * Compress PNG retires its worker from fewer pixels: oxipng's memory grows within a worker and is not given back, and
+ * measured in WebKit a batch of ten 2-megapixel PNGs on one worker rose by about 47 MB with each. oxipng takes long
+ * enough on such a picture that a new worker costs little; small pictures (icons) keep theirs.
+ */
+export const RETIRE_PIXELS_PNG = 500_000;
+
 // ------------------------------------------------------------------ MozJPEG
 
 interface MozDecoder { decode(data: Uint8Array, preserveOrientation: boolean): { data: Uint8ClampedArray; width: number; height: number } | null }
@@ -205,8 +221,9 @@ export async function avifEncode(data: Uint8Array | Uint8ClampedArray | Uint16Ar
 const heap = async (p: Promise<{ HEAP8?: Int8Array }> | null) => (p ? (await p.catch(() => null))?.HEAP8?.buffer.byteLength ?? 0 : 0);
 
 /** Lets the Emscripten codecs that hold more than `limit` bytes go (the next use loads them again), so a large picture's
- *  memory does not stay with the worker. */
-export async function releaseCodecs(limit = 64 * 1024 * 1024): Promise<void> {
+ *  memory does not stay with the worker. Below it a codec is kept and its memory used again by the next file of a batch:
+ *  made again for every file, each left its memory to the garbage collector, and a batch rose with every file. */
+export async function releaseCodecs(limit = RETIRE_BYTES): Promise<void> {
   if (await heap(mozDec) > limit) mozDec = null;
   if (await heap(mozEnc) > limit) mozEnc = null;
   if (await heap(webpDec) > limit) webpDec = null;

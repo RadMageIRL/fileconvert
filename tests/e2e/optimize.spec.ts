@@ -160,11 +160,23 @@ test('Compress JPG at a quality and to a file size: smaller, similar (SSIM), ori
   const shown = Number(/SSIM (\d\.\d{4})/.exec(byName(outs, 'photo.jpg').details.join(' '))![1]);
   expect(Math.abs(shown - get('photo.jpg').ssim!)).toBeLessThan(0.002);
   expect(get('exif-icc.jpg').orientation).toBe(6);
+  // Its size as it is shown, as the file list gives it: stored 320 x 240, turned a quarter by its orientation.
+  expect(byName(outs, 'exif-icc.jpg').details[0]).toBe('240 x 320 pixels');
   expect(get('exif-icc.jpg').sameIcc).toBe(true);
   expect(get('exif-icc.jpg').markers).toEqual(['MARK-COMMENT-JPEG', 'MARK-MAKE-JPEG', 'MARK-XMP-JPEG']);
   expect(get('cmyk.jpg').mode).toBe('RGB');
   expect(byName(outs, 'cmyk.jpg').details.join(' ')).toContain('CMYK converted to RGB (sRGB) by the browser');
   expect(get('mpf.jpg').pictures).toEqual([[320, 240], [80, 60]]);
+  // The result beside its original: both pictures shown, the slider moves the line, and closing lets both go.
+  const card = ws(page).locator('.ws-file').filter({ hasText: 'photo.jpg' });
+  await card.getByRole('button', { name: 'Compare with the original' }).click();
+  const imgs = card.locator('.ws-compare img');
+  await expect(imgs).toHaveCount(2);
+  await expect.poll(() => imgs.evaluateAll(list => list.map(i => (i as HTMLImageElement).naturalWidth))).toEqual([320, 320]);
+  await card.locator('[data-key="cmp-slider"]').fill('20');
+  await expect(card.locator('.cmp-original')).toHaveCSS('clip-path', 'inset(0px 80% 0px 0px)');
+  await card.getByRole('button', { name: 'Close the comparison' }).click();
+  await expect(card.locator('.ws-compare')).toHaveCount(0);
   // Metadata removed: EXIF details, XMP and the comment go; the orientation and the profile stay.
   await ws(page).locator('[data-key="opt-metadata"]').selectOption('remove');
   const outs2 = await run(page);
@@ -208,6 +220,11 @@ test('Compress WebP and AVIF: lossless kept lossless, transparency, profiles, bi
   expect(get('alpha.webp').mode).toBe('RGBA');
   expect(get('meta.webp').sameIcc).toBe(true);
   expect(get('meta.webp').markers).toEqual(['MARK-MAKE-WEBP']);
+  // Lossless with transparency: every pixel kept, the colors under the transparent ones included (libwebp's exact mode).
+  for (const n of ['lossy.webp', 'lossless.webp', 'meta.webp', 'animated.webp']) await ws(page).getByRole('button', { name: `Remove ${n}` }).click();
+  await ws(page).locator('[data-key="opt-mode"]').selectOption('lossless');
+  const ll = await run(page, 'Compress');
+  expect(byName(ll, 'alpha.webp').details.join(' ')).toMatch(/Lossless: every pixel is exactly as it was \(checked\)\.|Kept as it was/);
   await openTool(page, 'compress-avif', 'Compress AVIF');
   await add(page, [O('photo.avif'), O('alpha.avif'), O('icc.avif'), O('rotated.avif'), O('exif.avif'), O('hdr10.avif'), O('animated.avif')]);
   await expect(ws(page).locator('.ws-item').filter({ hasText: 'animated.avif' }).locator('.job-error')).toHaveText('This AVIF is an animation (an image sequence), which this tool does not change.');
@@ -221,13 +238,13 @@ test('Compress WebP and AVIF: lossless kept lossless, transparency, profiles, bi
   // Turned in the pixels: the stored 128 x 64 picture with a quarter turn becomes 64 x 128, with no rotation box.
   expect(ga('rotated.avif').size).toEqual([64, 128]);
   expect(ga('rotated.avif').avif!.irot).toBe(false);
+  expect(byName(a, 'rotated.avif').details[0]).toBe('64 x 128 pixels');
   expect(byName(a, 'exif.avif').details).toContain('Its EXIF metadata is not written into the result (this tool does not carry AVIF metadata).');
-  // HDR: 10 bits and PQ over BT.2020 kept.
+  // HDR: 10 bits and PQ over BT.2020 kept, in a new file (not the original offered back).
   const hdr = ga('hdr10.avif');
-  if (!hdr.sameBytes) {
-    expect(hdr.avif!.bits).toBe(10);
-    expect(hdr.avif!.nclx!.slice(0, 2)).toEqual([9, 16]);
-  }
+  expect(hdr.sameBytes).toBe(false);
+  expect(hdr.avif!.bits).toBe(10);
+  expect(hdr.avif!.nclx!.slice(0, 2)).toEqual([9, 16]);
   expect(w.errors).toEqual([]);
   expect(w.outside).toEqual([]);
 });
@@ -250,6 +267,10 @@ test('Resize images: fit within, exact, percent; upright, never enlarged unless 
   expect(get('exif-icc.jpg').size).toEqual([90, 120]);
   expect(get('exif-icc.jpg').orientation ?? 1).toBe(1);
   expect(get('exif-icc.jpg').sameIcc).toBe(true);
+  expect(byName(outs, 'exif-icc.jpg').details).toContain('Turned upright from its EXIF orientation, in the pixels themselves (the result\'s EXIF orientation is 1).');
+  // Metadata kept: EXIF, XMP and the comment go with it, and the result says so.
+  expect(get('exif-icc.jpg').markers).toEqual(['MARK-COMMENT-JPEG', 'MARK-MAKE-JPEG', 'MARK-XMP-JPEG']);
+  expect(byName(outs, 'exif-icc.jpg').details).toContain('Kept: Color profile (ICC), so colors look the same; EXIF (its orientation set to 1, as the pixels are upright); XMP; Comments.');
   expect(get('rgba.png').size).toEqual([120, 90]);
   expect(get('rgba.png').mode).toBe('RGBA');
   expect(get('alpha.webp').mode).toBe('RGBA');
@@ -278,6 +299,11 @@ test('Resize images: fit within, exact, percent; upright, never enlarged unless 
   await ws(page).locator('[data-key="opt-enlarge"]').check();
   const big = await run(page, 'Resize');
   expect(check([{ check: 'resize', src: O('photo.jpg'), out: big[0].path }])[0].size).toEqual([2000, 1500]);
+  // Exactly the size asked for: unchanged, with the reason.
+  await ws(page).locator('[data-key="opt-width"]').fill('320');
+  await ws(page).locator('[data-key="opt-height"]').fill('0');
+  const exactly = await run(page, 'Resize');
+  expect(exactly[0].details).toEqual(['320 x 240 pixels', 'Unchanged: the original file is offered as it is.', 'It is already that size.']);
   expect(w.errors).toEqual([]);
   expect(w.outside).toEqual([]);
 });
@@ -310,6 +336,7 @@ test('at 320 pixels, with options, a refused file and results with their details
   await ws(page).locator('[data-key="opt-measure"]').check();
   await ws(page).locator('[data-key="opt-resize"]').selectOption('fit');
   await add(page, [long, O('photo.jpg'), O('truncated.jpg')]);
+  await expect(ws(page).locator('.ws-item').filter({ hasText: 'truncated.jpg' }).locator('.job-error')).toHaveText('This JPEG is cut short: it has no end marker, so part of the picture is missing.');
   expect(await overflow()).toBeLessThanOrEqual(0);
   const button = ws(page).getByRole('button', { name: 'Compress', exact: true });
   if (info.project.use.hasTouch) await button.tap(); else await button.click();

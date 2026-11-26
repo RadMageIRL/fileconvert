@@ -64,7 +64,9 @@ export class Workspace {
   private error?: string;
   private warnings: string[] = [];
   private summary?: string;
-  private outputs: Array<{ name: string; blob: Blob; note?: string; details?: string[]; temp?: string }> = [];
+  private outputs: Array<{ name: string; blob: Blob; note?: string; details?: string[]; temp?: string; source?: number }> = [];
+  /** The result being compared with its original, and the addresses of the two pictures (let go when it closes). */
+  private comparing: { index: number; urls: string[] } | null = null;
   /** The name prefix of the current run's results in private storage. */
   private runPrefix = '';
   private runs = 0;
@@ -241,6 +243,7 @@ export class Workspace {
   }
 
   private dropOutputs(): void {
+    this.closeCompare();
     for (const o of this.outputs) this.names.release(o.name);
     const temps = this.outputs.flatMap(o => (o.temp ? [o.temp] : []));
     if (temps.length) this.host.discard?.(temps);
@@ -278,7 +281,7 @@ export class Workspace {
       });
       if (!current()) { leftovers(); return; }
       if (controller.signal.aborted) throw new CanceledError();
-      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob, note: o.note, details: o.details, temp: o.temp }));
+      this.outputs = r.outputs.map(o => ({ name: this.names.claim(o.base, o.ext), blob: o.blob, note: o.note, details: o.details, temp: o.temp, source: o.source }));
       this.warnings = r.warnings;
       this.summary = r.summary;
       this.state = 'done';
@@ -799,6 +802,36 @@ export class Workspace {
     if (keepFocus) box.querySelector<HTMLElement>(`[data-key="${keepFocus === 'cancel' ? 'run' : keepFocus === 'run' ? 'cancel' : keepFocus}"]`)?.focus();
   }
 
+  /** Opens the comparison of one result with its original, or closes it; one is open at a time. */
+  private toggleCompare(index: number): void {
+    const was = this.comparing?.index;
+    this.closeCompare();
+    if (was !== index) this.comparing = { index, urls: [] };
+    this.renderOutputs();
+    this.root.querySelector<HTMLElement>(`[data-key="cmp-${index}"]`)?.focus();
+  }
+
+  private closeCompare(): void {
+    for (const u of this.comparing?.urls ?? []) URL.revokeObjectURL(u);
+    this.comparing = null;
+  }
+
+  /** The original and the result one over the other, the slider choosing how much of each shows. The browser decodes
+   *  the two files it already holds; nothing is copied, and both are let go when the comparison closes. */
+  private comparePanel(original: Blob, result: Blob, name: string): HTMLElement {
+    const urls = [URL.createObjectURL(result), URL.createObjectURL(original)];
+    this.comparing!.urls.push(...urls);
+    const top = h('img', { src: urls[1], alt: `${name}, the original`, class: 'cmp-original' }) as HTMLImageElement;
+    const slider = h('input', { type: 'range', min: 0, max: 100, value: 50, 'aria-label': 'How much of the original shows, from the left', 'data-key': 'cmp-slider' }) as HTMLInputElement;
+    const set = () => { top.style.clipPath = `inset(0 ${100 - Number(slider.value)}% 0 0)`; };
+    slider.addEventListener('input', set);
+    set();
+    return h('figure', { class: 'ws-compare' },
+      h('div', { class: 'cmp-frame' }, h('img', { src: urls[0], alt: `${name}, the result` }), top),
+      slider,
+      h('figcaption', { class: 'ws-hint' }, 'Original on the left of the line, result on the right. Drag the slider to move the line.'));
+  }
+
   private renderOutputs(): void {
     const box = this.outBox;
     clear(box);
@@ -811,9 +844,13 @@ export class Workspace {
     this.outputs.forEach((o, i) => {
       const button = h('button', { type: 'button', class: 'small primary', 'data-key': `dl-${i}`, title: o.name, onclick: () => this.host.save(o.blob, o.name) }, h('span', {}, `Download ${o.name}`));
       if (!o.note && !o.details?.length) { buttons.append(button); return; }
+      const src = o.source !== undefined && this.def.compare ? this.entries.find(e => e.id === o.source) : undefined;
+      const open = this.comparing?.index === i;
+      const compare = src ? h('button', { type: 'button', class: 'small', 'data-key': `cmp-${i}`, 'aria-expanded': String(open), onclick: () => this.toggleCompare(i) }, open ? 'Close the comparison' : 'Compare with the original') : null;
       buttons.append(h('div', { class: 'ws-file' }, button,
         o.note ? h('span', { class: 'job-info' }, o.note) : null,
-        o.details?.length ? h('ul', { class: 'ws-details' }, ...o.details.map(d => h('li', {}, d))) : null));
+        o.details?.length ? h('ul', { class: 'ws-details' }, ...o.details.map(d => h('li', {}, d))) : null,
+        compare, open && src ? this.comparePanel(src.file, o.blob, o.name) : null));
     });
     if (this.outputs.length > 1) buttons.append(h('button', { type: 'button', class: 'small', 'data-key': 'zip', onclick: () => void this.downloadZip() }, `Download all (ZIP, ${this.outputs.length})`));
     box.append(buttons);

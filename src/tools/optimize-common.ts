@@ -7,7 +7,7 @@
 import type { ToolContext, ToolDefinition, ToolInput, ToolResult, ToolValues } from '../app/tools';
 import { CanceledError } from '../app/pool';
 import { formatBytes, LIMITS } from '../core/limits';
-import { estimateOptimize, type OptimizeOp, type PictureWork } from '../core/imagememory';
+import { estimateOptimize, type OptimizeOp, type PictureWork, type ResizeTo } from '../core/imagememory';
 import { safeBase } from '../core/naming';
 import { memoryAllowance, refusal } from '../core/pdfmemory';
 import type { OptimizeOutcome, OptimizeTask, PictureFacts } from '../engines/image/optimize';
@@ -45,16 +45,27 @@ export function targetOptions(key: string, value: string) {
   ];
 }
 
-/** The memory check of a set of pictures: each is processed alone, so the largest counts, with the results before it. */
-export function memoryCheck(inputs: readonly ToolInput[], opOf: (input: ToolInput) => { op: OptimizeOp; outPixels?: number }, measure: boolean): string | null {
+/**
+ * The memory check of a set of pictures: each is processed alone, so the largest counts, with the results before it.
+ * Before the run, the results are counted at their pictures' sizes (a compression's result is never larger: the original
+ * is kept instead); the worker checks each picture again with the results' real sizes, which a resize can make larger.
+ */
+export function memoryCheck(inputs: readonly ToolInput[], opOf: (input: ToolInput) => { op: OptimizeOp; outPixels?: number; to?: ResizeTo }, measure: boolean): string | null {
   const a = memoryAllowance();
   let held = 0;
+  const before = { files: 0, pixels: 0 };
   for (const input of inputs) {
     if (!input.picture) continue;
-    const { op, outPixels } = opOf(input);
-    const why = refusal(estimateOptimize(op, input.picture, { outPixels, measure, held, engine: a.engine }), a, inputs.length > 1 ? `${input.name} needs` : 'This picture needs', inputs.length > 1 ? 'Take it out, or try a smaller picture.' : 'Try a smaller picture.');
+    const { op, outPixels, to } = opOf(input);
+    // Too large on its own, or only after the pictures before it: the advice differs.
+    const alone = refusal(estimateOptimize(op, input.picture, { outPixels, to, measure, engine: a.engine }), a, inputs.length > 1 ? `${input.name} needs` : 'This picture needs', inputs.length > 1 ? 'Take it out, or try a smaller picture.' : 'Try a smaller picture.');
+    if (alone) return alone;
+    const k = before.files;
+    const why = refusal(estimateOptimize(op, input.picture, { outPixels, to, measure, held, before: { ...before }, engine: a.engine }), a, `After ${k === 1 ? 'the picture' : `the ${plural(k, 'picture')}`} before it, ${input.name} needs`, `Run at most ${k} at a time.`);
     if (why) return why;
     held += input.file.size;
+    before.files++;
+    before.pixels += input.picture.width * input.picture.height;
   }
   return null;
 }
@@ -74,7 +85,7 @@ export function describeOutcome(o: OptimizeOutcome, resize = false): string[] {
   const d: string[] = [];
   const dims = `${fmt(o.width)} x ${fmt(o.height)} pixels`;
   d.push(o.width === o.sourceWidth && o.height === o.sourceHeight ? dims : `${dims}, was ${fmt(o.sourceWidth)} x ${fmt(o.sourceHeight)}`);
-  if (o.original) d.push(resize ? 'Unchanged: the original file is offered as it is.' : 'Kept as it was: nothing smaller came out, so the original is offered unchanged.');
+  if (o.original) d.push(resize ? 'Unchanged: the original file is offered as it is.' : 'Kept as it was: the original is offered unchanged.');
   else if (o.lossless) d.push('Lossless: every pixel is exactly as it was (checked).');
   else d.push(`Lossy${o.quality ? `, quality ${o.quality}` : ''}: compressed again, so some detail is lost.`);
   if (o.ssim !== undefined) d.push(`SSIM ${o.ssim.toFixed(4)} (1 means identical). It measures changes in the structure of brightness, not everything people notice.`);
@@ -92,13 +103,14 @@ export function describeOutcome(o: OptimizeOutcome, resize = false): string[] {
 export async function runOptimize(inputs: readonly ToolInput[], ctx: ToolContext, taskOf: (input: ToolInput) => { task: OptimizeTask; op: OptimizeOp; outPixels?: number }): Promise<ToolResult> {
   const outputs: ToolResult['outputs'] = [];
   const warnings: string[] = [];
-  let before = 0, after = 0, unchanged = 0;
+  let before = 0, after = 0, unchanged = 0, held = 0;
+  const done = { files: 0, pixels: 0 };
   for (const [i, input] of inputs.entries()) {
     const head = inputs.length > 1 ? `${i + 1} of ${inputs.length}: ${input.name}` : input.name;
     ctx.progress({ fraction: i / inputs.length, stage: head });
     const { task, op, outPixels } = taskOf(input);
     try {
-      const r = await ctx.engines.image.run<OptimizeOutcome>('optimize', { file: input.file, format: input.format, task, memoryOp: op, allowance: memoryAllowance(), outPixels }, {
+      const r = await ctx.engines.image.run<OptimizeOutcome>('optimize', { file: input.file, format: input.format, task, memoryOp: op, allowance: memoryAllowance(), outPixels, held, before: { ...done } }, {
         signal: ctx.signal,
         onProgress: p => ctx.progress({ fraction: i / inputs.length, stage: p.stage ? `${head}: ${p.stage}` : head }),
       });
@@ -106,15 +118,19 @@ export async function runOptimize(inputs: readonly ToolInput[], ctx: ToolContext
       before += input.file.size;
       after += blob.size;
       if (r.original) unchanged++;
-      outputs.push({ blob, base: safeBase(input.name), ext: r.ext, note: sizeNote(input.file.size, blob.size, r.original), details: describeOutcome(r, op === 'resize') });
+      else held += blob.size;
+      outputs.push({ blob, base: safeBase(input.name), ext: r.ext, note: sizeNote(input.file.size, blob.size, r.original), details: describeOutcome(r, op === 'resize'), source: r.original ? undefined : input.id });
     } catch (e) {
       if (e instanceof CanceledError || ctx.signal.aborted) throw e;
       warnings.push(`${input.name} was left out: ${(e as Error).message}`);
     }
+    // Done or failed, it may have left memory behind for the pictures after it.
+    done.files++;
+    done.pixels += (input.picture?.width ?? 0) * (input.picture?.height ?? 0);
   }
   if (!outputs.length) throw new Error(warnings[0]?.replace(/^.*? was left out: /, '') ?? 'No picture could be processed.');
   ctx.progress({ fraction: 1 });
-  if (unchanged && outputs.length > 1) warnings.push(`${plural(unchanged, 'picture')} ${unchanged === 1 ? 'was' : 'were'} kept as ${unchanged === 1 ? 'it was' : 'they were'}${taskOf(inputs[0]).op === 'resize' ? '' : ': nothing smaller came out'}.`);
+  if (unchanged && outputs.length > 1) warnings.push(`${plural(unchanged, 'picture')} ${unchanged === 1 ? 'was' : 'were'} kept as ${unchanged === 1 ? 'it was' : 'they were'}.`);
   const summary = outputs.length > 1 ? `${plural(outputs.length, 'picture')}, ${sizeNote(before, after, false)} in all` : undefined;
   return { outputs, warnings, summary };
 }

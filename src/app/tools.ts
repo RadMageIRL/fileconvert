@@ -94,8 +94,9 @@ export interface ToolContext {
 }
 
 export interface ToolResult {
-  /** `note` is one line under the file's download button; `details` a short list below it. */
-  outputs: Array<{ blob: Blob; base: string; ext: string; note?: string; details?: string[]; temp?: string }>;
+  /** `note` is one line under the file's download button; `details` a short list below it; `source` the input it was
+   *  made from (its id), for comparing the two. */
+  outputs: Array<{ blob: Blob; base: string; ext: string; note?: string; details?: string[]; temp?: string; source?: number }>;
   warnings: string[];
   summary?: string;
 }
@@ -112,6 +113,8 @@ export interface ToolDefinition {
   ordered: boolean;
   /** Each PDF's row shows a small picture of its first page (Merge PDFs). Never needed to run the tool. */
   firstPages?: boolean;
+  /** Each result can be compared with its original, side by side under a slider (the lossy compression tools). */
+  compare?: boolean;
   options: readonly ToolOption[];
   /** The run button's label, such as "Merge PDFs". */
   action: string;

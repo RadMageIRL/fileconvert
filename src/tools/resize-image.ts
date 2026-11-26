@@ -4,6 +4,7 @@
 
 import type { ToolDefinition, ToolInput, ToolValues } from '../app/tools';
 import { FORMATS } from '../core/formats';
+import type { ResizeTo } from '../core/imagememory';
 import { LIMITS } from '../core/limits';
 import { resizeTarget, type ResizeOptions } from '../engines/image/optimize';
 import { fmt, inspectPicture, memoryCheck, METADATA, plural, runOptimize } from './optimize-common';
@@ -30,6 +31,9 @@ function sizeOf(input: ToolInput, o: ResizeOptions): { width: number; height: nu
   // The check gives the upright size (EXIF orientation and AVIF rotation applied), as the worker resizes it.
   return resizeTarget(p.width, p.height, o);
 }
+
+/** The format a picture is written in: the one chosen, or its own (each accepted format can be written). */
+const resultFormat = (i: ToolInput, o: ResizeOptions): ResizeTo => (o.to === 'same' ? i.format as ResizeTo : o.to);
 
 export const tool: ToolDefinition = {
   id: 'resize-image',
@@ -67,12 +71,12 @@ export const tool: ToolDefinition = {
     if (o.by === 'size' && !o.width && !o.height) return 'Give a width, a height or both.';
     if (o.by === 'size' && !o.lock && (!o.width || !o.height)) return 'An exact size needs both a width and a height.';
     for (const i of inputs) {
-      const s = sizeOf(i, o);
+      const s = sizeOf(i, o), to = resultFormat(i, o);
       if (s && (s.width * s.height > LIMITS.imagePixels || s.width > LIMITS.imageSide || s.height > LIMITS.imageSide)) return `${i.name} would be ${fmt(s.width)} x ${fmt(s.height)} pixels, more than the ${LIMITS.imagePixels / 1e6} megapixels and ${fmt(LIMITS.imageSide)} pixels on a side allowed.`;
-      if (s && o.to === 'webp' && (s.width > 16383 || s.height > 16383)) return `${i.name} would be ${fmt(s.width)} x ${fmt(s.height)} pixels; WebP is at most 16,383 pixels on a side.`;
-      if (s && o.to === 'jpg' && (s.width > 65535 || s.height > 65535)) return `${i.name} would be wider or taller than the 65,535 pixels a JPG can be.`;
+      if (s && to === 'webp' && (s.width > 16383 || s.height > 16383)) return `${i.name} would be ${fmt(s.width)} x ${fmt(s.height)} pixels; WebP is at most 16,383 pixels on a side.`;
+      if (s && to === 'jpg' && (s.width > 65535 || s.height > 65535)) return `${i.name} would be wider or taller than the 65,535 pixels a JPG can be.`;
     }
-    return memoryCheck(inputs, i => { const s = sizeOf(i, o); return { op: 'resize', outPixels: s ? s.width * s.height : undefined }; }, false);
+    return memoryCheck(inputs, i => { const s = sizeOf(i, o); return { op: 'resize', outPixels: s ? s.width * s.height : undefined, to: resultFormat(i, o) }; }, false);
   },
   async run(inputs, values, ctx) {
     const o = optionsOf(values);

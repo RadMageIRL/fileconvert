@@ -12,7 +12,7 @@ import { FORMATS, type FormatId } from '../../core/formats';
 import { LIMITS, LimitError } from '../../core/limits';
 import { decodePng } from '../pdf/pngdecode';
 import { addIcc, avifFacts, compressAvif, patchNclx, type AvifOptions } from './avifopt';
-import { avifDecode, avifEncode, mozjpegDecode, mozjpegEncode, releaseCodecs, retireAfter, webpDecode, webpEncode } from './codecs';
+import { avifDecode, avifEncode, mozjpegDecode, mozjpegEncode, releaseCodecs, RETIRE_PIXELS, RETIRE_PIXELS_PNG, retireAfter, webpDecode, webpEncode } from './codecs';
 import { encodeBmp, encodeGif } from './encoders';
 import { compressJpeg, jpegFacts, optimizeJpegLossless, uprightExif, type Decoded, type JpegLossyOptions } from './jpegopt';
 import { exifFacts } from './metadata';
@@ -118,6 +118,8 @@ interface Source {
   /** PNG chunks that describe its colors (gAMA, cHRM, sRGB, cICP) and its text, kept for a PNG result. */
   pngColor: Uint8Array[];
   pngText: Uint8Array[];
+  /** A JPEG's comment segments, whole, kept for a JPG result. */
+  jpegComments: Uint8Array[];
   avifNclx: { primaries: number; transfer: number } | null;
   notes: string[];
   /** Turned upright from an orientation. */
@@ -144,6 +146,20 @@ function jpegIcc(b: Uint8Array): Uint8Array | null {
 }
 
 /** An APPn segment of a JPEG starting with `prefix` (its body after the prefix), or null. */
+/** A JPEG's comment (COM) segments before its picture data, each whole. */
+function jpegComments(b: Uint8Array): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  let p = 2;
+  while (p + 4 <= b.length && b[p] === 0xff) {
+    const m = b[p + 1];
+    if (m === 0xda || m === 0xd9) break;
+    const len = (b[p + 2] << 8) | b[p + 3];
+    if (m === 0xfe) out.push(b.subarray(p, p + 2 + len));
+    p += 2 + len;
+  }
+  return out;
+}
+
 function jpegApp(b: Uint8Array, marker: number, prefix: string): Uint8Array | null {
   let p = 2;
   while (p + 4 <= b.length && b[p] === 0xff) {
@@ -157,7 +173,7 @@ function jpegApp(b: Uint8Array, marker: number, prefix: string): Uint8Array | nu
 }
 
 async function decodeSource(b: Uint8Array, format: FormatId, progress: Progress): Promise<Source> {
-  const base: Omit<Source, 'pic' | 'bits'> = { srcBits: 8, icc: null, exif: null, xmp: null, pngColor: [], pngText: [], avifNclx: null, notes: [], turned: false };
+  const base: Omit<Source, 'pic' | 'bits'> = { srcBits: 8, icc: null, exif: null, xmp: null, pngColor: [], pngText: [], jpegComments: [], avifNclx: null, notes: [], turned: false };
   progress(`Decoding ${FORMATS[format].label}`);
   if (format === 'jpg') {
     const f = jpegFacts(b);
@@ -165,10 +181,10 @@ async function decodeSource(b: Uint8Array, format: FormatId, progress: Progress)
     const xmp = jpegApp(b, 0xe1, 'http://ns.adobe.com/xap/1.0/\0');
     if (f.components === 4) {
       const d = await browserDecode(b, 'image/jpeg');
-      return { ...base, pic: d, bits: 8, exif, xmp, turned: f.orientation !== 1, notes: ['CMYK converted to RGB (sRGB) by the browser.'] };
+      return { ...base, pic: d, bits: 8, exif, xmp, jpegComments: jpegComments(b), turned: f.orientation !== 1, notes: ['CMYK converted to RGB (sRGB) by the browser.'] };
     }
     const d = await mozjpegDecode(b);
-    return { ...base, pic: orient(d, f.orientation), bits: 8, icc: jpegIcc(b), exif, xmp, turned: f.orientation !== 1 };
+    return { ...base, pic: orient(d, f.orientation), bits: 8, icc: jpegIcc(b), exif, xmp, jpegComments: jpegComments(b), turned: f.orientation !== 1 };
   }
   if (format === 'png') {
     const f = readPngFile(b);
@@ -315,6 +331,7 @@ async function resizeImage(b: Uint8Array, format: FormatId, o: ResizeOptions, pr
   const notes = [...src.notes];
   const changes: string[] = [];
   if (size.note) notes.push(size.note);
+  else if (size.width === sw && size.height === sh) notes.push('It is already that size.');
   if (size.width === sw && size.height === sh && to === format && !src.turned) {
     // Nothing to do: the original is offered unchanged.
     return { bytes: b, mime: FORMATS[format].mime, ext: FORMATS[format].ext, width: sw, height: sh, sourceWidth: sw, sourceHeight: sh, original: true, lossless: true, changes: [], removed: [], kept: [], notes };
@@ -325,11 +342,29 @@ async function resizeImage(b: Uint8Array, format: FormatId, o: ResizeOptions, pr
     pic = resample(pic, size.width, size.height);
     changes.push(`Resized from ${sw.toLocaleString('en-US')} x ${sh.toLocaleString('en-US')} to ${pic.width.toLocaleString('en-US')} x ${pic.height.toLocaleString('en-US')} pixels (Lanczos-3)${!o.lock && o.by === 'size' ? ', stretched to exactly that size' : ''}.`);
   }
-  if (src.turned) changes.push('Turned upright from its orientation, in the pixels themselves (the result\'s EXIF orientation is 1).');
+  if (src.turned) {
+    changes.push(format === 'avif'
+      ? 'Rotated or mirrored as it is shown (its AVIF irot or imir), in the pixels themselves, so the result has neither.'
+      : `Turned upright from its EXIF orientation, in the pixels themselves${!o.removeMetadata && src.exif && to !== 'avif' ? ' (the result\'s EXIF orientation is 1)' : ''}.`);
+  }
   const keep = !o.removeMetadata;
   const removed: string[] = [], kept: string[] = [];
+  const texts = src.pngText.filter(c => ascii(c, 4, 4) !== 'pHYs');
   if (src.icc) kept.push('Color profile (ICC), so colors look the same');
-  if (!keep && (src.exif || src.xmp || src.pngText.length)) removed.push('EXIF, XMP and text metadata');
+  if (!keep && (src.exif || src.xmp || texts.length || src.jpegComments.length)) removed.push('EXIF, XMP, text and comments');
+  if (keep) {
+    // What the result's format holds of the metadata kept, and what it cannot.
+    const label = FORMATS[to].label, a = /^[AEIOU]/.test(label) ? 'an' : 'a';
+    if (to === 'avif' && (src.exif || src.xmp)) notes.push('EXIF and XMP are not written into AVIF results by this tool.');
+    else if (to !== 'avif' && to !== 'gif' && to !== 'bmp') {
+      if (src.exif) kept.push(src.turned ? 'EXIF (its orientation set to 1, as the pixels are upright)' : 'EXIF');
+      if (src.xmp) kept.push('XMP');
+    }
+    if (texts.length && format === 'png' && to === 'png') kept.push('Text fields (titles, descriptions, software)');
+    else if (texts.length) notes.push(`Its PNG text fields (titles, descriptions, software) are not carried into ${a} ${label} result.`);
+    if (src.jpegComments.length && to === 'jpg') kept.push('Comments');
+    else if (src.jpegComments.length) notes.push(`Its JPEG comment is not carried into ${a} ${label} result.`);
+  }
   progress(`Encoding ${FORMATS[to].label}`);
   let bytes: Uint8Array;
   let lossless = false;
@@ -354,7 +389,7 @@ async function resizeImage(b: Uint8Array, format: FormatId, o: ResizeOptions, pr
       if (to === 'jpg') {
         const jpg = await mozjpegEncode(d, pic.width, pic.height, { quality: q, progressive: true, subsample: 2, gray: false });
         const jfifEnd = jpg[2] === 0xff && jpg[3] === 0xe0 ? 4 + ((jpg[4] << 8) | jpg[5]) : 2;
-        const segs = [...(keep && src.exif ? [exifSegment(exifUpright(src.exif))] : []), ...(src.icc ? iccSegments(src.icc) : []), ...(keep && src.xmp && src.xmp.length < 65000 ? [xmpSegment(src.xmp)] : [])];
+        const segs = [...(keep && src.exif ? [exifSegment(exifUpright(src.exif))] : []), ...(src.icc ? iccSegments(src.icc) : []), ...(keep && src.xmp && src.xmp.length < 65000 ? [xmpSegment(src.xmp)] : []), ...(keep ? src.jpegComments : [])];
         bytes = concatBytes([jpg.subarray(0, jfifEnd), ...segs, jpg.subarray(jfifEnd)]);
       } else bytes = encodeBmp(d, pic.width, pic.height);
     } else if (to === 'webp') {
@@ -376,7 +411,6 @@ async function resizeImage(b: Uint8Array, format: FormatId, o: ResizeOptions, pr
         const withIcc = addIcc(bytes, src.icc);
         if (withIcc) bytes = withIcc; else notes.push('Its color profile could not be written into the AVIF result.');
       }
-      if (keep && (src.exif || src.xmp)) notes.push('EXIF and XMP are not written into AVIF results by this tool.');
     } else {
       const d = new Uint8ClampedArray(d8);
       const { bytes: gif, stats } = encodeGif([{ rgba: d, delay: 0 }], pic.width, pic.height, 1);
@@ -485,9 +519,32 @@ function storedFacts(b: Uint8Array, format: FormatId, op: 'png' | 'jpeg' | 'webp
 
 // ------------------------------------------------------------------ the entry point
 
+/** A picture's size as it is shown: an EXIF orientation or an AVIF rotation that turns it a quarter swaps its sides. */
+function shown(bytes: Uint8Array, format: FormatId, width: number, height: number): [number, number] {
+  let quarter = false;
+  try {
+    if (format === 'jpg') quarter = jpegFacts(bytes).orientation >= 5;
+    else if (format === 'webp') quarter = webpFacts(bytes).orientation >= 5;
+    else if (format === 'png') quarter = readPngFile(bytes).layout.info.orientation >= 5;
+    else if (format === 'avif') quarter = avifFacts(bytes).transforms.some(t => t.kind === 'irot' && t.turns % 2 === 1);
+  } catch {
+    // Its size as stored.
+  }
+  return quarter ? [height, width] : [width, height];
+}
+
 /** Runs one optimization task on one file. `retire` says the worker should be let go after it (oxipng's memory). */
 export async function optimizeImage(b: Uint8Array, format: FormatId, task: OptimizeTask, progress: Progress): Promise<{ outcome: OptimizeOutcome; retire: boolean }> {
-  const done = async (o: OptimizeOutcome) => { await releaseCodecs(); return { outcome: o, retire: await retireAfter() }; };
+  const done = async (o: OptimizeOutcome) => {
+    // The compressions report sizes as the files store them; they are shown as the file list shows them, upright.
+    if (task.op !== 'resize') {
+      [o.sourceWidth, o.sourceHeight] = shown(b, format, o.sourceWidth, o.sourceHeight);
+      [o.width, o.height] = shown(o.bytes, format, o.width, o.height);
+    }
+    await releaseCodecs();
+    const large = Math.max(o.sourceWidth * o.sourceHeight, o.width * o.height) >= (task.op === 'png' ? RETIRE_PIXELS_PNG : RETIRE_PIXELS);
+    return { outcome: o, retire: large || await retireAfter() };
+  };
   const mimeOf = (f: FormatId) => ({ mime: FORMATS[f].mime, ext: FORMATS[f].ext });
   if (task.op === 'png') {
     const f0 = readPngFile(b);

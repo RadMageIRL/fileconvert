@@ -231,10 +231,13 @@ def avif_fixtures():
     g16[:, :, 0] = np.linspace(0, 40000, W)[None, :]
     g16[:, :, 1] = np.linspace(0, 30000, H)[:, None]
     g16[:, :, 2] = 20000
+    # Texture, so that compressing it again gives a smaller file whose color description can be checked (a smooth
+    # gradient is a few hundred bytes, which no result beats). Its own generator, so the fixtures after it stay the same.
+    g16 = np.clip(g16.astype(np.int32) + np.random.default_rng(2020).integers(-3000, 3000, g16.shape), 0, 65535).astype(np.uint16)
     with open(src, 'wb') as f:
         f.write(pypng(g16.reshape(H, -1), W, H, greyscale=False, bitdepth=16))
     out = os.path.join(t, 'hdr10.avif')
-    subprocess.run([ffmpeg, '-v', 'error', '-y', '-i', src, '-c:v', 'libaom-av1', '-still-picture', '1', '-pix_fmt', 'yuv420p10le', '-crf', '20',
+    subprocess.run([ffmpeg, '-v', 'error', '-y', '-i', src, '-c:v', 'libaom-av1', '-still-picture', '1', '-pix_fmt', 'yuv420p10le', '-crf', '4',
                     '-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc', '-color_range', 'pc', '-frames:v', '1', out], check=True)
     write('hdr10.avif', open(out, 'rb').read())
     shutil.rmtree(t)
