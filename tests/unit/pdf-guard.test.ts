@@ -204,12 +204,54 @@ describe('what the memory estimate is told about content and fonts', () => {
     expect(scanPdf(pdf(ops), LIMITS).contentBytes).toBe(ops.length);
   });
 
-  test('a content stream counts up to 128 KB: past that it is a drawing or padding, which costs little per byte', () => {
+  test('padding is left out of the content count, but not of the decoded bytes; Do operators and /Contents arrays are counted', () => {
+    // A stream of zeros: the decoded bytes count in full, the content only for the first 32 bytes of the run.
     const big = zlibSync(zeros(4 << 20));
-    expect(scanPdf(pdf(big, ' /Filter /FlateDecode'), LIMITS).contentBytes).toBe(128 * 1024);
-    const just = enc('0 0 m 1 1 l S\n'.repeat(9362));
-    expect(just.length).toBeLessThan(128 * 1024);
-    expect(scanPdf(pdf(zlibSync(just), ' /Filter /FlateDecode'), LIMITS).contentBytes).toBe(just.length);
+    const z = scanPdf(pdf(big, ' /Filter /FlateDecode'), LIMITS);
+    expect(z.contentBytes).toBe(32);
+    expect(z.rawContent).toBe(4 << 20);
+    expect(z.largestRawContent).toBe(4 << 20);
+    // Real drawing counts in full, whatever its size.
+    const ops = enc('0 0 m 1 1 l S\n'.repeat(200_000));
+    const d = scanPdf(pdf(zlibSync(ops), ' /Filter /FlateDecode'), LIMITS);
+    expect(d.contentBytes).toBe(ops.length);
+    expect(d.largestContent).toBe(ops.length);
+    // A form drawn many times counts its content each time; a picture drawn counts nothing; the resources say which.
+    const form = enc('0 0 m 9 9 l S\n'.repeat(50));
+    const formObj = cat(enc(`<< /Type /XObject /Subtype /Form /BBox [0 0 9 9] /Length ${form.length} >>\nstream\n`), form, enc('\nendstream'));
+    const picObj = enc('<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nx\nendstream');
+    const res = '<< /XObject << /Fm0 5 0 R /Im0 6 0 R >> >>';
+    const uses = enc('q 0.1 0 0 0.1 5 5 cm /Fm0 Do Q\n'.repeat(1000) + '/Im0 Do\n'.repeat(500));
+    const f = scanPdf(pdf(uses, '', { 5: formObj, 6: picObj }, res), LIMITS);
+    expect(f.formExpansion).toBe(1000 * form.length);
+    // Only forms that hold text count for reading text.
+    expect(f.textFormExpansion).toBe(0);
+    const label = enc('BT /F0 9 Tf (label) Tj ET');
+    const labelObj = cat(enc(`<< /Type /XObject /Subtype /Form /BBox [0 0 9 9] /Length ${label.length} >>\nstream\n`), label, enc('\nendstream'));
+    const t = scanPdf(pdf(enc('/Lb Do\n/Fm0 Do\n'.repeat(7)), '', { 5: formObj, 6: labelObj }, '<< /XObject << /Fm0 5 0 R /Lb 6 0 R >> >>'), LIMITS);
+    expect(t.textFormExpansion).toBe(7 * label.length);
+    expect(t.formExpansion).toBe(7 * label.length + 7 * form.length);
+    expect(f.contentBytes).toBe(uses.length);
+    // Without the resources naming it, a Do draws nothing known; "Do" inside a word, or after a number, is no operator.
+    expect(scanPdf(pdf(uses, '', { 5: formObj, 6: picObj }), LIMITS).formExpansion).toBe(0);
+    expect(scanPdf(pdf(enc('/Fm0 Done /Fm0 Do2 /Fm0 xDo /Fm0 1 Do /Fm0 Do'), '', { 5: formObj }, res), LIMITS).formExpansion).toBe(form.length);
+    // A form drawn by a form counts for each Do in the outer form's content.
+    const outer = enc('/Fm0 Do\n'.repeat(20));
+    const outerObj = cat(enc(`<< /Type /XObject /Subtype /Form /BBox [0 0 9 9] /Resources << /XObject << /Fm0 5 0 R >> >> /Length ${outer.length} >>\nstream\n`), outer, enc('\nendstream'));
+    const nested = scanPdf(pdf(enc('/Fm1 Do /Fm1 Do'), '', { 5: formObj, 7: outerObj }, '<< /XObject << /Fm1 7 0 R >> >>'), LIMITS);
+    expect(nested.formExpansion).toBe(2 * outer.length + 20 * form.length);
+    // The longest /Contents array in the file bounds one page's streams.
+    const objs: Record<number, Uint8Array> = {};
+    for (let n = 5; n < 9; n++) objs[n] = cat(enc(`<< /Length ${ops.length} >>\nstream\n`), ops, enc('\nendstream'));
+    objs[9] = enc('<< /Type /Page /Parent 2 0 R /Contents [5 0 R 6 0 R 7 0 R 8 0 R] >>');
+    expect(scanPdf(pdf(enc('q Q'), '', objs), LIMITS).maxContents).toBe(4);
+    // A page dictionary inside an object stream: its /Contents array and its resources count the same way.
+    const inner = enc('9 0 << /Type /Page /Parent 2 0 R /Resources << /XObject << /Fm7 8 0 R >> >> /Contents [5 0 R 6 0 R 7 0 R] >>');
+    const zs = zlibSync(inner);
+    const objstm = cat(enc(`<< /Type /ObjStm /N 1 /First 4 /Length ${zs.length} /Filter /FlateDecode >>\nstream\n`), zs, enc('\nendstream'));
+    const inStm = scanPdf(pdf(enc('/Fm7 Do\n'.repeat(10)), '', { 5: objstm, 8: formObj }), LIMITS);
+    expect(inStm.maxContents).toBe(3);
+    expect(inStm.formExpansion).toBe(10 * form.length);
   });
 });
 

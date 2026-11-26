@@ -51,8 +51,17 @@ export interface PdfWork {
   imagePixels?: number;
   /** Pixels of the largest JPEG 2000 picture (its decoder needs more memory per pixel). */
   jpxPixels?: number;
-  /** Bytes of page content once decoded (text and drawing operators of every page). */
+  /** Bytes of page content once decoded, without padding (text and drawing operators of every page). */
   content?: number;
+  /** One page's content at most, counted the same way: the largest stream times the most streams a page has, and never
+   *  more than all the content. */
+  pageContent?: number;
+  /** One page's content at most once decoded, padding included (the buffers pdf.js and the cleanup hold). */
+  pageRaw?: number;
+  /** Content forms make pdf.js read again (the guard's formExpansion), as much of it as the 50 pages pdf.js keeps hold. */
+  expanded?: number;
+  /** The same for forms that hold text: what reading text goes through again (forms that only draw cost it nothing). */
+  expandedText?: number;
   /** Bytes of embedded font programs once decoded. */
   fonts?: number;
   /** The file has soft masks, whose drawing takes several page-sized canvases. */
@@ -133,8 +142,10 @@ export function memoryAllowance(env: MemoryEnv = readMemoryEnv()): MemoryAllowan
 }
 
 /** The work in one PDF, from what its guard pass counted. */
-export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number; largestImagePixels?: number; largestJpxPixels?: number; contentBytes?: number; fontBytes?: number; softMasks?: number }): PdfWork {
-  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream, imagePixels: scan.largestImagePixels ?? 0, jpxPixels: scan.largestJpxPixels ?? 0, content: scan.contentBytes ?? 0, fonts: scan.fontBytes ?? 0, softMasks: (scan.softMasks ?? 0) > 0 };
+export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number; largestImagePixels?: number; largestJpxPixels?: number; contentBytes?: number; largestContent?: number; formExpansion?: number; textFormExpansion?: number; rawContent?: number; largestRawContent?: number; maxContents?: number; fontBytes?: number; softMasks?: number }): PdfWork {
+  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream, imagePixels: scan.largestImagePixels ?? 0, jpxPixels: scan.largestJpxPixels ?? 0, content: scan.contentBytes ?? 0, pageContent: Math.min(scan.contentBytes ?? 0, (scan.largestContent ?? 0) * (scan.maxContents ?? 1)),
+    pageRaw: Math.min(scan.rawContent ?? 0, (scan.largestRawContent ?? 0) * (scan.maxContents ?? 1)), expanded: (scan.formExpansion ?? 0) * Math.min(1, RENDER_KEPT_PAGES / Math.max(1, scan.pages)),
+    expandedText: (scan.textFormExpansion ?? 0) * Math.min(1, RENDER_KEPT_PAGES / Math.max(1, scan.pages)), fonts: scan.fontBytes ?? 0, softMasks: (scan.softMasks ?? 0) > 0 };
 }
 
 const sumOf = (works: readonly PdfWork[], k: 'bytes' | 'parsed' | 'objects' | 'pages' | 'content' | 'fonts') => works.reduce((n, w) => n + (w[k] ?? 0), 0);
@@ -159,7 +170,15 @@ export function estimate(works: readonly PdfWork[], kind: 'edit' | 'text', more:
   // uses, to read text (many small text items cost more than their bytes).
   const T = LIMITS.pdfTextMemory[engine];
   const read = kind === 'edit' ? edit.content * sumOf(works, 'content') : T.content * sumOf(works, 'content') + T.font * sumOf(works, 'fonts');
-  const total = per.base + per.byte * sumOf(works, 'bytes') + per.stream * largest + objects + page + read;
+  // One page is read at a time: its content, its decoded bytes with padding, and what its forms make pdf.js read again.
+  const most = (k: 'pageContent' | 'pageRaw' | 'expanded' | 'expandedText') => works.reduce((n, w) => Math.max(n, w[k] ?? 0), 0);
+  const P = kind === 'edit' ? edit : T;
+  // Reading text goes through every form drawn: a form that holds text at the text figure, one that only draws at a
+  // small one (its operators are read and let go).
+  const drawingForms = works.reduce((n, w) => Math.max(n, (w.expanded ?? 0) - (w.expandedText ?? 0)), 0);
+  const onePage = P.pageContent * most('pageContent') + P.raw * most('pageRaw')
+    + (kind === 'edit' ? P.expanded * most('expanded') : T.expanded * most('expandedText') + T.formRead * drawingForms);
+  const total = per.base + per.byte * sumOf(works, 'bytes') + per.stream * largest + objects + page + read + onePage;
   // What has to fit in the heap at once: the objects alone, with figures fitted to where a capped heap stopped Chrome.
   const H = LIMITS.pdfHeapMemory;
   const heap = H.parsed * sumOf(works, 'parsed') + H.page * sumOf(works, 'pages') + H.output * outputs;
@@ -187,7 +206,8 @@ export function estimateRender(work: PdfWork, pagePixels: number, more: { held?:
   const leftover = F.drawnImage * (work.imagePixels ?? 0) * Math.min(drawn, RENDER_KEPT_PAGES, work.pages);
   const total = F.base + F.byte * work.bytes + F.parsed * work.parsed + F.page * Math.min(work.pages, RENDER_KEPT_PAGES) + F.drawn * drawn + F.stream * (work.largest ?? 0)
     + picture + leftover + (work.softMasks ? F.masked : F.canvas) * pagePixels + F.held * (more.held ?? 0)
-    + F.font * (work.fonts ?? 0) + F.content * (work.content ?? 0);
+    + F.font * (work.fonts ?? 0) + F.content * (work.content ?? 0)
+    + F.pageContent * (work.pageContent ?? 0) + F.raw * (work.pageRaw ?? 0) + F.expanded * (work.expanded ?? 0);
   const H = LIMITS.pdfHeapMemory;
   return { total: Math.ceil(total), heap: Math.ceil(H.parsed * work.parsed + H.page * work.pages) };
 }

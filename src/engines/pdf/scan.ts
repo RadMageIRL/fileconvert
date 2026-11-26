@@ -39,9 +39,25 @@ export interface PdfScan {
   /** Bytes the object streams decode to, which a PDF library also parses into objects. */
   objectStreamBytes: number;
   largestStream: number;
-  /** Bytes of page content once decoded: the streams that are not pictures, fonts, profiles or object streams, each up
-   *  to 128 KB (CONTENT_COUNTED). Reading text and the cleanup's look at what each page uses read all of it. */
+  /** Bytes of page content once decoded: the streams that are not pictures, fonts, profiles or object streams, without
+   *  padding (a run of white space or zero bytes counts its first PAD_RUN bytes only). Reading text, drawing and the
+   *  cleanup's look at what each page uses read all of it. */
   contentBytes: number;
+  /** The largest content stream, counted the same way: one page's content is read at once. */
+  largestContent: number;
+  /** Content pdf.js reads again through forms, in all: for each name a Do draws, how often, times the largest form
+   *  that name refers to anywhere in the file (pictures count nothing). A small form drawn many times becomes far more
+   *  work than its bytes. Forms drawn by forms count once for each Do in the form's own content. */
+  formExpansion: number;
+  /** The same, for the forms that hold text (a BT operator): what reading text goes through again. */
+  textFormExpansion: number;
+  /** Bytes of page content once decoded, padding included (pdf.js keeps each decoded stream while it reads it), in all
+   *  and for the largest stream. */
+  rawContent: number;
+  largestRawContent: number;
+  /** The most streams in one page's /Contents array (1 when none has an array): with the largest stream, a bound on
+   *  one page's content, which is read at once. */
+  maxContents: number;
   /** Bytes of embedded font programs once decoded. pdf.js reads and converts every font a page uses, to read its text
    *  or to draw it. */
   fontBytes: number;
@@ -65,11 +81,89 @@ const ENDSTREAM = enc('endstream');
 const latin1 = new TextDecoder('latin1');
 const MB = 1048576;
 /**
- * Page content counts for the memory estimate up to this much per stream. What costs memory is many small text items;
- * a stream past this is a drawing (paths cost little per byte: a 40-page drawing with 260 KB a page needed no more
- * memory to edit than a plain file), or padding, which would otherwise make an ordinary file look like gigabytes.
+ * Page content counts for the memory estimate without its padding: in a run of white space or zero bytes (PDF white
+ * space), only the first PAD_RUN bytes count. Drawing and text operators are separated by a byte or two of white
+ * space, so they count in full, while a stream of zeros, which readers skip without allocating, counts almost nothing.
  */
-const CONTENT_COUNTED = 128 * 1024;
+const PAD_RUN = 32;
+const PDF_SPACE = new Uint8Array(256);
+for (const c of [0, 9, 10, 12, 13, 32]) PDF_SPACE[c] = 1;
+
+/** Where a PDF token ends: white space or a delimiter. */
+const TOKEN_END = new Uint8Array(256);
+for (const c of [0, 9, 10, 12, 13, 32, 40, 41, 60, 62, 91, 93, 123, 125, 47, 37]) TOKEN_END[c] = 1;
+
+/**
+ * Counts content bytes as it passes, leaving out padding, and which names its Do operators draw (each a form or a
+ * picture; which, the resources say). A token is read only as far as telling a name and a Do apart.
+ */
+class ContentCount implements Sink {
+  n = 0;
+  raw = 0;
+  /** Do operators by the name before them. */
+  readonly drawn = new Map<string, number>();
+  /** BT operators: the stream holds text. */
+  texts = 0;
+  private run = 0;
+  private inName = false;
+  private name = '';
+  private lastName = '';
+  private afterName = false;
+  private tokLen = 0;
+  private tok0 = 0;
+  private tok1 = 0;
+  push(chunk: Uint8Array): void {
+    let n = 0, run = this.run, tokLen = this.tokLen;
+    for (let i = 0; i < chunk.length; i++) {
+      const c = chunk[i];
+      if (PDF_SPACE[c]) {
+        // White space ends any token; the whole run is taken at once (padding past PAD_RUN counts nothing, and a stream
+        // of zeros is read as fast as it can be).
+        if (this.inName) { this.inName = false; this.lastName = this.name; this.afterName = true; }
+        else if (tokLen) { this.tokLen = tokLen; this.token(); tokLen = 0; }
+        let j = i + 1;
+        while (j < chunk.length && PDF_SPACE[chunk[j]]) j++;
+        const len = j - i;
+        if (run < PAD_RUN) n += Math.min(len, PAD_RUN - run);
+        run += len;
+        i = j - 1;
+        continue;
+      }
+      run = 0;
+      n++;
+      if (this.inName) {
+        if (!TOKEN_END[c]) { if (this.name.length < 64) this.name += String.fromCharCode(c); continue; }
+        this.inName = false;
+        this.lastName = this.name;
+        this.afterName = true;
+      }
+      if (c === 47 || TOKEN_END[c]) {
+        if (tokLen) { this.tokLen = tokLen; this.token(); tokLen = 0; }
+        if (c === 47) { this.inName = true; this.name = ''; }
+        continue;
+      }
+      if (tokLen === 0) this.tok0 = c;
+      else if (tokLen === 1) this.tok1 = c;
+      tokLen++;
+    }
+    this.tokLen = tokLen;
+    this.n += n;
+    this.raw += chunk.length;
+    this.run = run;
+  }
+  /** A token other than a name ends: a Do right after a name draws it. */
+  private token(): void {
+    if (!this.tokLen) return;
+    if (this.tokLen === 2 && this.tok0 === 68 && this.tok1 === 111 && this.afterName) this.drawn.set(this.lastName, (this.drawn.get(this.lastName) ?? 0) + 1);
+    else if (this.tokLen === 2 && this.tok0 === 66 && this.tok1 === 84) this.texts++;
+    this.afterName = false;
+    this.tokLen = 0;
+  }
+  end(): void {
+    this.token();
+    this.inName = false;
+  }
+}
 const mb = (n: number) => `${Math.round(n / MB).toLocaleString('en-US')} MB`;
 
 const FILTER_NAMES: Record<string, string> = {
@@ -118,10 +212,20 @@ class Head implements Sink {
 class PageCounter implements Sink {
   pages = 0;
   softMasks = 0;
+  contents = 0;
   signature = false;
   private tail = '';
+  /** A longer tail for /Contents arrays and references, which are kept as a maximum or a set, so seeing one twice does
+   *  no harm. */
+  private ctail = '';
+  constructor(private onRefs: (text: string) => void) {}
   push(chunk: Uint8Array): void {
-    const text = this.tail + latin1.decode(chunk);
+    const piece = latin1.decode(chunk);
+    const text = this.tail + piece;
+    const long = this.ctail + piece;
+    this.contents = Math.max(this.contents, mostContents(long));
+    this.onRefs(long);
+    this.ctail = long.slice(-1024);
     this.pages += countPages(text);
     this.softMasks += countSoftMasks(text);
     if (/\/ByteRange|\/Type\s*\/Sig\b/.test(text)) this.signature = true;
@@ -133,6 +237,14 @@ class PageCounter implements Sink {
 }
 
 const countPages = (text: string) => (text.match(/\/Type\s*\/Page(?![A-Za-z0-9])/g) ?? []).length;
+/** The most references in one /Contents array in this text. */
+const mostContents = (text: string) => {
+  let most = 0;
+  for (const m of text.matchAll(/\/Contents\s*\[([^\]]*)\]/g)) most = Math.max(most, (m[1].match(/\d+\s+\d+\s+R/g) ?? []).length);
+  return most;
+};
+/** A name followed by an indirect reference: /Fm0 12 0 R. */
+const NAME_REF = /\/([^\s/[\]<>(){}%]{1,64})\s+(\d+)\s+\d+\s+R\b/g;
 const countSoftMasks = (text: string) => (text.match(/\/S\s*\/(?:Luminosity|Alpha)(?![A-Za-z0-9])/g) ?? []).length;
 
 /** The width and height in a JPEG's frame header, or null. */
@@ -168,9 +280,26 @@ class Scanner {
   fed = 0;
   report: PdfScan = {
     version: null, encrypted: false, objects: 0, pages: 0, streams: 0, objectStreams: 0, decodedBytes: 0, textBytes: 0,
-    objectStreamBytes: 0, largestStream: 0, contentBytes: 0, fontBytes: 0, images: 0, largestImagePixels: 0, largestJpxPixels: 0, signatureHint: false, jbig2: 0, jpx: 0, softMasks: 0,
+    objectStreamBytes: 0, largestStream: 0, contentBytes: 0, largestContent: 0, formExpansion: 0, textFormExpansion: 0, rawContent: 0, largestRawContent: 0, maxContents: 1, fontBytes: 0, images: 0, largestImagePixels: 0, largestJpxPixels: 0, signatureHint: false, jbig2: 0, jpx: 0, softMasks: 0,
   };
+  /** For form expansion: each form's content size by object number, the objects each name refers to (from any
+   *  dictionary in the file), and how often each name is drawn. */
+  private formSize = new Map<number, number>();
+  private textForms = new Set<number>();
+  private refs = new Map<string, Set<number>>();
+  private drawn = new Map<string, number>();
+  /** The object number of the stream being measured, from its header. */
+  private objNum = -1;
   constructor(private b: Uint8Array, private L: PdfLimits) {}
+
+  /** Notes the objects each name refers to in this text (a name followed by a reference). */
+  noteRefs(text: string): void {
+    for (const m of text.matchAll(NAME_REF)) {
+      let set = this.refs.get(m[1]);
+      if (!set) { if (this.refs.size >= 100_000) continue; set = new Set(); this.refs.set(m[1], set); }
+      if (set.size < 10_000) set.add(Number(m[2]));
+    }
+  }
 
   /** Called for every decoded piece: checks one stream's size and the file's total. */
   add(n: number, streamSoFar: number, what: string): void {
@@ -201,6 +330,19 @@ class Scanner {
       at = Math.max(at, end - 1);
     }
     this.examineText(text, b.length);
+    let expansion = 0, textExpansion = 0;
+    for (const [name, n] of this.drawn) {
+      let size = 0, textSize = 0;
+      for (const o of this.refs.get(name) ?? []) {
+        const f = this.formSize.get(o) ?? 0;
+        size = Math.max(size, f);
+        if (this.textForms.has(o)) textSize = Math.max(textSize, f);
+      }
+      expansion += n * size;
+      textExpansion += n * textSize;
+    }
+    this.report.formExpansion = expansion;
+    this.report.textFormExpansion = textExpansion;
     this.report.decodedBytes = this.decoded;
     this.report.objectStreamBytes = this.objectStreamBytes;
     if (this.report.objects > this.L.pdfObjects) throw new LimitError(`This PDF has ${this.report.objects.toLocaleString('en-US')} objects; the limit is ${this.L.pdfObjects.toLocaleString('en-US')}.`);
@@ -218,6 +360,8 @@ class Scanner {
       const own = p + 4 * MB >= to ? text : text.slice(0, 4 * MB);
       this.report.objects += (own.match(/\d+\s+\d+\s+obj\b/g) ?? []).length;
       this.report.pages += countPages(own);
+      this.report.maxContents = Math.max(this.report.maxContents, mostContents(text));
+      this.noteRefs(text);
       this.report.softMasks += countSoftMasks(own);
       if (/\/ByteRange|\/Type\s*\/Sig\b/.test(text)) this.report.signatureHint = true;
       for (const m of text.matchAll(/trailer\s*<</g)) {
@@ -243,9 +387,10 @@ class Scanner {
   private dictBefore(at: number, lower: number): PdfDict {
     const from = Math.max(lower, at - 256 * 1024);
     const window = latin1.decode(this.b.subarray(from, at));
-    const re = /\d+\s+\d+\s+obj\b/g;
+    const re = /(\d+)\s+\d+\s+obj\b/g;
     let last = -1;
-    for (let m = re.exec(window); m; m = re.exec(window)) last = m.index + m[0].length;
+    this.objNum = -1;
+    for (let m = re.exec(window); m; m = re.exec(window)) { last = m.index + m[0].length; this.objNum = Number(m[1]); }
     if (last < 0) return {};
     const d = this.readDict(from + last);
     return d ?? {};
@@ -305,13 +450,15 @@ class Scanner {
     if (codec?.name === 'JPX') r.jpx++;
     if (codec?.name === 'CCF') this.row(num(codec.parms.Columns) ?? 1728, 1, 1, 'a fax picture');
     const headSink = codec && (codec.name === 'DCT' || codec.name === 'JPX') ? new Head(256 * 1024) : null;
-    const pages = objstm ? new PageCounter() : null;
+    const pages = objstm ? new PageCounter(t => this.noteRefs(t)) : null;
     // A font program (FontFile, FontFile2, FontFile3) or page content, as far as a dictionary tells: content has no type
     // or subtype and is not a color profile.
     const font = 'Length1' in dict || 'Length2' in dict || 'Length3' in dict || isName(dict.Subtype, 'Type1C') || isName(dict.Subtype, 'CIDFontType0C') || isName(dict.Subtype, 'OpenType');
     const plain = !font && !type && !image && !('Subtype' in dict) && !('N' in dict) && !codec;
     const tally = { n: 0, push(c: Uint8Array) { this.n += c.length; }, end() { /* nothing */ } };
-    let next: Sink = headSink ?? pages ?? tally;
+    const form = isName(dict.Subtype, 'Form') && !codec;
+    const content = plain || form ? new ContentCount() : null;
+    let next: Sink = headSink ?? pages ?? content ?? tally;
     let objectCounter: Counter | null = null;
     if (objstm) next = objectCounter = new Counter(this, next, what);
     const stages: Stage[] = [];
@@ -354,14 +501,28 @@ class Scanner {
       sink.end();
     }
     const streamSize = stages.length ? tally.n : Math.max(0, len ?? end - start - 9);
-    if (plain) r.contentBytes += Math.min(streamSize, CONTENT_COUNTED);
-    else if (font && !codec) r.fontBytes += streamSize;
+    if (content) {
+      // Uncompressed content was not fed through the stages: count it from the file.
+      if (!stages.length) { content.push(b.subarray(start, Math.min(b.length, start + streamSize))); content.end(); }
+      for (const [name, n] of content.drawn) this.drawn.set(name, (this.drawn.get(name) ?? 0) + n);
+      if (form) {
+        if (this.objNum >= 0) this.formSize.set(this.objNum, Math.max(this.formSize.get(this.objNum) ?? 0, content.n));
+        if (this.objNum >= 0 && content.texts) this.textForms.add(this.objNum);
+      }
+      else {
+        r.contentBytes += content.n;
+        r.rawContent += content.raw;
+        if (content.n > r.largestContent) r.largestContent = content.n;
+        if (content.raw > r.largestRawContent) r.largestRawContent = content.raw;
+      }
+    } else if (font && !codec) r.fontBytes += streamSize;
     if (objectCounter) {
       this.objectStreamBytes += objectCounter.count;
       if (this.objectStreamBytes > this.L.pdfObjectStreamBytes) throw new LimitError(`This PDF's object streams expand past ${mb(this.L.pdfObjectStreamBytes)} in all, the limit, so it was not opened.`);
     }
     if (pages) {
       r.pages += pages.pages;
+      r.maxContents = Math.max(r.maxContents, pages.contents);
       r.softMasks += pages.softMasks;
       if (pages.signature) r.signatureHint = true;
     }

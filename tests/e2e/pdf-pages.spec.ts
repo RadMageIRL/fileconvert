@@ -354,8 +354,9 @@ test('a signed PDF has to be accepted, encrypted and hostile PDFs are refused, a
     'import sys, zlib',
     'z = zlib.compress(bytes(200 << 20), 9)',
     'objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>", 2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",',
-    '        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents [4 0 R 5 0 R 6 0 R 7 0 R] >>"}',
-    'for n in range(4, 8): objs[n] = b"<< /Length %d /Filter /FlateDecode >>\\nstream\\n" % len(z) + z + b"\\nendstream"',
+    '        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R >>", 8: b"<< /Length 3 >>\\nstream\\nq Q\\nendstream"}',
+    // Slow to check (the guard decodes 800 MB of zeros) but light to edit: embedded files, not page content.
+    'for n in range(4, 8): objs[n] = b"<< /Type /EmbeddedFile /Length %d /Filter /FlateDecode >>\\nstream\\n" % len(z) + z + b"\\nendstream"',
     'out = b"%PDF-1.7\\n" + b"".join(b"%d 0 obj\\n" % k + v + b"\\nendobj\\n" for k, v in objs.items()) + b"trailer\\n<< /Root 1 0 R >>\\n%%EOF\\n"',
     'open(sys.argv[1], "wb").write(out)',
   ].join('\n'), slow]);

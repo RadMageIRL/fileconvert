@@ -84,17 +84,23 @@ export const LIMITS = {
    * most of what fonts seemed to cost, none in Firefox); for editing, per byte of page content (`content`: the cleanup
    * reads every page's content to see what it uses; Firefox needed none beyond its other figures). The content figures,
    * whose need varied most from one holdout to the next, are half again above the fit. The corrections were checked on
-   * further unseen files.
+   * further unseen files. A check of large content streams after that (local/eval-8, capcheck) added, for text and
+   * editing alike, what one page costs at once: per byte of the largest page's content (`pageContent`: a page of 4 MB
+   * of text items took Chrome 727 MB to read), per byte of that page decoded with its padding (`raw`: readers hold each
+   * decoded stream, even a stream of zeros that holds no operator), and per byte of content that forms make a reader
+   * read again (`expanded`: for each name a Do draws, its uses times the largest form it names; for text, forms that hold
+   * text, and `formRead` for forms that only draw, whose operators text extraction reads and lets go). Each is half again
+   * above what the check needed, and was checked on further unseen files.
    */
   pdfEditMemory: {
-    v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5, content: 31 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 64 * 1024, list: 96 * 1024, copy: 2.5, content: 0 },
-    other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5, content: 47 },
+    v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5, content: 31, pageContent: 32, raw: 4, expanded: 0 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 64 * 1024, list: 96 * 1024, copy: 2.5, content: 0, pageContent: 61.75, raw: 3.5, expanded: 0.75 },
+    other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5, content: 47, pageContent: 93, raw: 6, expanded: 1.25 },
   },
   pdfTextMemory: {
-    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 68 * 1024, stream: 3.5, font: 7, content: 50 },
-    gecko: { base: 256 * MB, byte: 7, parsed: 40, page: 120 * 1024, stream: 3.5, font: 0, content: 69 },
-    other: { base: 320 * MB, byte: 10.5, parsed: 48, page: 180 * 1024, stream: 4, font: 11, content: 104 },
+    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 68 * 1024, stream: 3.5, font: 7, content: 50, pageContent: 162, raw: 4.25, expanded: 79.25, formRead: 3 },
+    gecko: { base: 256 * MB, byte: 7, parsed: 40, page: 120 * 1024, stream: 3.5, font: 0, content: 69, pageContent: 30, raw: 4, expanded: 34, formRead: 3 },
+    other: { base: 320 * MB, byte: 10.5, parsed: 48, page: 180 * 1024, stream: 4, font: 11, content: 104, pageContent: 243, raw: 6.5, expanded: 119, formRead: 4.5 },
   },
   /**
    * Drawing PDF pages as pictures with pdf.js in the render worker (src/core/pdfmemory.ts, estimateRender): PDF to JPG
@@ -110,13 +116,15 @@ export const LIMITS = {
    * shows a large picture leaves memory the browser frees late (previews of a scanned PDF draw dozens at once); `font`,
    * per byte of embedded font programs, which pdf.js converts to draw with; and `content`, per byte of page content
    * once decoded (fitted before fonts; in Firefox it explained what fonts seemed to cost). They were checked again
-   * on further unseen files. WebKit as Playwright runs it cannot draw in a worker, so it was not
+   * on further unseen files. The check of large content streams added the same three one-page terms as for text
+   * (`pageContent`, `raw`, `expanded`: a small form drawn 95,000 times took Chrome 2 GB to draw), half again above
+   * what it needed. WebKit as Playwright runs it cannot draw in a worker, so it was not
    * measured: 'other' is 1.5 times the higher of Chrome and Firefox, part by part, and the base is higher.
    */
   pdfRenderMemory: {
-    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, jpx: 50, drawnImage: 2.75, canvas: 8, masked: 36, held: 1.5, font: 52, content: 26 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, jpx: 22, drawnImage: 0.75, canvas: 8, masked: 36, held: 4, font: 0, content: 76 },
-    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, jpx: 75, drawnImage: 4.25, canvas: 12, masked: 54, held: 6, font: 78, content: 114 },
+    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, jpx: 50, drawnImage: 2.75, canvas: 8, masked: 36, held: 1.5, font: 52, content: 26, pageContent: 154.25, raw: 4, expanded: 79.25 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, jpx: 22, drawnImage: 0.75, canvas: 8, masked: 36, held: 4, font: 0, content: 76, pageContent: 0, raw: 4, expanded: 34 },
+    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, jpx: 75, drawnImage: 4.25, canvas: 12, masked: 54, held: 6, font: 78, content: 114, pageContent: 231.5, raw: 6, expanded: 119 },
   },
   /**
    * Images to PDF (src/engines/pdf/images.ts): pictures in one PDF, and what the PDF may hold in all. Pictures are read

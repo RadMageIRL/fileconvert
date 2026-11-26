@@ -100,7 +100,8 @@ describe('the memory estimate for drawing pages', () => {
     expect(s.softMasks).toBe(1);
     expect(w.softMasks).toBe(true);
     const F = LIMITS.pdfRenderMemory.v8;
-    const base = F.base + F.byte * 1000 + F.parsed * w.parsed + F.page * w.pages + F.stream * w.largest! + F.font * w.fonts! + F.content * w.content!;
+    const base = F.base + F.byte * 1000 + F.parsed * w.parsed + F.page * w.pages + F.stream * w.largest! + F.font * w.fonts! + F.content * w.content!
+      + F.pageContent * w.pageContent! + F.raw * w.pageRaw! + F.expanded * w.expanded!;
     expect(estimateRender(w, 0, { engine: 'v8' }).total).toBe(Math.ceil(base + F.image * 128 * 128));
     expect(estimateRender(w, 1e6, { engine: 'v8' }).total - estimateRender(w, 0, { engine: 'v8' }).total).toBe(F.masked * 1e6);
     expect(estimateRender({ ...w, softMasks: false }, 1e6, { engine: 'v8' }).total - estimateRender({ ...w, softMasks: false }, 0, { engine: 'v8' }).total).toBe(F.canvas * 1e6);
@@ -125,6 +126,9 @@ describe('the memory estimate for drawing pages', () => {
     // Embedded fonts (pdf.js converts each one it draws with) and page content (read into drawing operations) count.
     expect(estimateRender({ ...w, fonts: 1e6 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, fonts: 0 }, 0, { engine: 'v8' }).total).toBe(F.font * 1e6);
     expect(estimateRender({ ...w, content: 1e6 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, content: 0 }, 0, { engine: 'v8' }).total).toBe(F.content * 1e6);
+    // One page's content (read and drawn at once), its decoded bytes with padding, and what forms make pdf.js read again.
+    for (const [k, f] of [['pageContent', F.pageContent], ['pageRaw', F.raw], ['expanded', F.expanded]] as const)
+      expect(estimateRender({ ...w, [k]: 1e6 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, [k]: 0 }, 0, { engine: 'v8' }).total, k).toBe(Math.ceil(f * 1e6));
     // An engine not told apart gets the highest figures.
     for (const k of Object.keys(F) as Array<keyof typeof F>) expect(LIMITS.pdfRenderMemory.other[k]).toBeGreaterThanOrEqual(Math.max(F[k], LIMITS.pdfRenderMemory.gecko[k]));
     expect(estimateRender(w, 1e6).total).toBe(estimateRender(w, 1e6, { engine: 'other' }).total);
