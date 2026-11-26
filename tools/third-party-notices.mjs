@@ -26,7 +26,9 @@ const USE = {
   '@mediabunny/aac-encoder': 'AAC encoding with FFmpeg\'s AAC encoder where the browser has none (media worker)',
   '@mediabunny/flac-encoder': 'FLAC encoding with libFLAC (media worker)',
   '@jsquash/avif': 'AVIF encoding, and AVIF decoding where the browser has none (image worker)',
-  '@jsquash/webp': 'WebP encoding where the browser has none (image worker)',
+  '@jsquash/webp': 'WebP encoding where the browser has none, and Compress WebP and Resize images: WebP decoding and encoding (image worker)',
+  '@jsquash/jpeg': 'MozJPEG: JPEG decoding and encoding for Compress JPG and Resize images (image worker, loaded only by those tools)',
+  '@jsquash/oxipng': 'oxipng: lossless PNG recompression for Compress PNG (image worker, loaded only by that tool)',
   'libheif-js': 'HEIC and HEIF decoding (image worker)',
   utif: 'TIFF reading and writing (image worker)',
   gifenc: 'GIF writing (image and media workers)',
@@ -70,6 +72,12 @@ const VENDORED = {
     ['pdf.js qcms build', 'wasm/LICENSE_PDFJS_QCMS'],
     ['the CMYK color profile CGATS001Compat-v2-micro.icc, in iccs', 'iccs/LICENSE'],
   ],
+  '@jsquash/jpeg': [
+    ['the MozJPEG (libjpeg-turbo) license roll-up, for mozjpeg_enc.wasm and mozjpeg_dec.wasm', 'codec/LICENSE.codec.md'],
+  ],
+  '@jsquash/oxipng': [
+    ['the oxipng license, for squoosh_oxipng_bg.wasm', 'codec/LICENSE.codec.md'],
+  ],
   '@cantoo/pdf-lib': [
     ['UPNG, PNG decoding (Photopea), vendored in packages/upng', 'src/packages/upng/LICENSE'],
     ['@pdf-lib/standard-fonts, the 14 standard font metrics (Andrew Dillon), vendored in packages/standard-fonts', 'src/packages/standard-fonts/LICENSE.md'],
@@ -99,6 +107,7 @@ const repoUrl = p => {
 };
 
 const rule = '='.repeat(78);
+const NL = String.fromCharCode(10);
 const thin = '-'.repeat(78);
 const out = [];
 out.push(`FileConvert: third-party notices
@@ -107,7 +116,7 @@ FileConvert's own code is licensed under the MIT License (see LICENSE.txt).
 
 FileConvert is built with the open-source components below, unmodified. Each keeps
 its own license; the full texts follow. All of them are permissive (MIT, ISC,
-BSD, Apache-2.0, SIL OFL 1.1, BlueOak) except these, which are weak copyleft:
+BSD, Apache-2.0, IJG, zlib, SIL OFL 1.1, BlueOak) except these, which are weak copyleft:
 
   - Mediabunny and its MP3, AAC and FLAC encoder packages, and DOMPurify (offered
     as MPL-2.0 OR Apache-2.0): Mozilla Public License 2.0. Their source code is
@@ -195,11 +204,26 @@ license texts are under those packages in section 1. LAME asks for credit and a
 link: https://lame.sourceforge.io/
 
 libavif 1.0.1 and libaom 3.7.0 (AVIF encoding and decoding), libsharpyuv and
-libwebp (WebP encoding) and libyuv, built by jSquash:
+libwebp (WebP encoding and decoding) and libyuv, built by jSquash:
 `);
 for (const [name, f] of [['libavif', 'libavif-LICENSE.txt'], ['libaom', 'libaom-LICENSE.txt'], ['libaom patent license', 'libaom-PATENTS.txt'], ['libwebp and libsharpyuv', 'libwebp-COPYING.txt'], ['libwebp patent grant', 'libwebp-PATENTS.txt'], ['libyuv', 'libyuv-LICENSE.txt']]) {
   out.push(`--- ${name} ---\n\n${text(join(LIC, f))}\n`);
 }
+out.push(`MozJPEG 3.3.1 (https://github.com/mozilla/mozjpeg), the JPEG codec in
+@jsquash/jpeg (mozjpeg_enc.wasm, mozjpeg_dec.wasm). This software is based in
+part on the work of the Independent JPEG Group. MozJPEG is libjpeg-turbo with
+Mozilla's encoder changes, under the IJG License, the Modified (3-clause) BSD
+License and the zlib License (LICENSE.md and README.ijg below; @jsquash/jpeg's
+own LICENSE.codec.md in section 1 is the same roll-up).
+`);
+for (const [name, f] of [['MozJPEG LICENSE.md', 'mozjpeg-LICENSE.txt'], ['MozJPEG README.ijg (the IJG License is in its LEGAL ISSUES section)', 'mozjpeg-README.ijg.txt']]) {
+  out.push(`--- ${name} ---${NL}${NL}${text(join(LIC, f))}${NL}`);
+}
+out.push(`oxipng 9.1.1 (MIT, https://github.com/shssoichiro/oxipng) with libdeflate
+(MIT) and the Rust crates listed below, compiled into @jsquash/oxipng's
+squoosh_oxipng_bg.wasm (single-threaded build).
+`);
+out.push(`--- oxipng, libdeflate and the Rust crates in squoosh_oxipng_bg.wasm ---${NL}${NL}${text(join(LIC, 'oxipng-crates-LICENSES.txt'))}${NL}`);
 out.push(`${thin}
 
 4. Files kept in this repository

@@ -129,6 +129,22 @@ export const LIMITS = {
     gecko: { base: 256 * MB, held: 3.5, copy: 3, planes: 3, pixel: 24, page: 1536 * 1024 },
     other: { base: 320 * MB, held: 7.5, copy: 3, planes: 5, pixel: 40, page: 1536 * 1024 },
   },
+  /**
+   * The image optimization tools (src/core/imagememory.ts, estimateOptimize), for each engine: a base for the worker and
+   * its codecs; per byte of the file (read, copied into the codec, the result); for Compress PNG per byte of decoded
+   * samples (oxipng keeps the picture and its filtered trials, about nine times its samples); for lossless JPEG per DCT
+   * coefficient (the coefficients read, and read again from the result to check it); for MozJPEG, libwebp and libavif per
+   * pixel (the decoded picture, a copy, and the encoder's working memory; AVIF twice that at 10 and 12 bits); per pixel for
+   * the similarity measure (the result decoded again); for Resize images per pixel decoded and per pixel of the result;
+   * and per byte of the results the page holds.
+   */
+  imageOptMemory: {
+    v8: { base: 96 * MB, byte: 4, png: 12, coefficient: 4.5, mozjpeg: 32, webp: 24, webpLossless: 48, avif: 48, measure: 10, decode: 14, encode: 32, held: 1.25 },
+    gecko: { base: 160 * MB, byte: 4, png: 12, coefficient: 4.5, mozjpeg: 32, webp: 24, webpLossless: 48, avif: 48, measure: 10, decode: 14, encode: 32, held: 1.5 },
+    other: { base: 240 * MB, byte: 6, png: 18, coefficient: 7, mozjpeg: 48, webp: 36, webpLossless: 72, avif: 72, measure: 15, decode: 21, encode: 48, held: 2 },
+  },
+  /** Image optimization: files at once in one tool. */
+  imageOptFiles: 500,
   textToPdfBytes: 8 * MB,
   markupBytes: 8 * MB,
   docxBytes: 200 * MB,

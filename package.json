@@ -28,6 +28,8 @@
     "@cantoo/pdf-lib": "2.11.1",
     "@joplin/turndown-plugin-gfm": "1.0.71",
     "@jsquash/avif": "2.1.1",
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/oxipng": "2.3.0",
     "@jsquash/webp": "1.5.0",
     "@mediabunny/aac-encoder": "1.66.2",
     "@mediabunny/flac-encoder": "1.66.2",

@@ -328,7 +328,7 @@ export function readPng(b: Uint8Array, whole: boolean, crc?: (data: Uint8Array) 
     if (len > 0x7fffffff) throw new Error('This PNG is damaged: a chunk claims an impossible size.');
     if (type === 'IDAT' && !whole) break;
     if (end + 4 > b.length) { if (whole && type !== 'IHDR') break; throw new NeedMore(); }
-    if (whole && crc && crc(b.subarray(p + 4, end)) !== u32be(b, end)) throw new Error(`This PNG is damaged: its ${type} chunk does not match its checksum.`);
+    if (whole && crc && crc(b.subarray(p + 4, end)) !== u32be(b, end)) throw new Error(`This PNG is damaged: ${/^[A-Za-z]{4}$/.test(type) ? `its ${type} chunk` : 'one of its chunks'} does not match its checksum.`);
     if (!ihdr && type !== 'IHDR') throw new Error('This PNG is damaged: it does not start with its header chunk.');
     switch (type) {
       case 'IHDR':

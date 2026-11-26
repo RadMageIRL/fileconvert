@@ -12,13 +12,14 @@ export type WorkerReply =
   /** Sent once when the worker's code has loaded, so the page can tell a failed download from a crash. */
   | { type: 'ready'; id?: undefined }
   | { type: 'progress'; id: number; fraction?: number; stage?: string }
-  | { type: 'done'; id: number; result: unknown }
+  /** `retire`: the worker should not be used again (a codec in it holds memory it cannot give back). */
+  | { type: 'done'; id: number; result: unknown; retire?: boolean }
   | { type: 'error'; id: number; name: string; message: string };
 
 export type Progress = (p: { fraction?: number; stage?: string }) => void;
 
 /** Installs the worker side of the protocol. `handlers` maps task names to async functions. */
-export function serve(handlers: Record<string, (payload: never, progress: Progress) => Promise<{ result: unknown; transfer?: Transferable[] }>>): void {
+export function serve(handlers: Record<string, (payload: never, progress: Progress) => Promise<{ result: unknown; transfer?: Transferable[]; retire?: boolean }>>): void {
   const scope = self as unknown as { onmessage: ((ev: MessageEvent<RunMessage>) => void) | null; postMessage(msg: unknown, transfer?: Transferable[]): void };
   scope.onmessage = async (ev: MessageEvent<RunMessage>) => {
     const { id, task, payload } = ev.data;
@@ -26,8 +27,8 @@ export function serve(handlers: Record<string, (payload: never, progress: Progre
     try {
       const handler = handlers[task];
       if (!handler) throw new Error(`Unknown task ${task}`);
-      const { result, transfer } = await handler(payload as never, progress);
-      scope.postMessage({ type: 'done', id, result } satisfies WorkerReply, transfer ?? []);
+      const { result, transfer, retire } = await handler(payload as never, progress);
+      scope.postMessage({ type: 'done', id, result, ...(retire ? { retire } : {}) } satisfies WorkerReply, transfer ?? []);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       scope.postMessage({ type: 'error', id, name: err.name, message: err.message || String(e) } satisfies WorkerReply);

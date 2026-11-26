@@ -92,7 +92,8 @@ export class Pool {
         if (m.type === 'ready') { slot.loaded = true; return; }
         if (m.id !== id || settled) return;
         if (m.type === 'progress') opts.onProgress?.({ fraction: m.fraction, stage: m.stage });
-        else if (m.type === 'done') { finish(false); resolve(m.result as T); }
+        // A worker whose codec keeps a large picture's memory (oxipng) asks to be retired: the next task gets a new one.
+        else if (m.type === 'done') { finish(!!m.retire); resolve(m.result as T); }
         else if (m.type === 'error') {
           // A failed job may leave a codec in a bad state, so its worker is not reused.
           finish(true);

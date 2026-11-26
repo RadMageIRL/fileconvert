@@ -16,5 +16,10 @@ export async function loadTool(id: ToolId): Promise<ToolDefinition> {
     case 'rotate-pdf': return (await import('../tools/rotate-pdf')).tool;
     case 'pdf-to-images': return (await import('../tools/pdf-to-images')).tool;
     case 'remove-pdf-metadata': return (await import('../tools/remove-pdf-metadata')).tool;
+    case 'compress-png': return (await import('../tools/compress-png')).tool;
+    case 'compress-jpeg': return (await import('../tools/compress-jpeg')).tool;
+    case 'compress-webp': return (await import('../tools/compress-webp')).tool;
+    case 'compress-avif': return (await import('../tools/compress-avif')).tool;
+    case 'resize-image': return (await import('../tools/resize-image')).tool;
   }
 }

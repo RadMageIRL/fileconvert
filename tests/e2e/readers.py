@@ -9,7 +9,8 @@ formatting, links, tables and pictures); md mistune (CommonMark with GFM tables)
 Xpdf pdftotext and PDFium (a PDF's structure, text and rendered pages); pdfdeep qpdf, pypdf and PDFium (what a
 merge keeps: bookmarks, links, named destinations, form fields, layers, page boxes, renders); render PDFium (pictures
 of PDF pages compared with its own rendering); pdfmeta qpdf, pypdf, Pillow and PDFium (what metadata a PDF holds, and
-what stays). None of them shares code with the browser engines.
+what stays); optimize pypng, Pillow, scikit-image, libjpeg-turbo and ExifTool (the image optimization tools' results
+against their originals). None of them shares code with the browser engines.
 """
 
 import csv
@@ -1139,6 +1140,198 @@ def read_pdf_meta(path):
     }
 
 
+def optimize_check(spec_path):
+    """The image optimization tools' results against their originals, read with tools that share no code with them:
+    pypng (every PNG sample as stored, palette and tRNS expanded here), Pillow (decoding, APNG frames, its own Lanczos
+    resize of the upright original), scikit-image (SSIM), libjpeg-turbo's djpeg and jpegtran where installed (pixels and
+    coefficients of lossless JPEG), a box reader here (AVIF bit depth and color), and ExifTool where installed (the
+    metadata left). Spec: a list of {check, src, out, ...}."""
+    import re
+    import shutil
+    import struct
+    import subprocess
+    import tempfile
+    import zlib
+    import numpy as np
+    import png as pypng
+    from PIL import Image, ImageOps
+    from skimage.metrics import structural_similarity
+
+    def png_chunks(b):
+        p, out = 8, []
+        while p + 8 <= len(b):
+            n = struct.unpack('>I', b[p:p + 4])[0]
+            out.append((b[p + 4:p + 8].decode('latin1'), b[p + 8:p + 8 + n]))
+            p += 12 + n
+        return out
+
+    def png_samples(path):
+        r = pypng.Reader(filename=path)
+        w, h, rows, info = r.read()
+        bits, planes = info['bitdepth'], info['planes']
+        a = np.array([np.asarray(list(row), dtype=np.uint32) for row in rows]).reshape(h, w, planes)
+        scale = lambda v, b: (v * 65535) // (2 ** b - 1)
+        if info.get('palette'):
+            pal = np.array([list(c) + [255] * (4 - len(c)) for c in info['palette']], dtype=np.uint32)
+            return scale(pal[a[:, :, 0]], 8).astype(np.uint16)
+        rgb = a[:, :, :3] if planes in (3, 4) else np.repeat(a[:, :, :1], 3, axis=2)
+        if planes in (2, 4):
+            al = a[:, :, planes - 1:planes]
+        else:
+            al = np.full((h, w, 1), 2 ** bits - 1, np.uint32)
+            t = info.get('transparent')
+            if t is not None:
+                t = np.array(t if isinstance(t, (tuple, list)) else (t,), dtype=np.uint32)
+                al[np.all(a[:, :, :len(t)] == t, axis=2)] = 0
+        return scale(np.concatenate([rgb, al], axis=2), bits).astype(np.uint16)
+
+    def frames(path):
+        im = Image.open(path)
+        out = []
+        for i in range(getattr(im, 'n_frames', 1)):
+            im.seek(i)
+            out.append((np.asarray(im.convert('RGBA')).copy(), im.info.get('duration')))
+        return out
+
+    def luma(im):
+        a = np.asarray(im.convert('RGBA'), dtype=np.float64)
+        al = a[:, :, 3:4] / 255
+        rgb = a[:, :, :3] * al + 255 * (1 - al)
+        return 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+
+    def avif_props(b):
+        """Primary item's pixi bits and colr (nclx or prof), from the boxes."""
+        out = {'bits': None, 'nclx': None, 'icc': False, 'irot': False}
+
+        def boxes(s, e):
+            p = s
+            while p + 8 <= e:
+                size, t = struct.unpack('>I4s', b[p:p + 8])
+                if size < 8:
+                    break
+                yield t.decode('latin1'), p + 8, p + size
+                p += size
+        for t, s, e in boxes(0, len(b)):
+            if t != 'meta':
+                continue
+            for t2, s2, e2 in boxes(s + 4, e):
+                if t2 == 'iprp':
+                    for t3, s3, e3 in boxes(s2, e2):
+                        if t3 == 'ipco':
+                            for t4, s4, e4 in boxes(s3, e3):
+                                if t4 == 'pixi' and out['bits'] is None:
+                                    out['bits'] = b[s4 + 5]
+                                elif t4 == 'colr':
+                                    kind = b[s4:s4 + 4]
+                                    if kind == b'nclx' and out['nclx'] is None:
+                                        out['nclx'] = list(struct.unpack('>HHH', b[s4 + 4:s4 + 10]))
+                                    elif kind in (b'prof', b'rICC'):
+                                        out['icc'] = True
+                                elif t4 == 'irot':
+                                    out['irot'] = True
+        return out
+
+    exiftool = None
+    # ExifTool is a local check only (local/tools, never part of the app); without it these results have no exiftool field.
+    for c in [os.environ.get('FILECONVERT_EXIFTOOL', ''), 'local/tools/exiftool/exiftool-13.64_64/exiftool.exe']:
+        if c and os.path.exists(c):
+            exiftool = os.path.abspath(c)
+            break
+    djpeg, jpegtran = shutil.which('djpeg'), shutil.which('jpegtran')
+
+    with open(spec_path, encoding='utf-8') as f:
+        spec = json.load(f)
+    results = []
+    for item in spec:
+        src, out = item['src'], item['out']
+        sb, ob = open(src, 'rb').read(), open(out, 'rb').read()
+        r = {'check': item['check'], 'srcBytes': len(sb), 'outBytes': len(ob), 'sameBytes': sb == ob}
+        markers = sorted(set(m.decode() for m in re.findall(rb'MARK-[A-Z]+-(?:PNG|JPEG|WEBP|AVIF)', ob)))
+        r['markers'] = markers
+        if exiftool:
+            j = json.loads(subprocess.run([exiftool, '-j', '-G1', '-a', '-s', out], capture_output=True, check=False).stdout or b'[{}]')[0]
+            r['exiftool'] = sorted(k for k in j if not k.startswith(('System:', 'File:', 'ExifTool:', 'Composite:')))
+        if item['check'] == 'png':
+            r['pixelsEqual'] = bool(np.array_equal(png_samples(src), png_samples(out)))
+            ihdr = png_chunks(ob)[0][1]
+            r['bits'], r['colorType'], r['interlace'] = ihdr[8], ihdr[9], ihdr[12]
+            types = [t for t, _ in png_chunks(ob)]
+            r['chunks'] = sorted(set(types) - {'IHDR', 'IDAT', 'IEND', 'fdAT'})
+            problems = []
+            for t, d in png_chunks(ob):
+                if t == 'iCCP':
+                    prof = zlib.decompress(d.split(b'\0', 1)[1][1:])
+                    if (ihdr[9] in (0, 4)) != (prof[16:20] == b'GRAY'):
+                        problems.append('profile does not fit the color type')
+            r['problems'] = problems
+            if 'acTL' in [t for t, _ in png_chunks(sb)]:
+                fa, fb = frames(src), frames(out)
+                r['frames'] = len(fb)
+                r['framesEqual'] = len(fa) == len(fb) and all(np.array_equal(x[0], y[0]) and x[1] == y[1] for x, y in zip(fa, fb))
+        if ob[:2] == b'\xff\xd8':
+            # A Multi-Picture file: Pillow follows the index to each picture after the first.
+            with Image.open(out) as im:
+                n = getattr(im, 'n_frames', 1)
+                r['pictures'] = [list(im.size)]
+                for i in range(1, n):
+                    im.seek(i)
+                    im.load()
+                    r['pictures'].append(list(im.size))
+        if item['check'] == 'jpeg-lossless':
+            r['progressive'] = b'\xff\xc2' in ob[:ob.find(b'\xff\xda')]
+            with Image.open(src) as a, Image.open(out) as b2:
+                r['pillowEqual'] = bool(np.array_equal(np.asarray(a), np.asarray(b2)))
+            if djpeg and jpegtran:
+                t = tempfile.mkdtemp()
+                outs = {}
+                for name, p in (('a', src), ('b', out)):
+                    subprocess.run([djpeg, '-outfile', os.path.join(t, name + '.pnm'), p], check=True, capture_output=True)
+                    subprocess.run([jpegtran, '-copy', 'none', '-optimize', '-outfile', os.path.join(t, name + '.jpg'), p], check=True, capture_output=True)
+                    outs[name] = (open(os.path.join(t, name + '.pnm'), 'rb').read(), open(os.path.join(t, name + '.jpg'), 'rb').read())
+                r['djpegEqual'] = outs['a'][0] == outs['b'][0]
+                r['coefficientsEqual'] = outs['a'][1] == outs['b'][1]
+                shutil.rmtree(t)
+        elif item['check'] in ('lossy', 'resize'):
+            with Image.open(out) as im:
+                im.load()
+                r['format'] = im.format
+                r['size'] = list(im.size)
+                r['mode'] = im.mode
+                r['icc'] = bool(im.info.get('icc_profile'))
+                ex = im.getexif()
+                r['orientation'] = ex.get(0x0112)
+                outim = im.copy()
+            with Image.open(src) as sim:
+                sim.load()
+                r['srcIcc'] = bool(sim.info.get('icc_profile'))
+                r['sameIcc'] = sim.info.get('icc_profile') == outim.info.get('icc_profile')
+                up = ImageOps.exif_transpose(sim) if item['check'] == 'resize' else sim.copy()
+            if item['check'] == 'lossy':
+                if list(up.size) == r['size']:
+                    a, b2 = luma(up), luma(outim)
+                    r['ssim'] = round(float(structural_similarity(a, b2, data_range=255, gaussian_weights=True, sigma=1.5, use_sample_covariance=False)), 4)
+                    mse = float(np.mean((a - b2) ** 2))
+                    r['psnr'] = round(10 * np.log10(255 ** 2 / mse), 2) if mse else 99.0
+            else:
+                ref = up.convert('RGBA').resize(tuple(r['size']), Image.Resampling.LANCZOS)
+                got = outim.convert('RGBA')
+                # Colors compared as they show (weighted by alpha): under a transparent pixel any color is right.
+                fr, fg = np.asarray(ref, dtype=np.float64), np.asarray(got, dtype=np.float64)
+                pr, pg = fr[:, :, :3] * fr[:, :, 3:4] / 255, fg[:, :, :3] * fg[:, :, 3:4] / 255
+                d = np.abs(pr - pg)
+                r['meanDiff'] = round(float(d.mean()), 3)
+                r['maxDiff'] = int(round(float(d.max())))
+                r['alphaMeanDiff'] = round(float(np.abs(fr[:, :, 3] - fg[:, :, 3]).mean()), 3)
+                a, b2 = luma(ref), luma(got)
+                if min(a.shape) >= 7:
+                    r['ssimVsPillow'] = round(float(structural_similarity(a, b2, data_range=255, gaussian_weights=True, sigma=1.5, use_sample_covariance=False)), 4)
+            if ob[4:8] == b'ftyp':
+                r['avif'] = avif_props(ob)
+                r['srcAvif'] = avif_props(sb) if sb[4:8] == b'ftyp' else None
+        results.append(r)
+    return {'tools': {'djpeg': bool(djpeg), 'jpegtran': bool(jpegtran), 'exiftool': bool(exiftool)}, 'results': results}
+
+
 kind, path = sys.argv[1], sys.argv[2]
 sys.stdout.reconfigure(encoding='utf-8')
 if kind == 'csv':
@@ -1177,6 +1370,8 @@ elif kind == 'render':
     result = render_compare(path)
 elif kind == 'pdfmeta':
     result = read_pdf_meta(path)
+elif kind == 'optimize':
+    result = optimize_check(path)
 else:
     sys.exit('unknown kind ' + kind)
 print(json.dumps(result, ensure_ascii=False))

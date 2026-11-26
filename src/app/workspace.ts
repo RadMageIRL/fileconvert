@@ -18,7 +18,7 @@ import { clear, h } from './dom';
 import type { Engines } from './jobs';
 import { CanceledError } from './pool';
 import { FirstPages, PageGrid, PreviewSession, TILE, type GridState } from './preview';
-import type { ToolDefinition, ToolInput, ToolOption, ToolValues } from './tools';
+import type { ShowIf, ToolDefinition, ToolInput, ToolOption, ToolValues } from './tools';
 
 interface Entry extends ToolInput {
   info: string;
@@ -169,6 +169,7 @@ export class Workspace {
           if (r.pages !== undefined) e.pages = r.pages;
           if (r.work) e.work = r.work;
           if (r.image) e.image = r.image;
+          if (r.picture) e.picture = r.picture;
           if (r.sizes) e.sizes = r.sizes;
           if (r.note) e.notes.push(r.note);
           if (r.error) e.error = r.error;
@@ -218,6 +219,9 @@ export class Workspace {
   }
 
   setValue(key: string, value: string | number | boolean): void {
+    // The same value again (a field's change on blur after it was taken as typed) changes nothing, so nothing is drawn
+    // again under a button being pressed.
+    if (this.values[key] === value) return;
     this.values[key] = value;
     // A choice the person makes is remembered where the option asks for it (paper size); defaults never are.
     const o = this.def.options.find(x => x.key === key);
@@ -247,7 +251,7 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image, sizes }) => ({ id, file, name, format, pages, work, image, sizes }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image, picture, sizes }) => ({ id, file, name, format, pages, work, image, picture, sizes }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;
@@ -423,7 +427,7 @@ export class Workspace {
       if (grid) grid.before(hint); else box.append(hint);
       el.querySelector('input, select')?.setAttribute('aria-describedby', id);
     }
-    if (o.showIf) { box.dataset.showKey = o.showIf.key; box.dataset.showValue = ([] as string[]).concat(o.showIf.value).join('|'); }
+    if (o.showIf) box.dataset.show = ([] as ShowIf[]).concat(o.showIf as ShowIf | ShowIf[]).map(c => `${c.key}=${([] as string[]).concat(c.value).join('|')}`).join('&');
     return box;
   }
 
@@ -438,6 +442,11 @@ export class Workspace {
     }
     if (o.kind === 'number') {
       const input = h('input', { type: 'number', min: o.min, max: o.max, step: o.step ?? 1, value: Number(this.values[o.key]), 'data-key': `opt-${o.key}` }) as HTMLInputElement;
+      // Taken as it is typed, when it is a number the option allows; on leaving the field it is held to the range.
+      input.addEventListener('input', () => {
+        const v = Number(input.value);
+        if (input.value !== '' && Number.isFinite(v) && v >= o.min && v <= o.max) this.setValue(o.key, v);
+      });
       input.addEventListener('change', () => {
         const v = Math.max(o.min, Math.min(o.max, Number(input.value) || o.min));
         input.value = String(v);
@@ -451,6 +460,7 @@ export class Workspace {
       return h('label', { class: 'field check' }, disabledWhileRunning(box), h('span', {}, o.label));
     }
     const text = h('input', { type: 'text', value: String(this.values[o.key]), placeholder: (o as { placeholder?: string }).placeholder, maxlength: (o as { maxLength?: number }).maxLength, 'data-key': `opt-${o.key}` }) as HTMLInputElement;
+    text.addEventListener('input', () => this.setValue(o.key, text.value));
     text.addEventListener('change', () => this.setValue(o.key, text.value));
     return h('label', { class: 'field' }, h('span', {}, o.label), disabledWhileRunning(text));
   }
@@ -727,7 +737,9 @@ export class Workspace {
     this.renderConfirm();
     this.renderPages();
     // Options that belong to one choice of another (split by ranges, or every N pages).
-    for (const el of this.root.querySelectorAll<HTMLElement>('[data-show-key]')) el.hidden = !el.dataset.showValue!.split('|').includes(String(this.values[el.dataset.showKey!]));
+    for (const el of this.root.querySelectorAll<HTMLElement>('[data-show]')) {
+      el.hidden = !el.dataset.show!.split('&').every(c => { const [k, v] = c.split('='); return v.split('|').includes(String(this.values[k])); });
+    }
     for (const el of this.root.querySelectorAll<HTMLInputElement>('[data-lock]')) el.disabled = this.running;
     this.renderRun();
     this.renderOutputs();
@@ -754,21 +766,30 @@ export class Workspace {
       h('label', { class: 'field check' }, input, h('span', {}, this.def.confirmLabel ?? 'Go on anyway')));
   }
 
+  /** The run and cancel buttons are made once and updated in place: a field's change on blur re-renders this area as
+   *  the button is pressed, and a button made again between the press and the release would lose the click. */
+  private runButton?: HTMLButtonElement;
+  private cancelButton?: HTMLButtonElement;
+
   private renderRun(): void {
     const box = this.runBox;
     const why = this.blocker();
     const keepFocus = document.activeElement && box.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
-    clear(box);
+    const button = this.running
+      ? (this.cancelButton ??= h('button', { type: 'button', 'data-key': 'cancel', onclick: () => this.cancel() }, 'Cancel'))
+      : (this.runButton ??= h('button', { type: 'button', class: 'primary', 'data-key': 'run', onclick: () => void this.run() }, this.def.action));
+    if (!this.running) button.disabled = !!why;
+    // Everything after the button is made again; the button itself stays where it is.
+    if (box.firstChild !== button) { clear(box); box.append(button); }
+    while (button.nextSibling) button.nextSibling.remove();
     if (this.running) {
       const p = h('progress', { max: 1, 'aria-label': `${this.def.title} progress` }) as HTMLProgressElement;
       if (this.fraction !== undefined) p.value = this.fraction;
       box.append(
-        h('button', { type: 'button', 'data-key': 'cancel', onclick: () => this.cancel() }, 'Cancel'),
         h('div', { class: 'job-status' }, h('span', { class: 'state' }, 'Working'), p,
           h('span', { class: 'pct' }, this.fraction !== undefined ? `${Math.floor(this.fraction * 100)}%` : ''),
           h('span', { class: 'job-info' }, this.stage ?? '')));
     } else {
-      box.append(h('button', { type: 'button', class: 'primary', 'data-key': 'run', disabled: !!why, onclick: () => void this.run() }, this.def.action));
       const plan = this.accepted().length && !this.entries.some(e => e.checking) ? this.def.plan?.(this.accepted(), this.values) : null;
       if (plan) box.append(h('p', { class: 'ws-plan' }, plan));
       if (why && this.entries.length) box.append(h('p', { class: 'ws-why' }, why));

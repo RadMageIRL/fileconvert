@@ -19,6 +19,11 @@ export const TOOLS = {
   'rotate-pdf': { accepts: ['pdf'] },
   'pdf-to-images': { accepts: ['pdf'], needs: 'worker-canvas' },
   'remove-pdf-metadata': { accepts: ['pdf'] },
+  'compress-png': { accepts: ['png'] },
+  'compress-jpeg': { accepts: ['jpg'] },
+  'compress-webp': { accepts: ['webp'] },
+  'compress-avif': { accepts: ['avif'] },
+  'resize-image': { accepts: ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp'] },
 } as const satisfies Record<string, { accepts: readonly FormatId[]; needs?: Need }>;
 
 export type ToolId = keyof typeof TOOLS;

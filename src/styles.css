@@ -305,7 +305,9 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-plan { margin: 0; font-size: .92rem; flex: 1 1 100%; }
 .ws-state.canceled { color: var(--warn); }
 .ws-state.done { color: var(--ok); font-weight: 600; }
-.ws-out { display: grid; gap: 8px; justify-items: start; }
+/* One column no wider than the workspace: a long result name in a button that does not wrap must not widen it. */
+.ws-out { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; justify-items: start; }
+.ws-out > * { max-width: 100%; }
 .ws-out .outputs { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
 .ws-file > button { max-width: 100%; }
 
@@ -370,7 +372,11 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
   * { transition: none !important; animation: none !important; }
 }
 .ws-file { display: grid; gap: 4px; justify-items: start; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); width: 100%; }
-.ws-details { margin: 0; padding-left: 18px; color: var(--muted); font-size: .88rem; display: grid; gap: 2px; }
+.ws-details { margin: 0; padding-left: 18px; color: var(--muted); font-size: .88rem; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.ws-file { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+/* Above the phone rule for .outputs buttons: a result's button is never wider than its card. */
+.ws-out .ws-file > button { max-width: 100%; }
+.ws-out .job-notes { overflow-wrap: anywhere; }
 .ws-out .outputs:has(.ws-file) { flex-direction: column; width: 100%; }
 html[data-tool] #drop, html[data-tool] #work { display: none; }
 .common .common-sub { margin-top: 14px; }

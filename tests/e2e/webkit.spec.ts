@@ -307,3 +307,50 @@ test('page previews, PDF to JPG and PNG, and Remove PDF metadata in WebKit: what
   expect(meta.words.filter(x => x.startsWith('MARK-'))).toEqual([]);
   expect(w.outside).toEqual([]);
 });
+
+test('the image optimization tools in WebKit, which has no canvas in workers: PNG, JPG, WebP and AVIF compress, and pictures resize', async ({ page }) => {
+  test.slow();
+  const w = await openApp(page);
+  const ws = page.locator('#workspace');
+  const open = (id: string) => page.evaluate(t => (window as unknown as { __fileconvert: { openTool(id: string): Promise<unknown> } }).__fileconvert.openTool(t), id);
+  const runAndRead = async (action: string) => {
+    await ws.getByRole('button', { name: action, exact: true }).click();
+    await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 180_000 });
+    return page.evaluate(async () => Promise.all((window as unknown as { __fileconvert: { workspace: { outputs: Array<{ name: string; blob: Blob; details?: string[] }> } } }).__fileconvert.workspace.outputs.map(async o => ({ name: o.name, details: o.details ?? [], bytes: [...new Uint8Array(await o.blob.arrayBuffer())] }))));
+  };
+  const dir = tempDir();
+  const checkAll = (check: string, outs: Array<{ name: string; bytes: number[] }>) => {
+    const spec = writeTemp(dir, `${check}.json`, Buffer.from(JSON.stringify(outs.map(o => ({ check, src: fx(`optimize/${o.name}`), out: writeTemp(dir, o.name, new Uint8Array(o.bytes)) })))));
+    return pyRead<{ results: Array<{ pixelsEqual?: boolean; djpegEqual?: boolean; pillowEqual?: boolean; size?: number[]; format?: string }> }>('optimize', spec).results;
+  };
+  await open('compress-png');
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/rgb.png'), fx('optimize/animated.png')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  for (const r of checkAll('png', await runAndRead('Compress'))) expect(r.pixelsEqual).toBe(true);
+  await open('compress-jpeg');
+  await ws.locator('[data-key="opt-mode"]').selectOption('lossless');
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/photo.jpg')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  for (const r of checkAll('jpeg-lossless', await runAndRead('Compress'))) expect(r.pillowEqual).toBe(true);
+  await ws.locator('[data-key="opt-mode"]').selectOption('quality');
+  for (const r of checkAll('lossy', await runAndRead('Compress'))) expect(r.format).toBe('JPEG');
+  // A CMYK JPEG is decoded by the browser, which needs a canvas here: it is left out with the reason.
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/cmyk.jpg')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  await ws.getByRole('button', { name: 'Compress', exact: true }).click();
+  await expect(ws.locator('.ws-out > .job-notes')).toContainText('cmyk.jpg was left out: This picture is decoded by the browser, which needs OffscreenCanvas; this browser has none.', { timeout: 120_000 });
+  await open('compress-webp');
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/lossy.webp')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  for (const r of checkAll('lossy', await runAndRead('Compress'))) expect(r.format).toBe('WEBP');
+  await open('compress-avif');
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/photo.avif')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  for (const r of checkAll('lossy', await runAndRead('Compress'))) expect(r.format).toBe('AVIF');
+  await open('resize-image');
+  await ws.locator('[data-key="opt-width"]').fill('100');
+  await ws.locator('input[type=file]').setInputFiles([fx('optimize/photo.jpg'), fx('optimize/rgba.png')]);
+  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  for (const r of checkAll('resize', await runAndRead('Resize'))) expect(r.size![0]).toBe(100);
+  expect(w.outside).toEqual([]);
+});

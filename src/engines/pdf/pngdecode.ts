@@ -113,6 +113,19 @@ function unfilterRow(f: number, cur: Uint8Array, prev: Uint8Array, n: number, bp
   }
 }
 
+/** Where a row of an (Adam7) pass sits in the picture: its first pixel and its step, across and down. */
+export interface RowPlace { x0: number; y0: number; dx: number; dy: number; width: number }
+
+/**
+ * Every row of the picture once its filter is undone, without its filter byte, with the pass it belongs to (the seven
+ * Adam7 passes in order when interlaced, else one): for checks that read a picture without holding it. The data is
+ * inflated in pieces and only as far as the picture goes, as for decodePng. `L.idat` gives the data's places in `b`
+ * (an APNG frame's fdAT data, without their sequence numbers, works the same way).
+ */
+export function eachRow(b: Uint8Array, L: PngLayout, visit: (pass: RowPlace, y: number, row: Uint8Array) => void): void {
+  inflate(b, L, new Rows(L, true, (pass, y, row) => visit(pass, y, row.subarray(1))));
+}
+
 /** Inflates the IDAT data through `rows`, and says what went wrong, if anything. */
 function inflate(b: Uint8Array, L: PngLayout, rows: Rows): void {
   const stage = new FlateStage(rows);

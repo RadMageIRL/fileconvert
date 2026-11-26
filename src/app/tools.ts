@@ -4,6 +4,7 @@
 // names and the downloads. A tool only says what it accepts and how to run, so every tool behaves the same way.
 
 import type { FormatId } from '../core/formats';
+import type { PictureWork } from '../core/imagememory';
 import type { ImageWork, PdfWork } from '../core/pdfmemory';
 import type { Engines } from './jobs';
 
@@ -20,6 +21,8 @@ export interface ToolInput {
   work?: PdfWork;
   /** What a picture's header says it costs, for the memory admission check (Images to PDF). */
   image?: ImageWork;
+  /** What a picture's header says it costs, for the image optimization tools' memory check. */
+  picture?: PictureWork;
   /** Each page's size as shown, in points, flat [w1, h1, w2, h2, ...] (PDF tools that draw pages, and previews). */
   sizes?: readonly number[];
 }
@@ -33,6 +36,8 @@ export interface ToolInspection {
   work?: PdfWork;
   /** What a picture's header says it costs (Images to PDF). */
   image?: ImageWork;
+  /** What a picture's header says it costs (image optimization tools). */
+  picture?: PictureWork;
   /** Each page's size as shown (PDF tools that draw pages, and previews). */
   sizes?: readonly number[];
   /** Shown under the file. */
@@ -43,13 +48,17 @@ export interface ToolInspection {
   confirm?: string;
 }
 
+/** A condition on another option's value. */
+export interface ShowIf { key: string; value: string | readonly string[] }
+
 /** What every option may have: a line of help under it, and a condition on another option for being shown. */
 interface OptionBase {
   key: string;
   label: string;
   hint?: string;
-  /** Shown only while the select option `key` has this value, or one of these values. */
-  showIf?: { key: string; value: string | readonly string[] };
+  /** Shown only while the select option `key` has this value, or one of these values; with a list, while every one of
+   *  them holds. */
+  showIf?: ShowIf | readonly ShowIf[];
   /** A choice the person makes is remembered in this browser under this name, and starts the option next time instead
    *  of its default (paper size). Only a choice they make is stored, never the default. */
   remember?: string;
