@@ -78,16 +78,23 @@ export const LIMITS = {
    * input (split copies the pictures and fonts its pages share into every part, and the result is held twice while it
    * is handed to the page). Objects are counted but not priced: the bytes parsed cover them. Each set is above every
    * peak measured in its browser, by 10% at least (local/PHASE2-MEMORY-v0.2.0.md). Text is pdf.js reading text.
+   * Holdouts of files not used to fit them (local/eval-8) raised the text figures per page and per byte, and added: for
+   * text, per byte of page content once decoded (`content`: many small text items cost far more than their bytes) and
+   * per byte of embedded font programs (`font`, which pdf.js reads and converts; fitted after content, which explained
+   * most of what fonts seemed to cost, none in Firefox); for editing, per byte of page content (`content`: the cleanup
+   * reads every page's content to see what it uses; Firefox needed none beyond its other figures). The content figures,
+   * whose need varied most from one holdout to the next, are half again above the fit. The corrections were checked on
+   * further unseen files.
    */
   pdfEditMemory: {
-    v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 64 * 1024, list: 96 * 1024, copy: 2.5 },
-    other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5 },
+    v8: { base: 128 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 48 * 1024, list: 96 * 1024, copy: 2.5, content: 31 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 48, page: 40 * 1024, stream: 1.5, output: 64 * 1024, list: 96 * 1024, copy: 2.5, content: 0 },
+    other: { base: 320 * MB, byte: 9.5, parsed: 128, page: 40 * 1024, stream: 7, output: 192 * 1024, list: 96 * 1024, copy: 2.5, content: 47 },
   },
   pdfTextMemory: {
-    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 48 * 1024, stream: 3.5 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, stream: 3.5 },
-    other: { base: 320 * MB, byte: 4.5, parsed: 48, page: 64 * 1024, stream: 4 },
+    v8: { base: 128 * MB, byte: 3, parsed: 40, page: 68 * 1024, stream: 3.5, font: 7, content: 50 },
+    gecko: { base: 256 * MB, byte: 7, parsed: 40, page: 120 * 1024, stream: 3.5, font: 0, content: 69 },
+    other: { base: 320 * MB, byte: 10.5, parsed: 48, page: 180 * 1024, stream: 4, font: 11, content: 104 },
   },
   /**
    * Drawing PDF pages as pictures with pdf.js in the render worker (src/core/pdfmemory.ts, estimateRender): PDF to JPG
@@ -97,13 +104,19 @@ export const LIMITS = {
    * bitmap and the smaller copies it draws from); per pixel of the page being drawn (`canvas`, or `masked` where the file
    * has soft masks, which take several page-sized canvases); and per byte of results held in memory where the browser has
    * no private storage for them. Fitted to peaks measured twice in Chrome and in Firefox, each set at least 10% above
-   * every peak in its browser (local/PHASE2-TOOLKIT-v0.2.0.md). WebKit as Playwright runs it cannot draw in a worker, so
-   * it was not measured: 'other' is 1.5 times the higher of Chrome and Firefox, part by part, and the base is higher.
+   * every peak in its browser (local/PHASE2-TOOLKIT-v0.2.0.md). A holdout of files not used to fit them (local/eval-8)
+   * added four: `jpx`, per pixel of the largest JPEG 2000 picture, whose decoder needs more than a JPEG's;
+   * `drawnImage`, per pixel of the largest picture for each page drawn up to the 50 pdf.js keeps, since a page that
+   * shows a large picture leaves memory the browser frees late (previews of a scanned PDF draw dozens at once); `font`,
+   * per byte of embedded font programs, which pdf.js converts to draw with; and `content`, per byte of page content
+   * once decoded (fitted before fonts; in Firefox it explained what fonts seemed to cost). They were checked again
+   * on further unseen files. WebKit as Playwright runs it cannot draw in a worker, so it was not
+   * measured: 'other' is 1.5 times the higher of Chrome and Firefox, part by part, and the base is higher.
    */
   pdfRenderMemory: {
-    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, canvas: 8, masked: 36, held: 1.5 },
-    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, canvas: 8, masked: 36, held: 4 },
-    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, canvas: 12, masked: 54, held: 6 },
+    v8: { base: 160 * MB, byte: 3, parsed: 40, page: 48 * 1024, drawn: 8 * 1024, stream: 3.5, image: 32, jpx: 50, drawnImage: 2.75, canvas: 8, masked: 36, held: 1.5, font: 52, content: 26 },
+    gecko: { base: 256 * MB, byte: 4.5, parsed: 40, page: 48 * 1024, drawn: 64 * 1024, stream: 3.5, image: 8, jpx: 22, drawnImage: 0.75, canvas: 8, masked: 36, held: 4, font: 0, content: 76 },
+    other: { base: 320 * MB, byte: 6.75, parsed: 60, page: 72 * 1024, drawn: 96 * 1024, stream: 5.25, image: 48, jpx: 75, drawnImage: 4.25, canvas: 12, masked: 54, held: 6, font: 78, content: 114 },
   },
   /**
    * Images to PDF (src/engines/pdf/images.ts): pictures in one PDF, and what the PDF may hold in all. Pictures are read
@@ -143,12 +156,17 @@ export const LIMITS = {
    * workloads in three passes (one in WebKit), 16 of them run three more times, and 12 batches of up to 150 photos
    * (local/eval-7/mem), each figure the smallest that puts every estimate at least 10% above the highest peak seen (the
    * same work in Chrome sometimes peaks about half again higher). 'other' (Safari and browsers not told apart) is 1.5
-   * times the higher of v8 and gecko for each part, and never below what WebKit needed.
+   * times the higher of v8 and gecko for each part, and never below what WebKit needed. A holdout of files not used to
+   * fit them (local/eval-8) raised the lossless WebP figure (photos need more than the screenshots fitted), and
+   * Firefox's MozJPEG, decoding and per-pixel batch figures, and added `perPixelAvif`, per pixel of each picture before
+   * in a batch whose results are AVIF (Firefox frees what libavif used later than any other encoder's memory, and more
+   * so the longer the batch): fitted to every AVIF batch measured, with half again on top. The corrections were checked
+   * on further unseen files.
    */
   imageOptMemory: {
-    v8: { base: 96 * MB, byte: 4, png: 27, coefficient: 9.5, mozjpeg: 41, webp: 21, webpLossless: 43, avif: 90, avifLossless: 139, measure: 3, decode: 8.25, encode: 30, held: 1, perFile: 1.5 * MB, perPixel: 0.08 },
-    gecko: { base: 112 * MB, byte: 4, png: 31, coefficient: 9, mozjpeg: 26, webp: 18, webpLossless: 42, avif: 84, avifLossless: 130, measure: 5, decode: 10.5, encode: 34, held: 1, perFile: 2 * MB, perPixel: 0.22 },
-    other: { base: 176 * MB, byte: 6, png: 64, coefficient: 14.25, mozjpeg: 62, webp: 32, webpLossless: 65, avif: 135, avifLossless: 209, measure: 18.5, decode: 15.75, encode: 51, held: 1.5, perFile: 10.5 * MB, perPixel: 0.33 },
+    v8: { base: 96 * MB, byte: 4, png: 27, coefficient: 9.5, mozjpeg: 41, webp: 21, webpLossless: 93, avif: 90, avifLossless: 139, measure: 3, decode: 8.25, encode: 30, held: 1, perFile: 1.5 * MB, perPixel: 0.08, perPixelAvif: 0.08 },
+    gecko: { base: 112 * MB, byte: 4, png: 31, coefficient: 9, mozjpeg: 37, webp: 18, webpLossless: 86, avif: 84, avifLossless: 130, measure: 5, decode: 20, encode: 34, held: 1, perFile: 2 * MB, perPixel: 0.66, perPixelAvif: 1.6 },
+    other: { base: 176 * MB, byte: 6, png: 64, coefficient: 14.25, mozjpeg: 62, webp: 32, webpLossless: 140, avif: 135, avifLossless: 209, measure: 18.5, decode: 30, encode: 51, held: 1.5, perFile: 10.5 * MB, perPixel: 0.99, perPixelAvif: 2.4 },
   },
   /** Image optimization: files at once in one tool. */
   imageOptFiles: 500,

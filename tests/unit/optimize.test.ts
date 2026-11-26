@@ -12,7 +12,8 @@ import { avifDecode, mozjpegEncode, wasmFiles } from '../../src/engines/image/co
 import { JpegCoefError, optimalTable, readJpegCoefficients, sameCoefficients, writeJpegCoefficients } from '../../src/engines/image/jpegcoef';
 import { compressJpeg, jpegFacts, optimizeJpegLossless, shiftMpf, uprightExif } from '../../src/engines/image/jpegopt';
 import { exifFacts } from '../../src/engines/image/metadata';
-import { optimizeImage, resizeTarget } from '../../src/engines/image/optimize';
+import { optimizeImage, pictureFacts, resizeTarget } from '../../src/engines/image/optimize';
+import { encodeGif } from '../../src/engines/image/encoders';
 import { compressPng, pngFingerprint, readPngFile } from '../../src/engines/image/pngopt';
 import { rgbaRows, writePng } from '../../src/engines/image/pngwrite';
 import { orient, resample } from '../../src/engines/image/resample';
@@ -402,7 +403,19 @@ describe('memory estimates', () => {
       expect(Math.abs(later - alone - (F.held * 1e7 + F.perFile * 20 + F.perPixel * 240e6)), engine).toBeLessThanOrEqual(1);
       expect(F.perFile, engine).toBeGreaterThan(0);
       expect(F.perPixel, engine).toBeGreaterThan(0);
+      // Results in AVIF leave more per picture before (Firefox frees libavif's memory late), and so does a resize whose
+      // format is not yet known; other results do not.
+      const before = { files: 20, pixels: 240e6 };
+      const avifLeft = (Math.max(F.perPixel, F.perPixelAvif) - F.perPixel) * 240e6;
+      for (const [op, more] of [['avif', {}], ['avif-lossless', {}], ['resize', { to: 'avif' }], ['resize', {}]] as const) {
+        const extra = estimateOptimize(op, w, { engine, ...more, before }).total - estimateOptimize(op, w, { engine, ...more, before: { files: 20, pixels: 0 } }).total;
+        expect(Math.abs(extra - Math.max(F.perPixel, F.perPixelAvif) * 240e6), `${engine} ${op}`).toBeLessThanOrEqual(1);
+      }
+      const webp = estimateOptimize('resize', w, { engine, to: 'webp', before }).total - estimateOptimize('resize', w, { engine, to: 'webp', before: { files: 20, pixels: 0 } }).total;
+      expect(Math.abs(webp - F.perPixel * 240e6), engine).toBeLessThanOrEqual(1);
+      expect(avifLeft, engine).toBeGreaterThanOrEqual(0);
     }
+    expect(LIMITS.imageOptMemory.gecko.perPixelAvif).toBeGreaterThan(LIMITS.imageOptMemory.gecko.perPixel);
   });
 
   test('Resize images counts the encoder of the format it writes, and the largest when that is not known', () => {
@@ -416,6 +429,27 @@ describe('memory estimates', () => {
       expect(to('gif'), engine).toBe(to('png'));
       for (const t of ['jpg', 'png', 'webp', 'avif'] as const) expect(to(), `${engine} ${t}`).toBeGreaterThanOrEqual(to(t));
     }
+  });
+});
+
+describe('GIF in Resize images', () => {
+  test('a still GIF whose compressed data holds the bytes of an image descriptor is not taken for an animation', () => {
+    // GIF89a, 2 x 2, no global colors; one image whose data sub-block holds 0x00 0x2C, the bytes that begin an image
+    // descriptor. A scan of the bytes counts a second frame there; walking the blocks finds one.
+    const still = Uint8Array.from([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 2, 0, 2, 0, 0x00, 0, 0,
+      0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0x00,
+      2, 16, 0x00, 0x2c, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0,
+      0x3b,
+    ]);
+    let pairs = 0;
+    for (let i = 13; i < still.length; i++) if (still[i] === 0x2c && still[i - 1] === 0) pairs++;
+    expect(pairs).toBe(2);
+    expect(pictureFacts(still, 'gif', 'resize').problem).toBeNull();
+    const w = 32, h = 24;
+    const pic = new Uint8ClampedArray(w * h * 4).fill(200);
+    const two = encodeGif([{ rgba: pic, delay: 10 }, { rgba: pic.map((v, k) => (k % 4 === 3 ? 255 : 255 - v)), delay: 10 }], w, h, 0).bytes;
+    expect(pictureFacts(two, 'gif', 'resize').problem).toMatch(/^This GIF is animated\./);
   });
 });
 

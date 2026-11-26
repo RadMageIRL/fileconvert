@@ -39,8 +39,16 @@ export interface PdfScan {
   /** Bytes the object streams decode to, which a PDF library also parses into objects. */
   objectStreamBytes: number;
   largestStream: number;
+  /** Bytes of page content once decoded: the streams that are not pictures, fonts, profiles or object streams, each up
+   *  to 128 KB (CONTENT_COUNTED). Reading text and the cleanup's look at what each page uses read all of it. */
+  contentBytes: number;
+  /** Bytes of embedded font programs once decoded. pdf.js reads and converts every font a page uses, to read its text
+   *  or to draw it. */
+  fontBytes: number;
   images: number;
   largestImagePixels: number;
+  /** Pixels of the largest JPEG 2000 picture, from its own header: decoding one costs more than a JPEG. */
+  largestJpxPixels: number;
   /** A digital signature is likely (a signature dictionary or a byte range was seen); the parsed check decides. */
   signatureHint: boolean;
   /** Pictures compressed with JBIG2 or JPEG 2000. */
@@ -56,6 +64,12 @@ const STREAM = enc('stream');
 const ENDSTREAM = enc('endstream');
 const latin1 = new TextDecoder('latin1');
 const MB = 1048576;
+/**
+ * Page content counts for the memory estimate up to this much per stream. What costs memory is many small text items;
+ * a stream past this is a drawing (paths cost little per byte: a 40-page drawing with 260 KB a page needed no more
+ * memory to edit than a plain file), or padding, which would otherwise make an ordinary file look like gigabytes.
+ */
+const CONTENT_COUNTED = 128 * 1024;
 const mb = (n: number) => `${Math.round(n / MB).toLocaleString('en-US')} MB`;
 
 const FILTER_NAMES: Record<string, string> = {
@@ -154,7 +168,7 @@ class Scanner {
   fed = 0;
   report: PdfScan = {
     version: null, encrypted: false, objects: 0, pages: 0, streams: 0, objectStreams: 0, decodedBytes: 0, textBytes: 0,
-    objectStreamBytes: 0, largestStream: 0, images: 0, largestImagePixels: 0, signatureHint: false, jbig2: 0, jpx: 0, softMasks: 0,
+    objectStreamBytes: 0, largestStream: 0, contentBytes: 0, fontBytes: 0, images: 0, largestImagePixels: 0, largestJpxPixels: 0, signatureHint: false, jbig2: 0, jpx: 0, softMasks: 0,
   };
   constructor(private b: Uint8Array, private L: PdfLimits) {}
 
@@ -292,7 +306,12 @@ class Scanner {
     if (codec?.name === 'CCF') this.row(num(codec.parms.Columns) ?? 1728, 1, 1, 'a fax picture');
     const headSink = codec && (codec.name === 'DCT' || codec.name === 'JPX') ? new Head(256 * 1024) : null;
     const pages = objstm ? new PageCounter() : null;
-    let next: Sink = headSink ?? pages ?? { push() { /* counted only */ }, end() { /* nothing */ } };
+    // A font program (FontFile, FontFile2, FontFile3) or page content, as far as a dictionary tells: content has no type
+    // or subtype and is not a color profile.
+    const font = 'Length1' in dict || 'Length2' in dict || 'Length3' in dict || isName(dict.Subtype, 'Type1C') || isName(dict.Subtype, 'CIDFontType0C') || isName(dict.Subtype, 'OpenType');
+    const plain = !font && !type && !image && !('Subtype' in dict) && !('N' in dict) && !codec;
+    const tally = { n: 0, push(c: Uint8Array) { this.n += c.length; }, end() { /* nothing */ } };
+    let next: Sink = headSink ?? pages ?? tally;
     let objectCounter: Counter | null = null;
     if (objstm) next = objectCounter = new Counter(this, next, what);
     const stages: Stage[] = [];
@@ -334,6 +353,9 @@ class Scanner {
       }
       sink.end();
     }
+    const streamSize = stages.length ? tally.n : Math.max(0, len ?? end - start - 9);
+    if (plain) r.contentBytes += Math.min(streamSize, CONTENT_COUNTED);
+    else if (font && !codec) r.fontBytes += streamSize;
     if (objectCounter) {
       this.objectStreamBytes += objectCounter.count;
       if (this.objectStreamBytes > this.L.pdfObjectStreamBytes) throw new LimitError(`This PDF's object streams expand past ${mb(this.L.pdfObjectStreamBytes)} in all, the limit, so it was not opened.`);
@@ -366,6 +388,7 @@ class Scanner {
   private picture(width: number, height: number, from: string): void {
     const px = Math.max(0, width) * Math.max(0, height);
     if (px > this.report.largestImagePixels) this.report.largestImagePixels = px;
+    if (from === 'JPEG 2000 data' && px > this.report.largestJpxPixels) this.report.largestJpxPixels = px;
     if (px > this.L.pdfImagePixels) throw new LimitError(`This PDF has a picture of ${Math.round(width).toLocaleString('en-US')} by ${Math.round(height).toLocaleString('en-US')} pixels (in its ${from}), more than the ${(this.L.pdfImagePixels / 1e6).toLocaleString('en-US')} million pixels allowed, so it was not opened.`);
   }
 

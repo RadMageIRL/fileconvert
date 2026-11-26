@@ -131,7 +131,10 @@ export async function runOptimize(inputs: readonly ToolInput[], ctx: ToolContext
   if (!outputs.length) throw new Error(warnings[0]?.replace(/^.*? was left out: /, '') ?? 'No picture could be processed.');
   ctx.progress({ fraction: 1 });
   if (unchanged && outputs.length > 1) warnings.push(`${plural(unchanged, 'picture')} ${unchanged === 1 ? 'was' : 'were'} kept as ${unchanged === 1 ? 'it was' : 'they were'}.`);
-  const summary = outputs.length > 1 ? `${plural(outputs.length, 'picture')}, ${sizeNote(before, after, false)} in all` : undefined;
+  // The workspace already says how many files and their size: this compares them with the originals.
+  const together = after < before ? `${pct(before, after)}% smaller than the ${formatBytes(before)} they started as (${formatBytes(before - after)} saved)`
+    : after > before ? `${Math.abs(pct(before, after))}% larger than the ${formatBytes(before)} they started as` : 'the same size as before';
+  const summary = outputs.length > 1 ? `Together ${together}` : undefined;
   return { outputs, warnings, summary };
 }
 

@@ -188,6 +188,31 @@ describe('the guard measures compressed data before any reader decodes it', { ti
   });
 });
 
+describe('what the memory estimate is told about content and fonts', () => {
+  test('page content and font programs are counted once decoded, apart from each other and from pictures', () => {
+    const ops = enc('q 1 0 0 1 10 10 cm 0 0 m 100 100 l S Q\n'.repeat(400));
+    const font = new Uint8Array(30_000).map((_, i) => (i * 7) % 251);
+    const z = zlibSync(font);
+    const picture = zlibSync(zeros(64 * 64 * 3));
+    const s = scanPdf(pdf(zlibSync(ops), ' /Filter /FlateDecode', {
+      5: cat(enc(`<< /Length ${z.length} /Length1 ${font.length} /Filter /FlateDecode >>\nstream\n`), z, enc('\nendstream')),
+      6: cat(enc(`<< /Type /XObject /Subtype /Image /Width 64 /Height 64 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${picture.length} /Filter /FlateDecode >>\nstream\n`), picture, enc('\nendstream')),
+    }), LIMITS);
+    expect(s.contentBytes).toBe(ops.length);
+    expect(s.fontBytes).toBe(font.length);
+    // Uncompressed content counts its own length.
+    expect(scanPdf(pdf(ops), LIMITS).contentBytes).toBe(ops.length);
+  });
+
+  test('a content stream counts up to 128 KB: past that it is a drawing or padding, which costs little per byte', () => {
+    const big = zlibSync(zeros(4 << 20));
+    expect(scanPdf(pdf(big, ' /Filter /FlateDecode'), LIMITS).contentBytes).toBe(128 * 1024);
+    const just = enc('0 0 m 1 1 l S\n'.repeat(9362));
+    expect(just.length).toBeLessThan(128 * 1024);
+    expect(scanPdf(pdf(zlibSync(just), ' /Filter /FlateDecode'), LIMITS).contentBytes).toBe(just.length);
+  });
+});
+
 describe('ordinary PDFs with many small streams', () => {
   test('3,000 pages of small compressed content in a 1 MB file pass the guard quickly', () => {
     // Each page's content is a few dozen compressed bytes: feeding every stream 64 KB at a time once counted as

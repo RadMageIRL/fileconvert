@@ -11,7 +11,7 @@ import { formatBytes } from '../core/limits';
 import { isLoadFailure, loadFailureMessage } from '../core/loading';
 import { NameRegistry, safeBase } from '../core/naming';
 import { checkOrder, chosenPages, formatOrder, formatPages, parseOrder } from '../core/pageranges';
-import { memoryAllowance } from '../core/pdfmemory';
+import { estimatePreviews, memoryAllowance } from '../core/pdfmemory';
 import { sniffBlob } from '../core/sniff';
 import { isToolId, toolUnavailable } from '../core/tools';
 import { clear, h } from './dom';
@@ -19,6 +19,10 @@ import type { Engines } from './jobs';
 import { CanceledError } from './pool';
 import { FirstPages, PageGrid, PreviewSession, TILE, type GridState } from './preview';
 import type { ShowIf, ToolDefinition, ToolInput, ToolOption, ToolValues } from './tools';
+
+/** Why previews stopped when this device has memory for the tool or for its previews, but not for both. */
+const CROWDED_PAGES = 'Previews are off for this PDF: this device has memory for the tool or for its previews, not for both. You can still choose pages here or by typing them.';
+const CROWDED_FIRST = 'First-page pictures are off: this device has memory for the tool or for the pictures, not for both.';
 
 interface Entry extends ToolInput {
   info: string;
@@ -135,10 +139,32 @@ export class Workspace {
     if (this.entries.some(e => e.checking)) return 'Checking the files.';
     if (n < min) return min === 1 ? 'Add a file to start.' : `Add at least ${min} files.`;
     if (n > max) return `This tool takes up to ${max} ${max === 1 ? 'file' : 'files'}. Remove ${n - max}.`;
+    // The tool alone first: what it cannot do on this device is said as it always was.
+    for (const e of this.entries) e.previewing = undefined;
     const own = this.def.check?.(this.accepted(), this.values) ?? null;
     if (own) return own;
+    // Then with what the previews may still hold when it runs. When only that does not fit, the previews stop (they are
+    // never needed), and the tool runs.
+    let shown = false;
+    for (const e of this.entries) { e.previewing = this.previewingOf(e); shown ||= !!e.previewing; }
+    if (shown && this.def.check?.(this.accepted(), this.values)) {
+      this.preview?.session.turnOff(CROWDED_PAGES);
+      this.firsts?.turnOff(CROWDED_FIRST);
+      for (const e of this.entries) e.previewing = undefined;
+    }
     if (this.raised().length && !this.confirmed) return `Check "${this.def.confirmLabel ?? 'Go on anyway'}" first.`;
     return null;
+  }
+
+  /** Whether a file's previews are shown, so that a run counts what they may still hold (src/tools/pdf-common.ts,
+   *  withPreviews): its page grid while the previews are not off, or its first-page picture once one was drawn. */
+  private previewingOf(e: Entry): ToolInput['previewing'] {
+    if (!e.work) return undefined;
+    const a = memoryAllowance();
+    // Previews too large for the device on their own are refused by their worker with that reason, and hold nothing.
+    if (this.preview?.id === e.id && this.preview.session.state !== 'off' && estimatePreviews(e.work, 'pages', a.engine).total <= a.total) return 'pages';
+    if (this.firsts && !this.firsts.off && this.firsts.picture(e.id)) return 'first';
+    return undefined;
   }
 
   /** The accepted files that raised a warning. */
@@ -254,7 +280,7 @@ export class Workspace {
 
   async run(): Promise<void> {
     if (this.running || this.blocker()) return;
-    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image, picture, sizes }) => ({ id, file, name, format, pages, work, image, picture, sizes }));
+    const inputs: ToolInput[] = this.accepted().map(({ id, file, name, format, pages, work, image, picture, sizes, previewing }) => ({ id, file, name, format, pages, work, image, picture, sizes, previewing }));
     this.dropOutputs();
     const controller = new AbortController();
     this.controller = controller;

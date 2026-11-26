@@ -5,7 +5,7 @@
 // fails, or a browser that cannot draw here, never stops a tool that does not need one.
 
 import { LimitError } from '../core/limits';
-import { admit, estimateRender, RENDER_KEPT_PAGES, type MemoryAllowance } from '../core/pdfmemory';
+import { admit, estimateRender, type MemoryAllowance, PREVIEW_PAGES, RENDER_KEPT_PAGES } from '../core/pdfmemory';
 import { pixelSize, type PageSize } from '../core/pdfrender';
 import { serve } from '../core/rpc';
 import { createTempFile } from '../core/tempstore';
@@ -42,7 +42,6 @@ export interface RenderedPage {
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 /** Pages counted as drawn for previews: as many as the page keeps pictures of (src/app/preview.ts). */
-const PREVIEW_PAGES = 160;
 
 /** The one PDF a preview worker keeps open, and how many pages it has drawn. */
 let preview: OpenRender | null = null;

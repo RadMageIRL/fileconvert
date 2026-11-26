@@ -161,6 +161,20 @@ test('a PDF too large to preview on this device: previews are off with the reaso
   await expect(ws(page).locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
 });
 
+test('a device with memory for the tool or for its previews, not both: the previews stop, with the reason, and the tool runs', async ({ page, browserName }) => {
+  test.skip(browserName === 'firefox', 'Firefox reports no device memory: the stand-in below is how the other browsers are held to a small device');
+  // 0.5 GB reported: 256 MB allowed. Rotating this PDF needs about 128 MB and its previews about 163 MB; the browser
+  // frees the previews' memory late, so a run counts it, and together they do not fit.
+  await page.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.5, configurable: true }); });
+  await openApp(page);
+  await openTool(page, 'rotate-pdf');
+  await add(page, fx('pdf-render/rotations.pdf'));
+  await expect(ws(page).locator('.pg-note')).toHaveText('Previews are off for this PDF: this device has memory for the tool or for its previews, not for both. You can still choose pages here or by typing them.', { timeout: 30_000 });
+  await expect(ws(page).locator('.ws-why')).toHaveCount(0);
+  await ws(page).getByRole('button', { name: 'Rotate the pages' }).click();
+  await expect(ws(page).locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
+});
+
 test('previews of a file go when it is removed, and the next file gets its own', async ({ page }) => {
   await openApp(page);
   await openTool(page, 'organize-pdf');

@@ -14,6 +14,7 @@ import { decodePng } from '../pdf/pngdecode';
 import { addIcc, avifFacts, compressAvif, patchNclx, type AvifOptions } from './avifopt';
 import { avifDecode, avifEncode, mozjpegDecode, mozjpegEncode, releaseCodecs, RETIRE_PIXELS, RETIRE_PIXELS_PNG, retireAfter, webpDecode, webpEncode } from './codecs';
 import { encodeBmp, encodeGif } from './encoders';
+import { readHeader } from './header';
 import { compressJpeg, jpegFacts, optimizeJpegLossless, uprightExif, type Decoded, type JpegLossyOptions } from './jpegopt';
 import { exifFacts } from './metadata';
 import { compressPng, readPngFile, type PngOptions } from './pngopt';
@@ -252,10 +253,9 @@ async function decodeSource(b: Uint8Array, format: FormatId, progress: Progress)
   }
   if (format === 'gif' || format === 'bmp') {
     if (format === 'gif') {
-      // An animated GIF has more than one image descriptor; only the first frame would be resized.
-      let frames = 0;
-      for (let i = 13; i + 9 < b.length && frames < 2; i++) if (b[i] === 0x2c && b[i - 1] === 0x00) frames++;
-      if (frames > 1) throw new LimitError('This GIF is animated. Resize images makes one picture, so it was not changed; to keep the animation, convert it to GIF, WebP or MP4 in the converter with a size set.');
+      // An animated GIF has more than one image descriptor; only the first frame would be resized. They are counted by
+      // walking the blocks: the bytes of a descriptor also turn up inside compressed picture data.
+      if (readHeader(b, 'gif').animated) throw new LimitError('This GIF is animated. Resize images makes one picture, so it was not changed; to keep the animation, convert it to GIF, WebP or MP4 in the converter with a size set.');
     }
     const d = await browserDecode(b, FORMATS[format].mime);
     return { ...base, pic: d, bits: 8 };
@@ -510,11 +510,12 @@ function storedFacts(b: Uint8Array, format: FormatId, op: 'png' | 'jpeg' | 'webp
     const quarter = f.transforms.some(t => t.kind === 'irot' && t.turns % 2 === 1);
     return { width: f.width, height: f.height, bits: f.bits, raw: f.width * f.height * (f.bits > 8 ? 8 : 4), kind: `${f.bits}-bit${f.alpha ? ', with transparency' : ''}${hdr}`, problem, notes, quarter };
   }
-  // GIF and BMP (Resize images): their size from the header.
+  // GIF and BMP (Resize images): their size from the header; an animated GIF is refused as it is added.
   const w = format === 'gif' ? b[6] | (b[7] << 8) : (b[18] | (b[19] << 8) | (b[20] << 16) | (b[21] << 24)) >>> 0;
   const hRaw = format === 'gif' ? b[8] | (b[9] << 8) : (b[22] | (b[23] << 8) | (b[24] << 16) | (b[25] << 24)) | 0;
   const h = Math.abs(hRaw);
-  return { width: w, height: h, bits: 8, raw: w * h * 4, kind: FORMATS[format].label, problem: null, notes };
+  const problem = format === 'gif' && readHeader(b, 'gif').animated ? 'This GIF is animated. Resize images makes one picture, so it is not used; to keep the animation, convert it to GIF, WebP or MP4 in the converter with a size set.' : null;
+  return { width: w, height: h, bits: 8, raw: w * h * 4, kind: FORMATS[format].label, problem, notes };
 }
 
 // ------------------------------------------------------------------ the entry point

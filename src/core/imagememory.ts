@@ -71,7 +71,9 @@ export function estimateOptimize(op: OptimizeOp, w: PictureWork, more: OptimizeM
       break;
     }
   }
-  const left = more.before ? F.perFile * more.before.files + F.perPixel * more.before.pixels : 0;
+  // A batch whose results are AVIF (or may be: a resize to a format not yet known) leaves more per picture.
+  const avif = op === 'avif' || op === 'avif-lossless' || (op === 'resize' && (more.to === 'avif' || !more.to));
+  const left = more.before ? F.perFile * more.before.files + (avif ? Math.max(F.perPixel, F.perPixelAvif) : F.perPixel) * more.before.pixels : 0;
   const total = F.base + F.byte * w.bytes + work + F.held * (more.held ?? 0) + left;
   return { total: Math.ceil(total), heap: 0 };
 }

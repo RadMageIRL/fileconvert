@@ -160,6 +160,11 @@ export class PreviewSession {
     }
   }
 
+  /** Turns the previews off for this file, with the reason; the pictures drawn so far stay. */
+  turnOff(reason: string): void {
+    if (this.state !== 'off') this.fail(reason);
+  }
+
   /** Lets the worker go while a tool runs; the pictures drawn so far stay, and the next request opens the PDF again. */
   suspend(): void {
     if (this.state === 'off') return;
@@ -305,6 +310,13 @@ export class FirstPages {
   suspend(): void {
     this.stop();
     this.wanted = [];
+  }
+
+  /** No more pictures, with the reason; the ones drawn so far stay. */
+  turnOff(reason: string): void {
+    if (this.off) return;
+    this.off = reason;
+    this.suspend();
   }
 
   dispose(): void {

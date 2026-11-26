@@ -12,7 +12,7 @@ import { estimateRender, refusal } from '../core/pdfmemory';
 import { NO_CANVAS, pictureLimits, pictureProblem, pixelSize, RENDER } from '../core/pdfrender';
 import { hasTempStore } from '../core/tempstore';
 import type { RenderedPage } from '../workers/render.worker';
-import { allowance, chosenPages, inspectPdf, pageLabel, pagesNote, pagesOfInput, plural } from './pdf-common';
+import { adviceWithPreviews, allowance, chosenPages, inspectPdf, pageLabel, pagesNote, pagesOfInput, plural, withPreviews } from './pdf-common';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 
@@ -98,7 +98,8 @@ export const tool: ToolDefinition = {
     const format = formatOf(values);
     const held = hasTempStore() ? 0 : total * HELD_PER_PIXEL[format];
     const needs = pages.length > 1 ? `Converting ${plural(pages.length, 'page')} at ${fmt(dpi)} dpi needs` : `Converting this page at ${fmt(dpi)} dpi needs`;
-    return refusal(estimateRender(input.work, largest, { held, engine: a.engine, drawn: pages.length }), a, needs, held ? 'Convert fewer pages at a time, or choose a lower resolution.' : 'Choose a lower resolution.');
+    return refusal(withPreviews(estimateRender(input.work, largest, { held, engine: a.engine, drawn: pages.length }), inputs, a.engine), a, needs,
+      adviceWithPreviews(held ? 'Convert fewer pages at a time, or choose a lower resolution.' : 'Choose a lower resolution.', inputs));
   },
   async run(inputs, values, ctx) {
     const input = inputs[0];

@@ -3,7 +3,7 @@
 
 import type { ToolDefinition, ToolInput } from '../app/tools';
 import { chosenPages, formatPages, parseRanges, pagesOf } from '../core/pageranges';
-import { estimate, memoryAllowance, refusal, type MemoryAllowance, type PdfWork } from '../core/pdfmemory';
+import { estimate, estimatePreviews, memoryAllowance, refusal, type MemoryAllowance, type MemoryEngine, type MemoryEstimate, type PdfWork } from '../core/pdfmemory';
 import type { DroppedPart, MergeReport } from '../engines/pdf/merge';
 import type { MetadataReport } from '../engines/pdf/metadata';
 import type { CleanReport, SignatureInfo } from '../engines/pdf/structure';
@@ -67,7 +67,28 @@ export function memoryCheck(inputs: readonly ToolInput[], more: { outputs?: numb
   const works = inputs.map(i => i.work).filter((w): w is PdfWork => !!w);
   if (!works.length) return null;
   const a = allowance();
-  return refusal(estimate(works, 'edit', { ...more, engine: a.engine }), a, needs, advice);
+  return refusal(withPreviews(estimate(works, 'edit', { ...more, engine: a.engine }), inputs, a.engine), a, needs, adviceWithPreviews(advice, inputs));
+}
+
+/**
+ * A task's estimate with what the previews of its files may still hold when it runs (src/core/pdfmemory.ts,
+ * estimatePreviews): every page grid shown, and the largest first-page picture (Merge PDFs draws one at a time).
+ */
+export function withPreviews(e: MemoryEstimate, inputs: readonly ToolInput[], engine: MemoryEngine): MemoryEstimate {
+  let pages = 0, first = 0;
+  for (const i of inputs) {
+    if (!i.work || !i.previewing) continue;
+    const t = estimatePreviews(i.work, i.previewing, engine).total;
+    if (i.previewing === 'pages') pages += t; else first = Math.max(first, t);
+  }
+  return { total: e.total + pages + first, heap: e.heap };
+}
+
+/** The advice of a refusal, saying when the previews were counted. */
+export function adviceWithPreviews(advice: string, inputs: readonly ToolInput[]): string {
+  const kind = inputs.find(i => i.work && i.previewing)?.previewing;
+  if (!kind) return advice;
+  return `${advice} This counts the memory ${kind === 'pages' ? 'its page previews' : 'the first-page pictures'} may still hold.`.trim();
 }
 
 /** The pages of the one file a page tool takes, once its check has counted them. */

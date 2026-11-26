@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { LIMITS } from '../../src/core/limits';
-import { admit, allowanceText, estimate, estimateFromSize, looksMobile, memoryAllowance, MemoryLimitError, refusal, workOf, type MemoryAllowance, type PdfWork } from '../../src/core/pdfmemory';
+import { admit, allowanceText, estimate, estimateFromSize, estimatePreviews, looksMobile, memoryAllowance, MemoryLimitError, refusal, workOf, type MemoryAllowance, type PdfWork } from '../../src/core/pdfmemory';
+import { adviceWithPreviews, withPreviews } from '../../src/tools/pdf-common';
 import { scanPdf } from '../../src/engines/pdf/scan';
 import { openPdf, partBytes, pdfLib } from '../../src/engines/pdf/structure';
 import { content, fx, page, pdfFrom } from './pdf-helpers';
@@ -106,11 +109,40 @@ describe('the estimate', () => {
     expect(estimateFromSize(a.bytes, 'text').total).toBeLessThanOrEqual(estimate([a], 'text').total);
   });
 
+  test('the largest JPEG 2000 picture is counted apart, from its own header, since decoding one costs more', () => {
+    const s = scanPdf(new Uint8Array(readFileSync(join(__dirname, '..', 'fixtures', 'pdf-render', 'jpx-cmyk.pdf'))));
+    expect(s.largestJpxPixels).toBeGreaterThan(0);
+    expect(s.largestJpxPixels).toBeLessThanOrEqual(s.largestImagePixels);
+    expect(workOf(1, s).jpxPixels).toBe(s.largestJpxPixels);
+    expect(scanPdf(fx('merge-b-objstm.pdf')).largestJpxPixels).toBe(0);
+  });
+
   test('the counts come from the guard: bytes outside streams, and what object streams decode to', () => {
     const s = scanPdf(fx('merge-b-objstm.pdf'));
     expect(s.objectStreamBytes).toBeGreaterThan(0);
     expect(s.textBytes).toBeGreaterThan(0);
-    expect(workOf(1234, s)).toEqual({ bytes: 1234, parsed: s.textBytes + s.objectStreamBytes, objects: s.objects, pages: s.pages, largest: s.largestStream, imagePixels: s.largestImagePixels, softMasks: s.softMasks > 0 });
+    expect(workOf(1234, s)).toEqual({ bytes: 1234, parsed: s.textBytes + s.objectStreamBytes, objects: s.objects, pages: s.pages, largest: s.largestStream, imagePixels: s.largestImagePixels, jpxPixels: s.largestJpxPixels, content: s.contentBytes, fonts: s.fontBytes, softMasks: s.softMasks > 0 });
+  });
+
+  test('page content and embedded fonts are counted apart, once decoded: the cleanup reads all content, pdf.js converts every font', () => {
+    const sans = scanPdf(new Uint8Array(readFileSync(join(__dirname, '..', 'fixtures', 'pdf-render', 'multilingual.pdf'))));
+    const std = scanPdf(new Uint8Array(readFileSync(join(__dirname, '..', 'fixtures', 'pdf-render', 'fonts-std.pdf'))));
+    // The file with embedded fonts has their programs counted; the one with the standard fonts, not embedded, has none.
+    expect(sans.fontBytes).toBeGreaterThan(10_000);
+    expect(std.fontBytes).toBe(0);
+    expect(sans.contentBytes).toBeGreaterThan(0);
+    expect(std.contentBytes).toBeGreaterThan(0);
+    // Pictures are not content.
+    const pic = scanPdf(new Uint8Array(readFileSync(join(__dirname, '..', 'fixtures', 'pdf-render', 'big-picture.pdf'))));
+    expect(pic.contentBytes).toBeLessThan(1000);
+    const w = workOf(1000, sans);
+    const E = LIMITS.pdfEditMemory.v8, T = LIMITS.pdfTextMemory.v8;
+    expect(estimate([{ ...w, content: 1e6 }], 'edit', { engine: 'v8' }).total - estimate([{ ...w, content: 0 }], 'edit', { engine: 'v8' }).total).toBe(E.content * 1e6);
+    expect(estimate([{ ...w, fonts: 1e6 }], 'text', { engine: 'v8' }).total - estimate([{ ...w, fonts: 0 }], 'text', { engine: 'v8' }).total).toBe(T.font * 1e6);
+    // Reading text prices content too (many small text items), and more than editing does; editing does not price fonts.
+    expect(estimate([{ ...w, content: 1e6 }], 'text', { engine: 'v8' }).total - estimate([{ ...w, content: 0 }], 'text', { engine: 'v8' }).total).toBe(T.content * 1e6);
+    expect(T.content).toBeGreaterThan(E.content);
+    expect(estimate([{ ...w, fonts: 1e6 }], 'edit', { engine: 'v8' }).total).toBe(estimate([{ ...w, fonts: 0 }], 'edit', { engine: 'v8' }).total);
   });
 });
 
@@ -232,5 +264,22 @@ describe('the tools check before they run', () => {
     const input = { id: 1, name: 'a.pdf', format: 'pdf' as const, file: { size: bytes } as File, pages, work: work({ bytes, pages }) };
     expect(del.check!([input], { pages: '1' })).toBeNull();
     expect(reorder.check!([input], { order: `${pages}, 1-${pages - 1}` })).toMatch(/^This PDF needs about .* of memory, more than the 2\.00 GB/);
+  });
+});
+
+describe('what previews hold when a tool runs', () => {
+  test('a tool that showed page previews counts them on top of its work; first-page pictures count the largest one', () => {
+    const w: PdfWork = { bytes: 6e6, parsed: 2e6, objects: 5000, pages: 1200, largest: 3e6, imagePixels: 8.4e6 };
+    const small: PdfWork = { ...w, pages: 3, imagePixels: 1e6 };
+    const file = new File([new Uint8Array(4)], 'a.pdf');
+    const input = (work: PdfWork, previewing?: 'pages' | 'first') => ({ id: 1, file, name: 'a.pdf', format: 'pdf' as const, work, pages: work.pages, previewing });
+    const e = { total: 1000, heap: 7 };
+    expect(withPreviews(e, [input(w)], 'v8')).toEqual(e);
+    expect(withPreviews(e, [input(w, 'pages')], 'v8')).toEqual({ total: 1000 + estimatePreviews(w, 'pages', 'v8').total, heap: 7 });
+    expect(withPreviews(e, [input(w, 'first'), input(small, 'first')], 'v8').total).toBe(1000 + Math.max(estimatePreviews(w, 'first', 'v8').total, estimatePreviews(small, 'first', 'v8').total));
+    // The page grid of 1,200 pages that each show an 8.4 MP picture holds far more than one first page.
+    expect(estimatePreviews(w, 'pages', 'v8').total).toBeGreaterThan(estimatePreviews(w, 'first', 'v8').total);
+    expect(adviceWithPreviews('Merge fewer files.', [input(w, 'first')])).toBe('Merge fewer files. This counts the memory the first-page pictures may still hold.');
+    expect(adviceWithPreviews('', [input(w)])).toBe('');
   });
 });

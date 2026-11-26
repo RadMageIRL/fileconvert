@@ -147,6 +147,8 @@ test('Compress JPG at a quality and to a file size: smaller, similar (SSIM), ori
   await add(page, [O('photo.jpg'), O('exif-icc.jpg'), O('cmyk.jpg'), O('mpf.jpg')]);
   await expect(ws(page).locator('.ws-plan')).toHaveText('4 JPG files at quality 80, dimensions kept.');
   const outs = await run(page);
+  // The count and total come first; the tool adds how they compare with the originals.
+  await expect(ws(page).locator('.ws-state.done')).toHaveText(/^Done: 4 files, [\d.]+ KB\. Together [\d.]+% smaller than the [\d.]+ KB they started as \([\d.]+ KB saved\)$/);
   const res = check(outs.map(o => ({ check: 'lossy', src: O(o.name), out: o.path })));
   const get = (n: string) => res[outs.findIndex(o => o.name === n)];
   for (const [i, r] of res.entries()) {

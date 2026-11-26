@@ -19,6 +19,23 @@ const GB = 1024 * 1024 * 1024;
 /** Pages pdf.js keeps after drawing them before the render worker has it let them all go (src/engines/pdf/render.ts). */
 export const RENDER_KEPT_PAGES = 50;
 
+/** Page previews: pages drawn for one PDF while it is in a tool, and the largest picture of one (224 pixels, at most
+ *  twice that on a high-density screen). Merge PDFs draws one first page per file, 64 pixels (128). */
+export const PREVIEW_PAGES = 160;
+export const PREVIEW_SIDE = 448;
+export const FIRST_PAGE_SIDE = 128;
+
+/**
+ * What the page previews of a PDF may still hold when a tool runs on it: the previews let their worker go, but the
+ * browser frees its memory later (measured, the run started with all of it still taken). A tool that showed previews
+ * counts them on top of its own work. 'first' is Merge PDFs' first-page picture.
+ */
+export function estimatePreviews(work: PdfWork, kind: 'pages' | 'first', engine?: MemoryEngine): MemoryEstimate {
+  return kind === 'pages'
+    ? estimateRender(work, PREVIEW_SIDE * PREVIEW_SIDE, { engine, drawn: PREVIEW_PAGES })
+    : estimateRender(work, FIRST_PAGE_SIDE * FIRST_PAGE_SIDE, { engine, drawn: 1 });
+}
+
 /** What the guard counted in one PDF, the part of it that decides its memory. */
 export interface PdfWork {
   bytes: number;
@@ -32,6 +49,12 @@ export interface PdfWork {
   largest?: number;
   /** Pixels of the largest picture in the file, which drawing a page that shows it decodes whole. */
   imagePixels?: number;
+  /** Pixels of the largest JPEG 2000 picture (its decoder needs more memory per pixel). */
+  jpxPixels?: number;
+  /** Bytes of page content once decoded (text and drawing operators of every page). */
+  content?: number;
+  /** Bytes of embedded font programs once decoded. */
+  fonts?: number;
   /** The file has soft masks, whose drawing takes several page-sized canvases. */
   softMasks?: boolean;
 }
@@ -110,11 +133,11 @@ export function memoryAllowance(env: MemoryEnv = readMemoryEnv()): MemoryAllowan
 }
 
 /** The work in one PDF, from what its guard pass counted. */
-export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number; largestImagePixels?: number; softMasks?: number }): PdfWork {
-  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream, imagePixels: scan.largestImagePixels ?? 0, softMasks: (scan.softMasks ?? 0) > 0 };
+export function workOf(bytes: number, scan: { textBytes: number; objectStreamBytes: number; objects: number; pages: number; largestStream: number; largestImagePixels?: number; largestJpxPixels?: number; contentBytes?: number; fontBytes?: number; softMasks?: number }): PdfWork {
+  return { bytes, parsed: scan.textBytes + scan.objectStreamBytes, objects: scan.objects, pages: scan.pages, largest: scan.largestStream, imagePixels: scan.largestImagePixels ?? 0, jpxPixels: scan.largestJpxPixels ?? 0, content: scan.contentBytes ?? 0, fonts: scan.fontBytes ?? 0, softMasks: (scan.softMasks ?? 0) > 0 };
 }
 
-const sumOf = (works: readonly PdfWork[], k: 'bytes' | 'parsed' | 'objects' | 'pages') => works.reduce((n, w) => n + w[k], 0);
+const sumOf = (works: readonly PdfWork[], k: 'bytes' | 'parsed' | 'objects' | 'pages' | 'content' | 'fonts') => works.reduce((n, w) => n + (w[k] ?? 0), 0);
 
 /**
  * The memory a task on these PDFs needs, at most. `kind` is 'edit' for the editing library (merge, split, extract,
@@ -132,7 +155,11 @@ export function estimate(works: readonly PdfWork[], kind: 'edit' | 'text', more:
   const largest = works.reduce((n, w) => Math.max(n, w.largest ?? 0), 0);
   // The page list and the new files' bytes are held on the page and as buffers, not in the worker's heap.
   const page = kind === 'edit' ? edit.list * (more.listed ?? 0) + edit.copy * (more.extraOutput ?? 0) : 0;
-  const total = per.base + per.byte * sumOf(works, 'bytes') + per.stream * largest + objects + page;
+  // The cleanup reads every page's content to see what it uses; pdf.js reads every page's content, and every font it
+  // uses, to read text (many small text items cost more than their bytes).
+  const T = LIMITS.pdfTextMemory[engine];
+  const read = kind === 'edit' ? edit.content * sumOf(works, 'content') : T.content * sumOf(works, 'content') + T.font * sumOf(works, 'fonts');
+  const total = per.base + per.byte * sumOf(works, 'bytes') + per.stream * largest + objects + page + read;
   // What has to fit in the heap at once: the objects alone, with figures fitted to where a capped heap stopped Chrome.
   const H = LIMITS.pdfHeapMemory;
   const heap = H.parsed * sumOf(works, 'parsed') + H.page * sumOf(works, 'pages') + H.output * outputs;
@@ -151,8 +178,16 @@ export function estimate(works: readonly PdfWork[], kind: 'edit' | 'text', more:
  */
 export function estimateRender(work: PdfWork, pagePixels: number, more: { held?: number; engine?: MemoryEngine; drawn?: number } = {}): MemoryEstimate {
   const F = LIMITS.pdfRenderMemory[more.engine ?? 'other'];
-  const total = F.base + F.byte * work.bytes + F.parsed * work.parsed + F.page * Math.min(work.pages, RENDER_KEPT_PAGES) + F.drawn * (more.drawn ?? 0) + F.stream * (work.largest ?? 0)
-    + F.image * (work.imagePixels ?? 0) + (work.softMasks ? F.masked : F.canvas) * pagePixels + F.held * (more.held ?? 0);
+  const drawn = more.drawn ?? 0;
+  // The largest picture decoded whole (JPEG 2000 at its own figure), and what each page drawn that shows a picture that
+  // large leaves until pdf.js lets its pages go (every 50 pages): measured, a page with an 8 MP picture left about 15 MB
+  // in Chrome however often pdf.js was asked to let go, and the browser freed it later. Pages that show none count too,
+  // since the file does not say which pages show which picture.
+  const picture = Math.max(F.image * (work.imagePixels ?? 0), F.jpx * (work.jpxPixels ?? 0));
+  const leftover = F.drawnImage * (work.imagePixels ?? 0) * Math.min(drawn, RENDER_KEPT_PAGES, work.pages);
+  const total = F.base + F.byte * work.bytes + F.parsed * work.parsed + F.page * Math.min(work.pages, RENDER_KEPT_PAGES) + F.drawn * drawn + F.stream * (work.largest ?? 0)
+    + picture + leftover + (work.softMasks ? F.masked : F.canvas) * pagePixels + F.held * (more.held ?? 0)
+    + F.font * (work.fonts ?? 0) + F.content * (work.content ?? 0);
   const H = LIMITS.pdfHeapMemory;
   return { total: Math.ceil(total), heap: Math.ceil(H.parsed * work.parsed + H.page * work.pages) };
 }

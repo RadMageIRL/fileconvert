@@ -100,13 +100,21 @@ describe('the memory estimate for drawing pages', () => {
     expect(s.softMasks).toBe(1);
     expect(w.softMasks).toBe(true);
     const F = LIMITS.pdfRenderMemory.v8;
-    const base = F.base + F.byte * 1000 + F.parsed * w.parsed + F.page * w.pages + F.stream * w.largest!;
+    const base = F.base + F.byte * 1000 + F.parsed * w.parsed + F.page * w.pages + F.stream * w.largest! + F.font * w.fonts! + F.content * w.content!;
     expect(estimateRender(w, 0, { engine: 'v8' }).total).toBe(Math.ceil(base + F.image * 128 * 128));
     expect(estimateRender(w, 1e6, { engine: 'v8' }).total - estimateRender(w, 0, { engine: 'v8' }).total).toBe(F.masked * 1e6);
     expect(estimateRender({ ...w, softMasks: false }, 1e6, { engine: 'v8' }).total - estimateRender({ ...w, softMasks: false }, 0, { engine: 'v8' }).total).toBe(F.canvas * 1e6);
     expect(F.masked).toBeGreaterThan(F.canvas);
-    // Each page drawn counts too (Firefox frees what a page used later than Chrome).
-    expect(estimateRender(w, 0, { engine: 'gecko', drawn: 1000 }).total - estimateRender(w, 0, { engine: 'gecko' }).total).toBe(LIMITS.pdfRenderMemory.gecko.drawn * 1000);
+    // Each page drawn counts too (Firefox frees what a page used later than Chrome), and so does what a page that shows
+    // the largest picture leaves, for as many pages as are drawn, up to the 50 pdf.js keeps and the file's own pages.
+    const G = LIMITS.pdfRenderMemory.gecko;
+    expect(estimateRender(w, 0, { engine: 'gecko', drawn: 1000 }).total - estimateRender(w, 0, { engine: 'gecko' }).total).toBe(G.drawn * 1000 + G.drawnImage * 128 * 128 * Math.min(1000, 50, w.pages));
+    const many = { ...w, pages: 1200, imagePixels: 8e6 };
+    expect(estimateRender(many, 0, { engine: 'v8', drawn: 160 }).total - estimateRender(many, 0, { engine: 'v8', drawn: 0 }).total).toBe(Math.ceil(F.drawn * 160 + F.drawnImage * 8e6 * 50));
+    expect(estimateRender({ ...many, pages: 3 }, 0, { engine: 'v8', drawn: 160 }).total - estimateRender({ ...many, pages: 3 }, 0, { engine: 'v8', drawn: 0 }).total).toBe(Math.ceil(F.drawn * 160 + F.drawnImage * 8e6 * 3));
+    // JPEG 2000 is decoded at its own figure, the higher one counting.
+    expect(F.jpx).toBeGreaterThan(F.image);
+    expect(estimateRender({ ...w, imagePixels: 4e7, jpxPixels: 4e7 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, imagePixels: 4e7, jpxPixels: 0 }, 0, { engine: 'v8' }).total).toBe((F.jpx - F.image) * 4e7);
     // Pages count up to the 50 pdf.js keeps before the worker lets them go.
     expect(estimateRender({ ...w, pages: 5000 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, pages: 50 }, 0, { engine: 'v8' }).total).toBe(0);
     expect(estimateRender({ ...w, pages: 50 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, pages: 49 }, 0, { engine: 'v8' }).total).toBe(F.page);
@@ -114,6 +122,9 @@ describe('the memory estimate for drawing pages', () => {
     expect(scanPdf(rx('rotations.pdf')).softMasks).toBe(0);
     expect(scanPdf(rx('multilingual.pdf')).softMasks).toBeGreaterThan(0);
     expect(estimateRender(w, 0, { engine: 'v8', held: 1e6 }).total - estimateRender(w, 0, { engine: 'v8' }).total).toBe(F.held * 1e6);
+    // Embedded fonts (pdf.js converts each one it draws with) and page content (read into drawing operations) count.
+    expect(estimateRender({ ...w, fonts: 1e6 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, fonts: 0 }, 0, { engine: 'v8' }).total).toBe(F.font * 1e6);
+    expect(estimateRender({ ...w, content: 1e6 }, 0, { engine: 'v8' }).total - estimateRender({ ...w, content: 0 }, 0, { engine: 'v8' }).total).toBe(F.content * 1e6);
     // An engine not told apart gets the highest figures.
     for (const k of Object.keys(F) as Array<keyof typeof F>) expect(LIMITS.pdfRenderMemory.other[k]).toBeGreaterThanOrEqual(Math.max(F[k], LIMITS.pdfRenderMemory.gecko[k]));
     expect(estimateRender(w, 1e6).total).toBe(estimateRender(w, 1e6, { engine: 'other' }).total);

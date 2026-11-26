@@ -23,6 +23,9 @@ export interface ToolInput {
   image?: ImageWork;
   /** What a picture's header says it costs, for the image optimization tools' memory check. */
   picture?: PictureWork;
+  /** Its previews are shown ('pages': the page grid; 'first': Merge PDFs' first-page picture), so a run counts what
+   *  they may still hold. Set by the workspace. */
+  previewing?: 'pages' | 'first';
   /** Each page's size as shown, in points, flat [w1, h1, w2, h2, ...] (PDF tools that draw pages, and previews). */
   sizes?: readonly number[];
 }
