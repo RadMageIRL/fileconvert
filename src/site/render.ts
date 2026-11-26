@@ -6,7 +6,7 @@
 
 import { allConversions, AUDIO_IN, AUDIO_OUT, effectiveCategory, FORMATS, IMAGE_IN, IMAGE_OUT, targetsFor, VIDEO_IN, VIDEO_OUT, type Category, type FormatId } from '../core/formats.ts';
 import { formatBytes, LIMITS } from '../core/limits.ts';
-import { CATEGORY_LABELS, commonPages, isConversion, isExtract, isNamed, isTool, pageName, pageTitle, PAGES, type ConversionPage, type Page } from '../core/pages.ts';
+import { ALIASES, CATEGORY_LABELS, commonPages, isConversion, isExtract, isNamed, isTool, pageBySlug, pageName, pageTitle, PAGES, type ConversionPage, type Page } from '../core/pages.ts';
 import { isToolId, TOOLS } from '../core/tools.ts';
 
 /** The canonical address of the app. Every page's canonical URL is under it. */
@@ -65,7 +65,9 @@ const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''}${isTo
 export function catalogHtml(): string {
   const cats = (Object.keys(CATEGORY_LABELS) as Category[]).filter(c => PAGES.some(p => p.category === c));
   return cats.map(c => {
-    const items = PAGES.filter(p => p.category === c).map(p =>
+    // Tools first: a search such as "compress jpeg" shows the tool before conversions its words also match.
+    const inCat = PAGES.filter(p => p.category === c);
+    const items = [...inCat.filter(isNamed), ...inCat.filter(p => !isNamed(p))].map(p =>
       `<li class="cat-item" data-cat="${c}" data-slug="${p.slug}" ${pageData(p)} data-terms="${esc(searchTerms(p))}"><a href="./${p.slug}/"><span class="cat-name">${esc(pageName(p))}</span><span class="cat-blurb">${esc(p.blurb)}</span></a></li>`);
     return `<section class="cat-group" data-cat="${c}" aria-labelledby="cat-${c}"><h3 id="cat-${c}">${CATEGORY_LABELS[c]}</h3><ul class="cat-list">${items.join('')}</ul></section>`;
   }).join('');
@@ -262,6 +264,32 @@ export function render404(home: string): string {
   return html.replace(/\b(href|src)="\.\//g, '$1="/fileconvert/');
 }
 
+/**
+ * The page at an alias's address, for hosts that cannot redirect: not indexed, its canonical address the page's, and it
+ * moves on at once (a refresh, with a link for anything that does not follow one). No script, so the policy is the same.
+ */
+export function renderAlias(home: string, from: string): string {
+  const to = pageBySlug(ALIASES[from])!;
+  const csp = /<meta http-equiv="Content-Security-Policy" content="[^"]*">/.exec(home)?.[0] ?? '';
+  const name = pageName(to);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  ${csp}
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${name} | FileConvert</title>
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="${pageUrl(to)}">
+  <meta http-equiv="refresh" content="0; url=../${to.slug}/">
+</head>
+<body>
+  <p>This page has moved to <a href="../${to.slug}/">${name}</a>.</p>
+</body>
+</html>
+`;
+}
+
 export function sitemapXml(lastmod: string | null): string {
   const urls = [SITE, ...PAGES.map(pageUrl)];
   const mod = lastmod ? `<lastmod>${lastmod}</lastmod>` : '';
@@ -276,6 +304,10 @@ export function pageProblems(): string[] {
   const problems: string[] = [];
   const pairs = new Set(allConversions().map(([a, b]) => `${a}>${b}`));
   const seen = { slug: new Set<string>(), title: new Set<string>(), description: new Set<string>() };
+  for (const [from, to] of Object.entries(ALIASES)) {
+    if (PAGES.some(p => p.slug === from)) problems.push(`alias ${from}: a page has that address`);
+    if (!PAGES.some(p => p.slug === to)) problems.push(`alias ${from}: there is no page ${to}`);
+  }
   for (const p of PAGES) {
     const where = `page ${p.slug}`;
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) problems.push(`${where}: the slug must be lowercase words joined by hyphens`);

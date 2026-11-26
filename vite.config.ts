@@ -2,8 +2,8 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
-import { pageBySlug, PAGES } from './src/core/pages.ts';
-import { fillStatics, pageProblems, render404, renderPage, sitemapXml, stripMarkers } from './src/site/render.ts';
+import { ALIASES, pageBySlug, PAGES } from './src/core/pages.ts';
+import { fillStatics, pageProblems, render404, renderAlias, renderPage, sitemapXml, stripMarkers } from './src/site/render.ts';
 import { CSP } from './tools/csp.mjs';
 
 const PDFJS = join('node_modules', 'pdfjs-dist');
@@ -140,6 +140,7 @@ function sitePages(): Plugin {
       // Development: /<slug>/ serves that page, rendered from index.html like the build does.
       server.middlewares.use(async (req, res, next) => {
         const slug = /^\/([a-z0-9-]+)\/$/.exec((req.url ?? '').split('?')[0])?.[1];
+        if (slug && ALIASES[slug]) { res.statusCode = 308; res.setHeader('Location', `/${ALIASES[slug]}/`); res.end(); return; }
         const page = slug ? pageBySlug(slug) : undefined;
         if (!page) return next();
         const home = await server.transformIndexHtml('/', readFileSync('index.html', 'utf8'));
@@ -154,6 +155,7 @@ function sitePages(): Plugin {
       for (const page of PAGES) {
         this.emitFile({ type: 'asset', fileName: `${page.slug}/index.html`, source: stripMarkers(renderPage(home, page)) });
       }
+      for (const from of Object.keys(ALIASES)) this.emitFile({ type: 'asset', fileName: `${from}/index.html`, source: renderAlias(home, from) });
       this.emitFile({ type: 'asset', fileName: '404.html', source: stripMarkers(render404(home)) });
       this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: sitemapXml(lastmod()) });
       index.source = stripMarkers(home);

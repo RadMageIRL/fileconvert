@@ -435,7 +435,7 @@ export class App {
     clear(box);
     const save = () => saveSettings(this.settings);
     const panel = (cat: Category, hint: string, ...fields: Node[]) => {
-      const d = h('details', { class: 'panel', 'data-cat': cat, open: open.has(cat) }, h('summary', {}, `${CATEGORY_NAMES[cat]} settings`, h('span', { class: 'hint' }, hint)), h('div', { class: 'fields' }, ...fields));
+      const d = h('details', { class: 'panel', 'data-cat': cat, open: open.has(cat) }, h('summary', {}, h('span', { class: 'label' }, h('span', { class: 'title' }, `${CATEGORY_NAMES[cat]} settings`), h('span', { class: 'hint' }, hint))), h('div', { class: 'fields' }, ...fields));
       box.append(d);
       return d;
     };

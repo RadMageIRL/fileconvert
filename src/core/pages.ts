@@ -289,7 +289,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['vector', 'logo', 'drawing', 'illustration', 'jpeg'],
   },
   {
-    kind: 'tool', slug: 'remove-image-metadata', tool: 'remove-image-metadata', category: 'image', common: 1,
+    kind: 'tool', slug: 'remove-image-metadata', tool: 'remove-image-metadata', category: 'image', common: 4,
     name: 'Remove photo metadata',
     title: 'Remove Photo Metadata (EXIF, GPS), Private | FileConvert',
     blurb: 'Camera details and location out, picture untouched',
@@ -316,7 +316,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['exif', 'gps', 'location', 'privacy', 'strip', 'metadata', 'remove', 'clean', 'photo', 'iphone'],
   },
   {
-    kind: 'tool', slug: 'compress-jpg', tool: 'compress-jpeg', category: 'image', common: 13,
+    kind: 'tool', slug: 'compress-jpg', tool: 'compress-jpeg', category: 'image', common: 1,
     name: 'Compress JPG',
     title: 'Compress JPG and JPEG, Quality or File Size | FileConvert',
     blurb: 'Smaller photos, by quality or file size',
@@ -343,7 +343,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['jpeg', 'compress', 'compressor', 'reduce', 'shrink', 'smaller', 'optimize', 'optimise', 'kb', 'mb', 'size', 'photo', 'photos', 'mozjpeg', 'quality', 'lossless', 'email'],
   },
   {
-    kind: 'tool', slug: 'compress-png', tool: 'compress-png', category: 'image', common: 15,
+    kind: 'tool', slug: 'compress-png', tool: 'compress-png', category: 'image', common: 2,
     name: 'Compress PNG',
     title: 'Compress PNG Without Losing Quality, Private | FileConvert',
     blurb: 'Smaller PNG files, every pixel kept',
@@ -370,7 +370,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['compress', 'compressor', 'optimize', 'optimise', 'shrink', 'reduce', 'smaller', 'lossless', 'oxipng', 'size', 'screenshot', 'apng'],
   },
   {
-    kind: 'tool', slug: 'compress-webp', tool: 'compress-webp', category: 'image',
+    kind: 'tool', slug: 'compress-webp', tool: 'compress-webp', category: 'image', common: 5,
     name: 'Compress WebP',
     title: 'Compress WebP Images, Lossy or Lossless | FileConvert',
     blurb: 'Smaller WebP, lossy or lossless',
@@ -396,7 +396,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['compress', 'compressor', 'optimize', 'shrink', 'reduce', 'smaller', 'lossless', 'lossy', 'size', 'quality', 'libwebp'],
   },
   {
-    kind: 'tool', slug: 'compress-avif', tool: 'compress-avif', category: 'image',
+    kind: 'tool', slug: 'compress-avif', tool: 'compress-avif', category: 'image', common: 6,
     name: 'Compress AVIF',
     title: 'Compress AVIF Images, HDR and 10-bit Kept | FileConvert',
     blurb: 'Smaller AVIF, its bit depth and HDR kept',
@@ -422,7 +422,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['compress', 'compressor', 'optimize', 'shrink', 'reduce', 'smaller', 'hdr', '10-bit', 'size', 'quality', 'av1'],
   },
   {
-    kind: 'tool', slug: 'resize-image', tool: 'resize-image', category: 'image', common: 14,
+    kind: 'tool', slug: 'resize-image', tool: 'resize-image', category: 'image', common: 3,
     name: 'Resize images',
     title: 'Resize Images: Pixels or Percent, No Cropping | FileConvert',
     blurb: 'New width and height, nothing cropped',
@@ -449,7 +449,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['resize', 'resizer', 'scale', 'shrink', 'smaller', 'larger', 'dimensions', 'width', 'height', 'pixels', 'px', 'percent', 'batch', 'bulk', 'jpeg', 'photo', 'picture'],
   },
   {
-    kind: 'tool', slug: 'images-to-tiff', tool: 'images-to-tiff', category: 'image', common: 2,
+    kind: 'tool', slug: 'images-to-tiff', tool: 'images-to-tiff', category: 'image', common: 16,
     name: 'Combine images into a TIFF',
     title: 'Combine Images into One Multi-Page TIFF | FileConvert',
     blurb: 'Many pictures, one multi-page TIFF',
@@ -734,7 +734,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['txt', 'extract', 'text', 'document'],
   },
   {
-    kind: 'tool', slug: 'merge-pdf', tool: 'merge-pdf', category: 'document', common: 4,
+    kind: 'tool', slug: 'merge-pdf', tool: 'merge-pdf', category: 'document', common: 7,
     name: 'Merge PDFs',
     title: 'Merge PDF Files, Private and Free | FileConvert',
     blurb: 'Several PDFs as one, links and bookmarks kept',
@@ -763,7 +763,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['combine', 'join', 'append', 'pdf', 'bookmarks', 'forms', 'document', 'pages'],
   },
   {
-    kind: 'tool', slug: 'images-to-pdf', tool: 'images-to-pdf', category: 'document', common: 10,
+    kind: 'tool', slug: 'images-to-pdf', tool: 'images-to-pdf', category: 'document', common: 9,
     name: 'Images to PDF',
     title: 'Images to PDF: JPG, PNG and More, Private | FileConvert',
     blurb: 'Pictures as one PDF, one per page',
@@ -847,7 +847,7 @@ export const PAGES: readonly Page[] = [
     serves: [['png', 'pdf']],
   },
   {
-    kind: 'tool', slug: 'split-pdf', tool: 'split-pdf', category: 'document', common: 5,
+    kind: 'tool', slug: 'split-pdf', tool: 'split-pdf', category: 'document', common: 8,
     name: 'Split a PDF',
     title: 'Split a PDF into Pages or Ranges, Private | FileConvert',
     blurb: 'One PDF as several, by ranges or pages',
@@ -874,7 +874,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['split', 'separate', 'divide', 'break', 'pages', 'ranges', 'pdf', 'document'],
   },
   {
-    kind: 'tool', slug: 'extract-pdf-pages', tool: 'extract-pdf-pages', category: 'document', common: 6,
+    kind: 'tool', slug: 'extract-pdf-pages', tool: 'extract-pdf-pages', category: 'document', common: 11,
     name: 'Extract pages from a PDF',
     title: 'Extract Pages from a PDF, Private and Free | FileConvert',
     blurb: 'Chosen pages as a new PDF',
@@ -900,7 +900,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['extract', 'select', 'pick', 'save pages', 'pages', 'pdf', 'document'],
   },
   {
-    kind: 'tool', slug: 'delete-pdf-pages', tool: 'delete-pdf-pages', category: 'document', common: 7,
+    kind: 'tool', slug: 'delete-pdf-pages', tool: 'delete-pdf-pages', category: 'document', common: 12,
     name: 'Delete pages from a PDF',
     title: 'Delete Pages from a PDF, Private and Free | FileConvert',
     blurb: 'Pages out, nothing of them left behind',
@@ -926,7 +926,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['delete', 'remove', 'drop', 'pages', 'blank pages', 'pdf', 'document'],
   },
   {
-    kind: 'tool', slug: 'organize-pdf', tool: 'organize-pdf', category: 'document', common: 8,
+    kind: 'tool', slug: 'organize-pdf', tool: 'organize-pdf', category: 'document', common: 13,
     name: 'Reorder PDF pages',
     title: 'Reorder PDF Pages, Private and Free | FileConvert',
     blurb: 'Pages in a new order, links still right',
@@ -951,7 +951,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['reorder', 'organize', 'arrange', 'sort', 'move pages', 'rearrange', 'pdf', 'document'],
   },
   {
-    kind: 'tool', slug: 'rotate-pdf', tool: 'rotate-pdf', category: 'document', common: 9,
+    kind: 'tool', slug: 'rotate-pdf', tool: 'rotate-pdf', category: 'document', common: 14,
     name: 'Rotate PDF pages',
     title: 'Rotate PDF Pages, Private and Free | FileConvert',
     blurb: 'Pages turned upright, nothing redrawn',
@@ -975,7 +975,7 @@ export const PAGES: readonly Page[] = [
     keywords: ['rotate', 'turn', 'flip', 'upright', 'sideways', 'landscape', 'portrait', 'pdf', 'document'],
   },
   {
-    kind: 'tool', slug: 'pdf-to-jpg', tool: 'pdf-to-images', preset: { format: 'jpg' }, category: 'document', common: 11,
+    kind: 'tool', slug: 'pdf-to-jpg', tool: 'pdf-to-images', preset: { format: 'jpg' }, category: 'document', common: 10,
     name: 'PDF to JPG',
     title: 'PDF to JPG: Pages as Pictures, Private | FileConvert',
     blurb: 'PDF pages as JPG pictures',
@@ -1028,7 +1028,7 @@ export const PAGES: readonly Page[] = [
     serves: [['pdf', 'png']],
   },
   {
-    kind: 'tool', slug: 'remove-pdf-metadata', tool: 'remove-pdf-metadata', category: 'document', common: 12,
+    kind: 'tool', slug: 'remove-pdf-metadata', tool: 'remove-pdf-metadata', category: 'document', common: 15,
     name: 'Remove PDF metadata',
     title: 'Remove PDF Metadata: Author, Dates, XMP | FileConvert',
     blurb: 'Author, dates and XMP out, pages kept',
@@ -1439,7 +1439,7 @@ export const PAGES: readonly Page[] = [
   },
   // ------------------------------------------------------------------ archives
   {
-    kind: 'extract', slug: 'extract-zip', formats: ['zip'], category: 'archive', common: 3,
+    kind: 'extract', slug: 'extract-zip', formats: ['zip'], category: 'archive', common: 17,
     name: 'Extract files from a ZIP',
     title: 'Extract ZIP Files Online, Free and Private | FileConvert',
     blurb: 'Open a ZIP, then download or convert what is inside',
@@ -1496,6 +1496,15 @@ export const PAGES: readonly Page[] = [
 export function pageBySlug(slug: string): Page | undefined {
   return PAGES.find(p => p.slug === slug);
 }
+
+/**
+ * Other addresses for a page: each sends the reader to the one canonical page (a permanent redirect where the host
+ * allows it; in the build, a page that is not indexed and moves on at once). Aliases are not pages, tools or
+ * conversions, and are not in the sitemap.
+ */
+export const ALIASES: Readonly<Record<string, string>> = {
+  'compress-jpeg': 'compress-jpg',
+};
 
 /** Pages in the Common conversions list, in order. */
 export function commonPages(): Page[] {

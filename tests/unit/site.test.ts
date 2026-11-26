@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { answers, NOT_SUPPORTED, parseQuery } from '../../src/app/catalog';
 import { allConversions, FORMATS } from '../../src/core/formats';
-import { commonPages, isConversion, isNamed, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
-import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderPage, searchTerms, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
+import { ALIASES, commonPages, isConversion, isNamed, pageName, pageTitle, PAGES, type ConversionPage } from '../../src/core/pages';
+import { fillRegion, fillStatics, pageProblems, pageUrl, render404, renderAlias, renderPage, searchTerms, settingsHint, SITE, sitemapXml, stripMarkers } from '../../src/site/render';
 
 const template = readFileSync(join(__dirname, '..', '..', 'index.html'), 'utf8');
 /** The home page as the build makes it, with its static content filled in. */
@@ -184,6 +184,24 @@ describe('rendering', () => {
     expect(new Set(locs).size).toBe(locs.length);
     expect(xml.match(/<lastmod>2026-11-22<\/lastmod>/g)).toHaveLength(locs.length);
     expect(sitemapXml(null)).not.toContain('lastmod');
+  });
+});
+
+describe('aliases', () => {
+  test('compress-jpeg leads to Compress JPG, the one canonical page: not indexed, not in the sitemap, not a page of its own', () => {
+    expect(ALIASES).toEqual({ 'compress-jpeg': 'compress-jpg' });
+    expect(PAGES.some(p => p.slug === 'compress-jpeg')).toBe(false);
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'">`;
+    const html = renderAlias(`<head>\n  <meta charset="utf-8">\n  ${csp}\n</head>`, 'compress-jpeg');
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).toContain(`<link rel="canonical" href="${SITE}compress-jpg/">`);
+    expect(html).toContain('<meta http-equiv="refresh" content="0; url=../compress-jpg/">');
+    expect(html).toContain(csp);
+    expect(html).not.toMatch(/<script/);
+    expect(sitemapXml(null)).not.toContain('compress-jpeg');
+    // Search finds the one page by either spelling.
+    const terms = searchTerms(PAGES.find(p => p.slug === 'compress-jpg')!).split(' ');
+    expect(terms).toEqual(expect.arrayContaining(['jpg', 'jpeg', 'compress']));
   });
 });
 

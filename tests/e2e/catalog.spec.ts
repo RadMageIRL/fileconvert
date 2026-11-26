@@ -14,8 +14,8 @@ test('the catalog lists every page, and the search narrows it as you type', asyn
   await expect(page.locator('.unavailable')).toHaveCount(0);
   const search = page.getByRole('searchbox', { name: 'Search conversions' });
   await search.fill('heic');
-  // The TIFF tool and Images to PDF take HEIC pictures too.
-  await expect(visible(page)).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF', 'Images to PDF']);
+  // The TIFF tool and Images to PDF take HEIC pictures too; within a category, tools come before conversions.
+  await expect(visible(page)).toHaveText(['Combine images into a TIFF', 'HEIC to JPG', 'HEIC to PNG', 'Images to PDF']);
   await expect(page.locator('#catalog-status')).toHaveText('4 pages match.');
   await expect(page.locator('.cat-group:not([hidden]) h3')).toHaveText(['Images', 'Documents']);
   await search.fill('iphone video');
@@ -24,6 +24,12 @@ test('the catalog lists every page, and the search narrows it as you type', asyn
   await expect(visible(page)).toHaveText(['MP4 to MP3']);
   await search.fill('excel');
   await expect(visible(page)).toHaveText(['JSON to CSV', 'CSV to JSON', 'XLSX to CSV', 'XLSX to JSON', 'JSON to XLSX', 'XLS to XLSX', 'XLS to CSV', 'ODS to XLSX', 'XML to XLSX']);
+  // A format with a tool's word asks for the tool: it comes first, and the format's conversions are not summed up.
+  await search.fill('compress jpeg');
+  await expect(visible(page)).toHaveText(['Compress JPG', 'PNG to JPG']);
+  await expect(page.locator('#catalog-more')).toBeHidden();
+  await search.fill('jpeg');
+  await expect(page.locator('#catalog-more')).toContainText('JPG converts to');
   await search.fill('');
   await expect(page.locator('.cat-item:not([hidden])')).toHaveCount(PAGES.length);
   await expect(page.locator('#catalog-status')).toHaveText('');

@@ -123,6 +123,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px;
 .settings { display: grid; gap: 10px; margin-bottom: 14px; }
 .panel { border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
 .panel > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; }
+/* The heading stays on one line; its hint moves below it, under the heading, when they do not fit side by side. */
+.panel > summary .label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+.panel > summary .title { white-space: nowrap; }
 .panel > summary::-webkit-details-marker { display: none; }
 .panel > summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: 4px; }
 .panel[open] > summary::before { transform: rotate(45deg); }
@@ -365,8 +368,7 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
   .job { padding: 10px 10px; gap: 6px 10px; }
   .fields { padding-inline: 10px; gap: 12px; }
   .foot-row { gap: 6px 14px; }
-  .panel > summary { flex-wrap: wrap; row-gap: 0; }
-  .panel > summary .hint { flex-basis: 100%; padding-left: 20px; }
+  .panel > summary .hint { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

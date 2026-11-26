@@ -130,7 +130,9 @@ export function setupCatalog(): void {
       if (ok) shown++;
     }
     for (const g of groups) g.hidden = !g.querySelector('.cat-item:not([hidden])');
-    const lines = q.tokens.length ? answers(q, hasPage, served) : [];
+    // A format named with other words that a tool matched ("compress jpeg") asks for that tool, not a list of conversions.
+    const toolAsked = q.formats.length === 1 && q.tokens.length > 1 && items.some(i => !i.hidden && (i.dataset.tool || i.dataset.extract));
+    const lines = q.tokens.length && !toolAsked ? answers(q, hasPage, served) : [];
     clear(more);
     for (const l of lines) more.append(h('p', {}, l));
     if (lines.some(l => l.includes('converter at the top'))) {

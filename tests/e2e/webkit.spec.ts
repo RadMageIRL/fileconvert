@@ -57,8 +57,8 @@ test('a conversion page loads with its content, and the catalog search works', a
   await expect(page.locator('html[data-ready="true"]')).toBeAttached();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Convert JSON to CSV');
   await page.getByRole('searchbox', { name: 'Search conversions' }).fill('heic');
-  // The TIFF tool and Images to PDF take HEIC pictures, so they match too.
-  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['HEIC to JPG', 'HEIC to PNG', 'Combine images into a TIFF', 'Images to PDF']);
+  // The TIFF tool and Images to PDF take HEIC pictures, so they match too; tools come first in their category.
+  await expect(page.locator('.cat-item:not([hidden]) .cat-name')).toHaveText(['Combine images into a TIFF', 'HEIC to JPG', 'HEIC to PNG', 'Images to PDF']);
   await addFiles(page, [fx('data/records.json')]);
   await expect(row(page, 'records.json').getByRole('combobox', { name: 'Convert records.json to' })).toHaveValue('csv');
   expect(errors).toEqual([]);
