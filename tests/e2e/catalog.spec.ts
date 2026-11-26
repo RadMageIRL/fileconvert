@@ -10,6 +10,8 @@ const visible = (page: import('@playwright/test').Page) => page.locator('.cat-it
 test('the catalog lists every page, and the search narrows it as you type', async ({ page }) => {
   const w = await openApp(page);
   await expect(page.locator('.cat-item')).toHaveCount(PAGES.length);
+  // Every tool can run in this browser, so none is marked as unavailable (WebKit as Playwright runs it marks PDF to images).
+  await expect(page.locator('.unavailable')).toHaveCount(0);
   const search = page.getByRole('searchbox', { name: 'Search conversions' });
   await search.fill('heic');
   // The TIFF tool and Images to PDF take HEIC pictures too.

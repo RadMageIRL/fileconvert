@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { fx, openApp, PYTHON, pyRead, save, tempDir, unexpectedViolations } from './helpers';
+import { numbered } from './pdfgen';
 
 // Merge PDFs (v0.2.0, Phase 2) in the browser: the tool in the workspace, the merge in the PDF worker, every result
 // read by qpdf, pypdf and PDFium (tests/e2e/readers.py, kind pdfdeep), which share no code with FileConvert, and
@@ -336,4 +337,76 @@ test('after the memory check stops a merge, taking a file out lets it run', asyn
   const { deep } = await mergeAndRead(page, info);
   expect(deep.pages).toHaveLength(4);
   expect(deep.qpdf.ok).toBe(true);
+});
+
+// First-page pictures (v0.2.0, Phase 3, decision 4): each file's row shows its first page, drawn in a render worker of
+// its own, one file at a time, only for rows on screen or near it; a picture is never needed to merge.
+const thumbs = (page: Page) => ws(page).locator('.ws-thumb canvas');
+const inked = (page: Page, name: string) => item(page, name).locator('.ws-thumb canvas').evaluate((c: HTMLCanvasElement) => {
+  const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] < 200 || d[i + 1] < 200 || d[i + 2] < 200) n++;
+  return { w: c.width, h: c.height, ink: n / (d.length / 4) };
+});
+
+test('each file shows its first page, kept with its row as the rows move, and the merge does not wait for it', async ({ page }, info) => {
+  const w = await openApp(page);
+  await openMerge(page);
+  await add(page, [fx('pdf/merge-a.pdf'), fx('pdf/merge-b.pdf'), fx('pdf-render/rotations.pdf')]);
+  await expect(thumbs(page)).toHaveCount(3, { timeout: 30_000 });
+  // Each row's picture is that file's first page: rotations.pdf starts with an upright Letter page with a red square.
+  const r = await inked(page, 'rotations.pdf');
+  expect(r.h).toBeGreaterThan(r.w);
+  expect(r.ink).toBeGreaterThan(0.01);
+  for (const li of await ws(page).locator('.ws-item').all()) expect(await li.locator('[data-thumb]').getAttribute('data-thumb')).toBe(await li.getAttribute('data-id'));
+  // Moved to the top from the keyboard, the file keeps its picture, and the focus stays on it.
+  await item(page, 'rotations.pdf').getByRole('button', { name: 'Move rotations.pdf up' }).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(order(page)).toHaveText(['rotations.pdf', 'merge-a.pdf', 'merge-b.pdf']);
+  expect((await inked(page, 'rotations.pdf')).ink).toBeGreaterThan(0.01);
+  await expect(thumbs(page)).toHaveCount(3);
+  // A file taken out takes its picture with it.
+  await item(page, 'merge-b.pdf').getByRole('button', { name: 'Remove merge-b.pdf' }).click();
+  await expect(thumbs(page)).toHaveCount(2);
+  const { deep } = await mergeAndRead(page, info);
+  expect(deep.qpdf.ok).toBe(true);
+  expect(deep.pages).toHaveLength(4 + source('merge-a.pdf').pages.length);
+  expect(w.errors).toEqual([]);
+  expect(w.outside).toEqual([]);
+});
+
+test('a file whose first page needs more memory than this device allows keeps a plain tile, and merges', async ({ page, browserName }, info) => {
+  test.skip(browserName === 'firefox', 'Firefox reports no device memory: the stand-in below is how the other browsers are held to a small device');
+  await page.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 1, configurable: true }); });
+  await openApp(page);
+  await openMerge(page);
+  await add(page, [fx('pdf/merge-a.pdf'), fx('pdf-render/big-picture.pdf')]);
+  await expect(item(page, 'merge-a.pdf').locator('.ws-thumb canvas')).toHaveCount(1, { timeout: 30_000 });
+  const tile = item(page, 'big-picture.pdf').locator('.ws-thumb.generic');
+  await expect(tile).toHaveAttribute('title', /^No picture of the first page: Showing the first page of this PDF needs about [\d.]+ (MB|GB) of memory, more than the 512 MB/, { timeout: 30_000 });
+  await expect(tile).toHaveText('PDF');
+  const { deep } = await mergeAndRead(page, info);
+  expect(deep.qpdf.ok).toBe(true);
+  expect(deep.pages).toHaveLength(source('merge-a.pdf').pages.length + 1);
+});
+
+test('forty files: only the rows near the screen get pictures, and more as the list scrolls', async ({ page }) => {
+  await openApp(page);
+  await openMerge(page);
+  const dir = tempDir();
+  const files = Array.from({ length: 40 }, (_, i) => { const p = resolve(dir, `n${String(i + 1).padStart(2, '0')}.pdf`); writeFileSync(p, numbered(1)); return p; });
+  await add(page, files);
+  // Wait until drawing stops for the rows in view, then count: far fewer than forty.
+  let drawn = -1;
+  for (let i = 0; i < 40; i++) {
+    const n = await thumbs(page).count();
+    if (n === drawn && n > 0) break;
+    drawn = n;
+    await page.waitForTimeout(500);
+  }
+  expect(drawn).toBeGreaterThan(0);
+  expect(drawn).toBeLessThan(40);
+  await item(page, 'n40.pdf').scrollIntoViewIfNeeded();
+  await expect(item(page, 'n40.pdf').locator('.ws-thumb canvas')).toHaveCount(1, { timeout: 30_000 });
 });

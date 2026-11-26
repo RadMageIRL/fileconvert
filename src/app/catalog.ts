@@ -3,6 +3,7 @@
 // page of their own. Unsupported formats people often ask for get the same reason the converter would give.
 
 import { allConversions, ANIMATED_IN, FORMATS, targetsFor, type FormatId } from '../core/formats';
+import { isToolId, toolUnavailable } from '../core/tools';
 import { $, clear, h } from './dom';
 
 const STOP = new Set(['to', 'into', 'convert', 'converter', 'conversion', 'converting', 'file', 'files', 'from', 'a', 'an', 'the', 'online', 'free', 'and', 'or', 'as', 'in', 'for', 'my']);
@@ -88,7 +89,22 @@ export function answers(q: Query, hasPage: (from: FormatId, to: FormatId) => boo
 
 const matches = (terms: string[], tokens: string[]) => tokens.every(t => terms.some(w => w.startsWith(t)));
 
+/** Tools this browser cannot run (PDF to JPG and PNG without OffscreenCanvas) are marked wherever they are listed, so
+ *  none is offered as if it worked here; the link stays, and the tool's page says why. */
+export function markUnavailable(root: ParentNode = document): void {
+  for (const el of root.querySelectorAll<HTMLElement>('[data-tool]')) {
+    const id = el.dataset.tool ?? '';
+    const why = isToolId(id) ? toolUnavailable(id) : null;
+    if (!why || el.classList.contains('unavailable')) continue;
+    el.classList.add('unavailable');
+    el.title = why;
+    const link = el.tagName === 'A' ? el : el.querySelector('a');
+    link?.append(h('span', { class: 'cat-note' }, 'Not available in this browser'));
+  }
+}
+
 export function setupCatalog(): void {
+  markUnavailable();
   const tools = document.getElementById('catalog-tools');
   const input = document.getElementById('catalog-search') as HTMLInputElement | null;
   if (!tools || !input) return;

@@ -14,6 +14,7 @@ tests/fixtures/pdf-render/: hand-written PDFs, so no PDF library's habits leak i
   shown on screen (neither may appear in a picture).
 - fonts-std.pdf: the standard fonts a PDF may name without including them (Helvetica, Times, Courier, Symbol,
   ZapfDingbats), which pdf.js draws from its own font files.
+- fonts-sans.pdf: Helvetica and Arial in their four styles, not included, with WinAnsi accents, quotes and the euro sign.
 - jpx-cmyk.pdf: a JPEG 2000 picture (pdf.js's OpenJPEG decoder), and CMYK colors and a CMYK JPEG (its color module).
 - big-picture.pdf: one page showing a 30-megapixel JPEG (one gray, so the file is small): previews of it need more
   memory than a small allowance, while editing it does not.
@@ -234,6 +235,36 @@ def fonts_std():
     write('fonts-std.pdf', pdf(objs))
 
 
+def fonts_sans():
+    """Helvetica (Type 1) and Arial (TrueType) in their four styles, none included, as many PDF writers leave them:
+    pdf.js draws them all with its sans-serif font files. WinAnsi accents, quotes, the euro sign and the middle dot."""
+    helv = [b'Helvetica', b'Helvetica-Bold', b'Helvetica-Oblique', b'Helvetica-BoldOblique']
+    arial = [(b'Arial', 400, 0), (b'Arial,Bold', 700, 0), (b'Arial,Italic', 400, -12), (b'Arial,BoldItalic', 700, -12)]
+    objs = {1: b'<< /Type /Catalog /Pages 2 0 R >>'}
+    fonts = b''
+    k = 0
+    for n in helv:
+        objs[20 + k] = b'<< /Type /Font /Subtype /Type1 /BaseFont /%s /Encoding /WinAnsiEncoding >>' % n
+        fonts += b'/F%d %d 0 R ' % (k, 20 + k)
+        k += 1
+    for n, weight, angle in arial:
+        objs[40 + k] = (b'<< /Type /FontDescriptor /FontName /%s /Flags %d /FontBBox [-665 -325 2000 1006] /ItalicAngle %d'
+                        b' /Ascent 905 /Descent -212 /CapHeight 716 /StemV %d /FontWeight %d >>' % (n, 32 + (64 if angle else 0), angle, 80 if weight == 400 else 140, weight))
+        objs[20 + k] = b'<< /Type /Font /Subtype /TrueType /BaseFont /%s /Encoding /WinAnsiEncoding /FontDescriptor %d 0 R >>' % (n, 40 + k)
+        fonts += b'/F%d %d 0 R ' % (k, 20 + k)
+        k += 1
+    sample = b'Hamburgefonstiv 0123 \\300\\351\\356\\365\\374 \\307\\361\\337 \\200\\223\\224\\225\\226\\227\\205\\231 \\267'
+    content = bytearray()
+    for i, n in enumerate(helv + [a[0] for a in arial]):
+        y = 750 - i * 90
+        content += b'BT /F%d 10 Tf 40 %d Td (%s:) Tj ET\n' % (i, y, n)
+        content += b'BT /F%d 28 Tf 40 %d Td (%s) Tj ET\n' % (i, y - 34, sample)
+    objs[3] = stream(bytes(content))
+    objs[10] = page(3, b'<< /Font << %s>> >>' % fonts)
+    objs[2] = pages([10])
+    write('fonts-sans.pdf', pdf(objs))
+
+
 def jpx_cmyk():
     objs = {1: b'<< /Type /Catalog /Pages 2 0 R >>', 3: HELV}
     img = Image.new('RGB', (160, 120))
@@ -371,6 +402,6 @@ def metadata():
 
 
 if __name__ == '__main__':
-    for f in (rotations, boxes, sizes, transparency, annotations, fonts_std, jpx_cmyk, big_picture, metadata):
+    for f in (rotations, boxes, sizes, transparency, annotations, fonts_std, fonts_sans, jpx_cmyk, big_picture, metadata):
         f()
     print('written to', os.path.normpath(ROOT), file=sys.stderr)

@@ -62,7 +62,6 @@ const USE = {
 const VENDORED = {
   'pdfjs-dist': [
     ['the Foxit standard fonts (Courier, Times, Symbol and Dingbats replacements), from PDFium, in standard_fonts', 'standard_fonts/LICENSE_FOXIT'],
-    ['the Liberation Sans fonts (Helvetica replacements) by Red Hat, in standard_fonts; GPL-2.0 with the font exception below; source at https://github.com/liberationfonts/liberation-fonts', 'standard_fonts/LICENSE_LIBERATION'],
     ['OpenJPEG (JPEG 2000 decoding, openjpeg.wasm)', 'wasm/LICENSE_OPENJPEG'],
     ['pdf.js OpenJPEG decoder build', 'wasm/LICENSE_PDFJS_OPENJPEG'],
     ['the JBIG2 decoder from PDFium (jbig2.wasm)', 'wasm/LICENSE_JBIG2'],
@@ -116,14 +115,6 @@ BSD, Apache-2.0, SIL OFL 1.1, BlueOak) except these, which are weak copyleft:
   - libheif and libde265, inside libheif-js: GNU LGPL 3.0.
   - LAME, inside @mediabunny/mp3-encoder: GNU LGPL 2.0 or later.
   - FFmpeg's AAC encoder, inside @mediabunny/aac-encoder: GNU LGPL 2.1 or later.
-
-and these font files, shipped with pdfjs-dist and used only to draw PDF text in
-Helvetica that a PDF names without including it:
-
-  - Liberation Sans (four TrueType files): GNU GPL 2.0 with a font exception.
-    They are separate, unmodified files that FileConvert fetches only when a PDF
-    page needs them, so they can be replaced; their source is at
-    https://github.com/liberationfonts/liberation-fonts.
 
 The LGPL libraries are compiled to WebAssembly and shipped as separate files that
 FileConvert loads at run time, so they can be replaced with modified builds. Their
@@ -209,6 +200,21 @@ libwebp (WebP encoding) and libyuv, built by jSquash:
 for (const [name, f] of [['libavif', 'libavif-LICENSE.txt'], ['libaom', 'libaom-LICENSE.txt'], ['libaom patent license', 'libaom-PATENTS.txt'], ['libwebp and libsharpyuv', 'libwebp-COPYING.txt'], ['libwebp patent grant', 'libwebp-PATENTS.txt'], ['libyuv', 'libyuv-LICENSE.txt']]) {
   out.push(`--- ${name} ---\n\n${text(join(LIC, f))}\n`);
 }
+out.push(`${thin}
+
+4. Files kept in this repository
+${rule}
+
+Arimo 1.31 (Regular, Bold, Italic, Bold Italic), four TrueType files in
+vendor/arimo, unmodified, served as pdfjs/standard_fonts/Arimo-*.ttf. They draw
+PDF text in Helvetica or Arial that a PDF names without including the font.
+Copyright 2010-2014 Google Inc. All Rights Reserved. Licensed under the Apache
+License, Version 2.0. Arimo is a trademark of Google Inc. and may be registered
+in certain jurisdictions. Source: the Chrome OS core fonts release
+croscorefonts-1.31.0 (vendor/arimo/README.txt gives its address and checksums).
+
+${text(join(root, 'vendor', 'arimo', 'LICENSE.txt'))}
+`);
 out.push(`${thin}\n\nEnd of notices.\n`);
 
 const result = out.join('\n').replace(/\n{4,}/g, '\n\n\n');

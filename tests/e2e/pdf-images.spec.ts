@@ -50,7 +50,7 @@ function compare(items: Array<{ pdf: string; page: number; picture: string; dpi:
 }
 
 /** Each fixture, its pages, and how each page is compared: its pixel size at 150 dpi, and how close to PDFium it is. */
-const FIXTURES: Array<{ file: string; sizes: Array<[number, number]>; mean?: number; skip?: number[]; unit?: number[] }> = [
+const FIXTURES: Array<{ file: string; sizes: Array<[number, number]>; mean?: number; off48?: number; skip?: number[]; unit?: number[] }> = [
   { file: 'rotations.pdf', sizes: [[1275, 1650], [1650, 1275], [1275, 1650], [1650, 1275]] },
   // Page 3 has UserUnit 2, which pdf.js applies and PDFium does not: it is compared with PDFium at twice the resolution.
   { file: 'boxes.pdf', sizes: [[625, 729], [1042, 1354], [1250, 833], [833, 625]], unit: [3] },
@@ -60,6 +60,8 @@ const FIXTURES: Array<{ file: string; sizes: Array<[number, number]>; mean?: num
   { file: 'annotations.pdf', sizes: [[1275, 1650]] },
   // Helvetica, Times and Courier are not in the PDF: pdf.js draws them with its own fonts, PDFium with others.
   { file: 'fonts-std.pdf', sizes: [[1275, 1650]], mean: 4 },
+  // Helvetica and Arial in their four styles at 28 points: pdf.js draws them with Arimo, PDFium with its own sans-serif.
+  { file: 'fonts-sans.pdf', sizes: [[1275, 1650]], mean: 6, off48: 0.04 },
   { file: 'jpx-cmyk.pdf', sizes: [[1275, 1650], [1275, 1650]] },
   { file: 'multilingual.pdf', sizes: [[1275, 1650], [1275, 1650], [1275, 1650]] },
   { file: 'metadata.pdf', sizes: [[1275, 1650]] },
@@ -89,7 +91,7 @@ test('every page of the render fixtures as PNG at 150 dpi: the size its page giv
       expect(Math.abs(r.ref[0] - r.got[0]) + Math.abs(r.ref[1] - r.got[1]), where).toBeLessThanOrEqual(2);
       if (f.skip?.includes(i + 1)) return;
       expect(r.mean, where).toBeLessThan(f.mean ?? 2.5);
-      expect(r.off48, where).toBeLessThan(0.03);
+      expect(r.off48, where).toBeLessThan(f.off48 ?? 0.03);
       expect(Math.abs(r.inkRef - r.inkGot), where).toBeLessThan(0.01);
     });
     await ws(page).getByRole('button', { name: `Remove ${f.file}` }).click();
@@ -97,7 +99,9 @@ test('every page of the render fixtures as PNG at 150 dpi: the size its page giv
   expect(w.errors).toEqual([]);
   expect(w.outside).toEqual([]);
   expect(await unexpectedViolations(page)).toEqual([]);
-  for (const a of ['standard_fonts/LiberationSans-Regular.ttf', 'standard_fonts/FoxitSerif.pfb', 'standard_fonts/FoxitFixed.pfb', 'standard_fonts/FoxitSymbol.pfb', 'standard_fonts/FoxitDingbats.pfb', 'wasm/openjpeg.wasm', 'wasm/qcms_bg.wasm', 'iccs/CGATS001Compat-v2-micro.icc']) expect(assets, a).toContain(a);
+  // The sans-serif standard font is Arimo, asked for by pdf.js under Liberation Sans's names and never fetched as Liberation.
+  expect(assets.filter(a => a.includes('Liberation'))).toEqual([]);
+  for (const a of ['standard_fonts/Arimo-Regular.ttf', 'standard_fonts/Arimo-Bold.ttf', 'standard_fonts/Arimo-Italic.ttf', 'standard_fonts/Arimo-BoldItalic.ttf', 'standard_fonts/FoxitSerif.pfb', 'standard_fonts/FoxitFixed.pfb', 'standard_fonts/FoxitSymbol.pfb', 'standard_fonts/FoxitDingbats.pfb', 'wasm/openjpeg.wasm', 'wasm/qcms_bg.wasm', 'iccs/CGATS001Compat-v2-micro.icc']) expect(assets, a).toContain(a);
 });
 
 test('PDF to JPG: chosen pages, names padded to the page count, white background, quality, one by one or as a ZIP', async ({ page }, info) => {

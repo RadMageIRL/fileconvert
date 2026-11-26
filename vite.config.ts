@@ -12,10 +12,15 @@ const PDFJS = join('node_modules', 'pdfjs-dist');
  *  runs PDF scripts, nor the decoders' JavaScript fallbacks, for browsers without WebAssembly. */
 const PDFJS_FILES: Record<string, RegExp> = {
   cmaps: /^[\w.-]+\.bcmap$/,
-  standard_fonts: /^(Foxit\w+\.pfb|Liberation[\w-]+\.ttf)$/,
+  standard_fonts: /^Foxit\w+\.pfb$/,
   wasm: /^(openjpeg|jbig2|qcms_bg)\.wasm$/,
   iccs: /^[\w.-]+\.icc$/,
 };
+/** The sans-serif standard font, from vendor/arimo (Apache-2.0) in place of the Liberation Sans files pdfjs-dist ships:
+ *  served beside pdf.js's other standard fonts, where the render worker asks for it by Liberation Sans's names
+ *  (src/engines/pdf/render.ts). */
+const ARIMO = join('vendor', 'arimo');
+const ARIMO_FILES = /^Arimo-(Regular|Bold|Italic|BoldItalic)\.ttf$/;
 
 /**
  * Adds the Content-Security-Policy to the built page as a meta tag, for hosts that cannot send headers
@@ -49,9 +54,10 @@ function pdfjsCmaps(): Plugin {
       for (const [dir, ok] of Object.entries(PDFJS_FILES)) {
         server.middlewares.use(`/pdfjs/${dir}/`, (req, res, next) => {
           const name = (req.url ?? '').replace(/^\/+/, '').split('?')[0];
-          if (!ok.test(name)) return next();
+          const arimo = dir === 'standard_fonts' && ARIMO_FILES.test(name);
+          if (!ok.test(name) && !arimo) return next();
           res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream');
-          res.end(readFileSync(join(PDFJS, dir, name)));
+          res.end(readFileSync(arimo ? join(ARIMO, name) : join(PDFJS, dir, name)));
         });
       }
     },
@@ -60,6 +66,9 @@ function pdfjsCmaps(): Plugin {
         for (const name of readdirSync(join(PDFJS, dir)).filter(n => ok.test(n)).sort()) {
           this.emitFile({ type: 'asset', fileName: `pdfjs/${dir}/${name}`, source: readFileSync(join(PDFJS, dir, name)) });
         }
+      }
+      for (const name of readdirSync(ARIMO).filter(n => ARIMO_FILES.test(n)).sort()) {
+        this.emitFile({ type: 'asset', fileName: `pdfjs/standard_fonts/${name}`, source: readFileSync(join(ARIMO, name)) });
       }
     },
   };

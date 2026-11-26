@@ -113,6 +113,24 @@ serve({
     return { result: { pages: preview.pages } };
   },
 
+  /** The first page of one PDF as a small picture, its longer side `side` pixels (Merge PDFs: one for each file in the
+   *  list). The PDF is checked by the guard and the memory check, opened, its first page drawn, and let go at once:
+   *  nothing else of it is drawn or kept. */
+  async firstPage(p: { file: Blob; assets: string; allowance?: MemoryAllowance; side: number }) {
+    if (!canDraw()) throw new Error(NO_CANVAS);
+    const open = await openForRender(p.file, { assets: p.assets, allowance: p.allowance, pagePixels: p.side * p.side, drawn: 1, needs: 'Showing the first page of this PDF needs' });
+    try {
+      const page = await open.pdf.getPage(1);
+      const canvas = await drawPage(page, { dpi: previewDpi(shownSizeOf(page), p.side), transparent: false });
+      const bitmap = canvas.transferToImageBitmap();
+      canvas.width = canvas.height = 0;
+      page.cleanup();
+      return { result: { bitmap }, transfer: [bitmap] };
+    } finally {
+      await open.pdf.loadingTask.destroy();
+    }
+  },
+
   /** A small picture of one page of the open PDF: its longer side `side` pixels. */
   async previewPage(p: { page: number; side: number }) {
     if (!preview) throw new Error('No PDF is open for previews.');

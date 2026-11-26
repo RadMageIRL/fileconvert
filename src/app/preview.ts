@@ -175,6 +175,146 @@ export class PreviewSession {
   }
 }
 
+/** First-page pictures kept at once (Merge PDFs takes up to 200 files; each picture is at most about 64 KB). */
+const FIRST_CACHE = 200;
+
+/**
+ * The first page of each PDF in a tool that takes many (Merge PDFs), as a small picture in the file's row. Drawn the way
+ * page previews are, in a render worker of its own, one file at a time and only for rows on screen or near it: each PDF
+ * is checked by the guard and the memory check, opened, its first page drawn and the PDF let go, so nothing else of it
+ * is drawn or kept. A file that cannot be drawn, or a browser that cannot draw in a worker, keeps a plain document tile;
+ * the tool never waits for a picture. The worker is stopped while the tool runs and when the list goes.
+ */
+export class FirstPages {
+  private worker: Worker | null = null;
+  private calls = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>();
+  private nextId = 1;
+  private generation = 0;
+  private busy = false;
+  private wanted: Array<{ id: number; file: Blob }> = [];
+  private cache = new Map<number, ImageBitmap>();
+  /** Why a file has no picture, by file. */
+  private failed = new Map<number, string>();
+  /** Why there are no pictures at all (the browser cannot draw in a worker, or the worker stopped). */
+  off = '';
+
+  constructor(
+    private make: () => Worker,
+    private assets: string,
+    private allowance: () => MemoryAllowance,
+    readonly side: number,
+    private onPicture: (id: number) => void,
+  ) {}
+
+  private start(): Worker {
+    if (this.worker) return this.worker;
+    const w = this.make();
+    w.onmessage = (ev: MessageEvent<WorkerReply>) => {
+      const m = ev.data;
+      if (!m || typeof m !== 'object' || !('type' in m) || m.type === 'ready' || m.type === 'progress') return;
+      const c = this.calls.get(m.id);
+      if (!c) return;
+      this.calls.delete(m.id);
+      if (m.type === 'done') c.resolve(m.result);
+      else { const e = new Error(m.message); e.name = m.name; c.reject(e); }
+    };
+    w.onerror = ev => {
+      ev.preventDefault();
+      this.off = 'First-page pictures stopped: the browser may have run out of memory. The files are merged as they are.';
+      this.stop();
+    };
+    this.worker = w;
+    return w;
+  }
+
+  private call<T>(task: string, payload: unknown): Promise<T> {
+    const w = this.start();
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      this.calls.set(id, { resolve: v => resolve(v as T), reject });
+      w.postMessage({ type: 'run', id, task, payload } satisfies RunMessage);
+    });
+  }
+
+  private stop(): void {
+    this.generation++;
+    this.worker?.terminate();
+    this.worker = null;
+    const stopped = Object.assign(new Error('Stopped.'), { name: 'Stopped' });
+    for (const c of this.calls.values()) c.reject(stopped);
+    this.calls.clear();
+    this.busy = false;
+  }
+
+  picture(id: number): ImageBitmap | undefined {
+    return this.cache.get(id);
+  }
+
+  /** Why a file has no picture, when drawing it failed or was refused. */
+  failure(id: number): string | undefined {
+    return this.failed.get(id);
+  }
+
+  /** The files whose rows are on screen or near it, in list order; the others are no longer wanted. */
+  want(files: Array<{ id: number; file: Blob }>): void {
+    if (this.off) return;
+    this.wanted = files.filter(f => !this.cache.has(f.id) && !this.failed.has(f.id));
+    void this.pump();
+  }
+
+  private async pump(): Promise<void> {
+    if (this.busy || this.off) return;
+    this.busy = true;
+    const gen = this.generation;
+    try {
+      while (this.wanted.length && gen === this.generation) {
+        const f = this.wanted.shift()!;
+        if (this.cache.has(f.id) || this.failed.has(f.id)) continue;
+        try {
+          const r = await this.call<{ bitmap: ImageBitmap }>('firstPage', { file: f.file, assets: this.assets, allowance: this.allowance(), side: this.side });
+          if (gen !== this.generation) { r.bitmap.close(); return; }
+          this.cache.set(f.id, r.bitmap);
+          while (this.cache.size > FIRST_CACHE) {
+            const [oldest, b] = this.cache.entries().next().value as [number, ImageBitmap];
+            this.cache.delete(oldest);
+            b.close();
+          }
+        } catch (e) {
+          if (gen !== this.generation) return;
+          const msg = (e as Error).message || 'It could not be drawn.';
+          // A browser that cannot draw in a worker cannot draw any of them.
+          if (/OffscreenCanvas/.test(msg)) { this.off = msg; this.stop(); this.onPicture(f.id); return; }
+          this.failed.set(f.id, msg);
+        }
+        this.onPicture(f.id);
+      }
+    } finally {
+      if (gen === this.generation) this.busy = false;
+    }
+  }
+
+  /** The file left the list: its picture goes. */
+  forget(id: number): void {
+    this.cache.get(id)?.close();
+    this.cache.delete(id);
+    this.failed.delete(id);
+    this.wanted = this.wanted.filter(f => f.id !== id);
+  }
+
+  /** Lets the worker go while the tool runs; the pictures drawn so far stay. */
+  suspend(): void {
+    this.stop();
+    this.wanted = [];
+  }
+
+  dispose(): void {
+    this.stop();
+    for (const b of this.cache.values()) b.close();
+    this.cache.clear();
+    this.off = 'Closed.';
+  }
+}
+
 export type GridMode = 'select' | 'order' | 'view';
 
 export interface GridState {

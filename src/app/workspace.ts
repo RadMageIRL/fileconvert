@@ -13,10 +13,11 @@ import { NameRegistry, safeBase } from '../core/naming';
 import { checkOrder, chosenPages, formatOrder, formatPages, parseOrder } from '../core/pageranges';
 import { memoryAllowance } from '../core/pdfmemory';
 import { sniffBlob } from '../core/sniff';
+import { isToolId, toolUnavailable } from '../core/tools';
 import { clear, h } from './dom';
 import type { Engines } from './jobs';
 import { CanceledError } from './pool';
-import { PageGrid, PreviewSession, TILE, type GridState } from './preview';
+import { FirstPages, PageGrid, PreviewSession, TILE, type GridState } from './preview';
 import type { ToolDefinition, ToolInput, ToolOption, ToolValues } from './tools';
 
 interface Entry extends ToolInput {
@@ -44,6 +45,9 @@ export interface WorkspaceHost {
   /** The address of pdf.js's files in the app, for page previews. */
   assets?: string;
 }
+
+/** The first-page picture in a file's row, in CSS pixels (drawn at up to twice that for sharp screens). */
+const FIRST = 64;
 
 /** Where a remembered choice is kept in this browser (localStorage). */
 const REMEMBER = 'fileconvert-choice-';
@@ -79,12 +83,19 @@ export class Workspace {
   private pagesUi?: { opt?: ToolOption; grid: PageGrid; text?: HTMLInputElement; shown: string; madeFor: string };
   /** The previews of the file in the tool, drawn in a worker of their own. */
   private preview: { id: number; session: PreviewSession } | null = null;
+  /** The first page of each PDF in the list, for a tool that takes many (Merge PDFs), and the rows on screen. */
+  private firsts: FirstPages | null = null;
+  private rowObserver: IntersectionObserver | null = null;
+  private rowsShown = new Set<number>();
   private runBox!: HTMLElement;
   private outBox!: HTMLElement;
   private picker!: HTMLInputElement;
+  /** Why this browser cannot run the tool at all (no OffscreenCanvas for PDF to JPG and PNG), or null. */
+  readonly unavailable: string | null;
 
   /** `preset` sets options for a page about one use of the tool (PNG on the PDF to PNG page), over remembered choices. */
   constructor(private root: HTMLElement, readonly def: ToolDefinition, private host: WorkspaceHost, preset: Record<string, string> = {}) {
+    this.unavailable = isToolId(def.id) ? toolUnavailable(def.id) : null;
     for (const o of def.options) {
       this.values[o.key] = o.value;
       const kept = o.remember ? this.recall(o.remember) : null;
@@ -134,6 +145,7 @@ export class Workspace {
   }
 
   add(files: Iterable<File>): void {
+    if (this.unavailable) { this.host.announce(this.unavailable); return; }
     if (this.running) return;
     for (const file of files) {
       const e: Entry = { id: this.nextId++, file, name: file.name || 'unnamed', format: 'txt', info: formatBytes(file.size), checking: true, notes: [] };
@@ -177,6 +189,8 @@ export class Workspace {
   remove(id: number): void {
     if (this.running) return;
     this.entries.find(e => e.id === id)?.inspecting?.abort();
+    this.firsts?.forget(id);
+    this.rowsShown.delete(id);
     this.entries = this.entries.filter(e => e.id !== id);
     this.changed();
   }
@@ -240,6 +254,7 @@ export class Workspace {
     Object.assign(this, { state: 'running', error: undefined, fraction: undefined, stage: 'Starting' });
     // The previews let their worker go while the tool runs, so the two do not hold the file in memory together.
     this.preview?.session.suspend();
+    this.firsts?.suspend();
     const prefix = `ws${Date.now().toString(36)}-${++this.runs}-`;
     this.runPrefix = prefix;
     this.render();
@@ -299,6 +314,9 @@ export class Workspace {
     this.dropOutputs();
     this.preview?.session.dispose();
     this.preview = null;
+    this.firsts?.dispose();
+    this.firsts = null;
+    this.rowObserver?.disconnect();
     this.pagesUi?.grid.dispose();
     clear(this.root);
   }
@@ -333,8 +351,9 @@ export class Workspace {
     this.outBox = h('div', { class: 'ws-out' });
     this.root.append(
       h('div', { class: 'ws-head' }, h('h2', { id: 'workspace-title' }, this.def.title), h('p', { class: 'lede' }, this.def.summary)),
+      ...(this.unavailable ? [h('p', { class: 'ws-unavailable', role: 'note' }, this.unavailable)] : []),
       h('div', { class: 'ws-add' }, this.picker,
-        h('button', { type: 'button', class: 'primary', 'data-key': 'add', onclick: () => this.picker.click() }, 'Add files'),
+        h('button', { type: 'button', class: 'primary', 'data-key': 'add', disabled: !!this.unavailable, onclick: () => this.picker.click() }, 'Add files'),
         h('span', { class: 'drop-sub' }, `${this.acceptedLabels()}${this.def.maxInputs > 1 ? `, up to ${this.def.maxInputs} files` : ''}. You can also drop files on the page.`)),
       this.list,
       this.optionsBox(),
@@ -344,7 +363,51 @@ export class Workspace {
       this.outBox,
     );
     this.setupDrag();
+    this.setupFirstPages();
     this.render();
+  }
+
+  /** First-page pictures in the rows (Merge PDFs), drawn only for rows on screen or near it. */
+  private setupFirstPages(): void {
+    if (!this.def.firstPages || !this.host.assets) return;
+    const side = Math.round(FIRST * Math.min(2, Math.max(1, globalThis.devicePixelRatio || 1)));
+    this.firsts = new FirstPages(() => this.host.engines.newRenderWorker(), this.host.assets, () => memoryAllowance(), side, id => this.paintFirst(id));
+    if (typeof IntersectionObserver !== 'function') return;
+    this.rowObserver = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        const id = Number((e.target as HTMLElement).dataset.id);
+        if (e.isIntersecting) this.rowsShown.add(id); else this.rowsShown.delete(id);
+      }
+      this.wantFirsts();
+    }, { rootMargin: '200px 0px' });
+  }
+
+  /** Asks for the pictures of the rows on screen, in list order. */
+  private wantFirsts(): void {
+    if (!this.firsts || this.running) return;
+    this.firsts.want(this.accepted().filter(e => this.rowsShown.has(e.id)).map(e => ({ id: e.id, file: e.file })));
+  }
+
+  /** The row's picture: the first page when it has been drawn, a plain document tile otherwise. */
+  private firstTile(id: number): HTMLElement {
+    const f = this.firsts!;
+    const bitmap = f.picture(id);
+    const why = f.failure(id) ?? (f.off && f.off !== 'Closed.' ? f.off : undefined);
+    const tile = h('span', { class: `ws-thumb${bitmap ? '' : ' generic'}`, 'aria-hidden': 'true', 'data-thumb': id, title: why ? `No picture of the first page: ${why}` : undefined });
+    if (!bitmap) { tile.append(h('span', {}, 'PDF')); return tile; }
+    const canvas = h('canvas', { width: bitmap.width, height: bitmap.height }) as HTMLCanvasElement;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+    const k = FIRST / Math.max(bitmap.width, bitmap.height);
+    canvas.style.width = `${Math.round(bitmap.width * k)}px`;
+    canvas.style.height = `${Math.round(bitmap.height * k)}px`;
+    tile.append(canvas);
+    return tile;
+  }
+
+  /** A picture was drawn (or failed): its row's tile is replaced. */
+  private paintFirst(id: number): void {
+    const old = this.list?.querySelector(`[data-thumb="${id}"]`);
+    if (old) old.replaceWith(this.firstTile(id));
   }
 
   /** An option's control, with its hint beside its label (read as the control's description, not its name). */
@@ -632,6 +695,8 @@ export class Workspace {
   private render(): void {
     if (!this.list) return;
     const focused = document.activeElement && this.root.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
+    // The rows are made again; the observer follows the new ones.
+    this.rowObserver?.disconnect();
     clear(this.list);
     const acc = this.accepted();
     const ordered = this.def.ordered && acc.length > 1;
@@ -651,9 +716,13 @@ export class Workspace {
           h('button', { type: 'button', class: 'small', 'data-key': `down-${e.id}`, 'aria-label': `Move ${e.name} down`, disabled: pos === acc.length - 1 || this.running, onclick: () => this.move(e.id, 1) }, 'Down'));
       }
       actions.append(h('button', { type: 'button', class: 'small ghost danger', 'data-key': `rm-${e.id}`, 'aria-label': `Remove ${e.name}`, disabled: this.running, onclick: () => this.remove(e.id) }, 'Remove'));
-      li.append(h('span', { class: 'ws-pos', 'aria-hidden': 'true' }, usable && this.def.ordered ? String(pos + 1) : ''), main, actions);
+      li.append(h('span', { class: 'ws-pos', 'aria-hidden': 'true' }, usable && this.def.ordered ? String(pos + 1) : ''));
+      if (this.firsts) { li.classList.add('has-thumb'); li.append(usable ? this.firstTile(e.id) : h('span', { class: 'ws-thumb generic', 'aria-hidden': 'true' })); }
+      li.append(main, actions);
       this.list.append(li);
+      if (usable) this.rowObserver?.observe(li);
     }
+    this.wantFirsts();
     this.list.hidden = this.entries.length === 0;
     this.renderConfirm();
     this.renderPages();

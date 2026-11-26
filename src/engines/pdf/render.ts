@@ -10,7 +10,8 @@
 //
 // Fonts are drawn as outlines by pdf.js (disableFontFace), since a worker has no document to load fonts into: the
 // fonts embedded in the PDF are drawn from their own data, and the standard ones (Helvetica, Times, Courier and the
-// others a PDF may name without embedding) from the font files pdf.js ships, which load from the app's own folder
+// others a PDF may name without embedding) from the font files pdf.js ships (Arimo in place of its Liberation Sans, see
+// FONT_FILES), which load from the app's own folder
 // when a page needs them, as do its character maps, its JPEG 2000 and JBIG2 decoders and its CMYK color profile.
 // A font for which there is neither (Chinese, Japanese or Korean text in a font the PDF does not include) is drawn by
 // the canvas with the device's own fonts.
@@ -32,6 +33,7 @@ let lib: Promise<PdfJs> | null = null;
  *  on the page; importing it here makes pdf.js parse in this thread instead of starting a worker of its own. */
 export function pdfjs(): Promise<PdfJs> {
   lib ??= (async () => {
+    mapFontRequests();
     const parser = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
     await import(/* @vite-ignore */ parser.default);
     return import('pdfjs-dist');
@@ -91,6 +93,32 @@ class NoFilterFactory {
   addSelectionFilter() { return 'none'; }
   createSelectionStyle() { return null; }
   destroy() { /* nothing held */ }
+}
+
+/** pdf.js asks for its sans-serif standard font (Helvetica and Arial a PDF names without including) by Liberation Sans's
+ *  file names. FileConvert ships Arimo instead (vendor/arimo, Apache-2.0): the same design with the same character
+ *  widths, so text is placed exactly as before. */
+export const FONT_FILES: Readonly<Record<string, string>> = {
+  'LiberationSans-Regular.ttf': 'Arimo-Regular.ttf',
+  'LiberationSans-Bold.ttf': 'Arimo-Bold.ttf',
+  'LiberationSans-Italic.ttf': 'Arimo-Italic.ttf',
+  'LiberationSans-BoldItalic.ttf': 'Arimo-BoldItalic.ttf',
+};
+
+/** pdf.js fetches its standard fonts itself, in this worker (useWorkerFetch, which its color management needs as well),
+ *  asking for the sans-serif one by Liberation Sans's names. Those four requests, and only those, are answered with the
+ *  Arimo files beside them; everything else goes through unchanged. */
+const LIBERATION = /\/standard_fonts\/(LiberationSans-(?:Regular|Bold|Italic|BoldItalic)\.ttf)$/;
+let fontsMapped = false;
+function mapFontRequests(): void {
+  if (fontsMapped) return;
+  fontsMapped = true;
+  const real = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const m = LIBERATION.exec(url);
+    return real(m ? url.slice(0, url.length - m[1].length) + FONT_FILES[m[1]] : input, init);
+  };
 }
 
 /** A PDF read for drawing, after the guard and the memory check. */

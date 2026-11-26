@@ -239,6 +239,9 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .cat-item.current a { border-color: var(--accent); background: var(--card-hi); }
 .cat-name { font-weight: 600; }
 .cat-blurb { color: var(--faint); font-size: .88rem; }
+.cat-note { display: block; color: var(--warn, var(--faint)); font-size: .82rem; }
+.chip .cat-note { display: inline; margin-left: 6px; }
+.ws-unavailable { border: 1px solid var(--line); border-left: 4px solid var(--warn, var(--accent)); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; background: var(--card); }
 
 /* ---------- tool workspace ---------- */
 .workspace { margin: 18px 0 30px; display: grid; gap: 14px; }
@@ -257,6 +260,10 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
 .ws-item.rejected { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 .ws-pos { color: var(--accent); font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 .ws-main { min-width: 0; }
+.ws-item.has-thumb { grid-template-columns: 28px 64px minmax(0, 1fr) auto; }
+.ws-thumb { width: 64px; height: 64px; display: grid; place-items: center; overflow: hidden; }
+.ws-thumb canvas { display: block; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.ws-thumb.generic span { width: 46px; height: 60px; display: grid; place-items: center; border: 1px dashed var(--line-hi); border-radius: 4px; color: var(--faint); font-size: .75rem; letter-spacing: .04em; }
 .ws-options { margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 6px 0 2px; min-width: 0; }
 .ws-options legend { padding: 0 8px; margin-left: 8px; font-weight: 600; }
 .ws-hint { color: var(--muted); font-size: .88rem; }
@@ -342,6 +349,10 @@ button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(
   .hero { padding-top: 22px; }
   .ws-item { grid-template-columns: 24px minmax(0, 1fr); }
   .ws-item .job-actions { grid-column: 2; justify-content: flex-start; }
+  .ws-item.has-thumb { grid-template-columns: 24px 48px minmax(0, 1fr); }
+  .ws-item.has-thumb .job-actions { grid-column: 3; }
+  .ws-thumb { width: 48px; height: 48px; }
+  .ws-thumb canvas { max-width: 48px; max-height: 48px; object-fit: contain; }
 }
 /* The narrowest phones (320 pixels): tighter gutters and header, so nothing scrolls sideways. */
 @media (max-width: 380px) {

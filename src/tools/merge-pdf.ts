@@ -71,6 +71,7 @@ export const tool: ToolDefinition = {
   minInputs: 2,
   maxInputs: LIMITS.pdfMergeFiles,
   ordered: true,
+  firstPages: true,
   options: [],
   action: 'Merge PDFs',
   confirmLabel: 'Merge anyway; the signatures will no longer be valid',

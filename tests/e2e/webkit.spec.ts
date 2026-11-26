@@ -135,6 +135,9 @@ test('Merge PDFs in WebKit: the workspace checks, merges and offers the result; 
   const ws = page.locator('#workspace');
   await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf'), fx('pdf/merge-b.pdf')]);
   await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
+  // No canvas in a worker: each row keeps a plain document tile that says why, and the merge does not need a picture.
+  await expect(ws.locator('.ws-thumb.generic').first()).toHaveAttribute('title', /^No picture of the first page: This browser cannot draw PDF pages in the background/, { timeout: 30_000 });
+  await expect(ws.locator('.ws-thumb canvas')).toHaveCount(0);
   await ws.getByRole('button', { name: 'Merge PDFs' }).click();
   await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
   // Playwright's WebKit on Windows does not report downloads, so the result is read from the workspace itself.
@@ -283,11 +286,14 @@ test('page previews, PDF to JPG and PNG, and Remove PDF metadata in WebKit: what
   await expect(ws.locator('[data-key="opt-pages"]')).toHaveValue('2');
   await ws.getByRole('button', { name: 'Delete the pages' }).click();
   await expect(ws.locator('.ws-state.done')).toBeVisible({ timeout: 60_000 });
-  // PDF to JPG and PNG says why it cannot run, before anything starts.
+  // PDF to JPG and PNG is not offered as if it worked: the catalog marks it, and its workspace says why before a file is
+  // added, and takes none.
+  await expect(page.locator('.cat-item[data-tool="pdf-to-images"] .cat-note')).toHaveText(['Not available in this browser', 'Not available in this browser']);
   await open('pdf-to-images');
+  await expect(ws.locator('.ws-unavailable')).toHaveText('This browser cannot draw in the background (it has no OffscreenCanvas), so this tool cannot run here. Current Chrome, Edge, Firefox and Safari 16.4 or later can.');
+  await expect(ws.getByRole('button', { name: 'Add files' })).toBeDisabled();
   await ws.locator('input[type=file]').setInputFiles([fx('pdf/merge-a.pdf')]);
-  await expect(ws.locator('.ws-item.checking')).toHaveCount(0, { timeout: 60_000 });
-  await expect(ws.locator('.ws-why')).toHaveText('This browser cannot draw PDF pages in the background: it has no OffscreenCanvas in workers. Current Chrome, Edge, Firefox and Safari (16.4 and later) have it.');
+  await expect(ws.locator('.ws-item')).toHaveCount(0);
   await expect(ws.getByRole('button', { name: 'Convert the pages' })).toBeDisabled();
   // Metadata removal needs no canvas.
   await open('remove-pdf-metadata');

@@ -60,7 +60,7 @@ export function searchTerms(p: Page): string {
 /** The data attributes that say what a page does: its tool, its archive formats, or its pair. */
 const pageData = (p: Page) => isTool(p) ? `data-tool="${p.tool}"${p.serves ? ` data-serves="${p.serves.map(([a, b]) => `${a}>${b}`).join(' ')}"` : ''}${p.preset ? ` data-preset="${new URLSearchParams(p.preset as Record<string, string>).toString()}"` : ''}` : isExtract(p) ? `data-extract="${p.formats.join(' ')}"` : `data-from="${p.from}" data-to="${p.to}"`;
 
-const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
+const pageLink = (p: Page, cls = '') => `<a${cls ? ` class="${cls}"` : ''}${isTool(p) ? ` data-tool="${p.tool}"` : ''} href="./${p.slug}/">${esc(pageName(p))}</a>`;
 
 export function catalogHtml(): string {
   const cats = (Object.keys(CATEGORY_LABELS) as Category[]).filter(c => PAGES.some(p => p.category === c));

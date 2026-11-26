@@ -101,6 +101,8 @@ export interface ToolDefinition {
   maxInputs: number;
   /** The order of the files matters: the list can be reordered by dragging or with Move up and Move down. */
   ordered: boolean;
+  /** Each PDF's row shows a small picture of its first page (Merge PDFs). Never needed to run the tool. */
+  firstPages?: boolean;
   options: readonly ToolOption[];
   /** The run button's label, such as "Merge PDFs". */
   action: string;
